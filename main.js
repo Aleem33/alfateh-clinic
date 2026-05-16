@@ -17,6 +17,7 @@ function createWindow() {
       webSecurity: false,
     },
     title: 'Al-Fateh Clinic',
+    icon: path.join(__dirname, 'icon.ico'),
     show: false,
     backgroundColor: '#f8fafc',
     autoHideMenuBar: true,

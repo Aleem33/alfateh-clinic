@@ -28,8 +28,18 @@ if %ERRORLEVEL% NEQ 0 (
 echo  [OK] Dependencies ready
 echo.
 
-:: Step 2 - Build Vite/React app
-echo  [2/3] Building React app...
+:: Step 2 - App icons from logo
+echo  [2/4] Generating app icons...
+call npm run icons
+if %ERRORLEVEL% NEQ 0 (
+  echo  [ERROR] Icon generation failed.
+  pause & exit /b 1
+)
+echo  [OK] Icons ready
+echo.
+
+:: Step 3 - Build Vite/React app
+echo  [3/4] Building React app...
 call npm run build
 if %ERRORLEVEL% NEQ 0 (
   echo  [ERROR] Build failed. Check errors above.
@@ -38,8 +48,8 @@ if %ERRORLEVEL% NEQ 0 (
 echo  [OK] React build complete
 echo.
 
-:: Step 3 - Package Electron app
-echo  [3/3] Packaging Windows installer...
+:: Step 4 - Package Electron app
+echo  [4/4] Packaging Windows installer...
 call npx electron-builder --win
 if %ERRORLEVEL% NEQ 0 (
   echo  [ERROR] Electron packaging failed.
