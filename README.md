@@ -9,6 +9,18 @@ Electron desktop app — Firebase Auth + Firestore backend.
 2. **Authentication** → Sign-in method → Enable **Email/Password**
 3. **Firestore Database** → Create database → Start in **production mode** → Enable
 4. **Firestore** → Rules tab → paste contents of `firestore.rules` → Publish
+5. **Firebase config (local only — never commit):**
+   ```bash
+   copy firebase-applet-config.example.json firebase-applet-config.json
+   ```
+   Edit `firebase-applet-config.json` with values from Firebase → Project settings → Your apps → Web app config.
+
+### Security: API key exposed on GitHub?
+If GitHub emailed you about a leaked Google API key:
+1. **Rotate the key** — [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) → find the key → **Regenerate** or create a new one and delete the old key.
+2. Update your local `firebase-applet-config.json` with the new key.
+3. **Restrict the key** — same page → Application restrictions (HTTP referrers for web) and API restrictions (Firebase APIs only).
+4. This repo no longer tracks `firebase-applet-config.json`; add the same values as **GitHub repository secrets** for release builds: `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID`, and optionally `FIREBASE_MEASUREMENT_ID`.
 
 ### 2. Create Admin User
 Firebase Console → Authentication → Users → Add user:
