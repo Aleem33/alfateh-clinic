@@ -1,21 +1,14 @@
-name: Release
+name: CI
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (must match package.json), e.g. 3.0.0'
-        required: true
-        default: '3.0.0'
-
-permissions:
-  contents: write
 
 jobs:
-  release-windows:
+  build:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -41,7 +34,5 @@ jobs:
           FIREBASE_MEASUREMENT_ID: ${{ secrets.FIREBASE_MEASUREMENT_ID }}
         run: node scripts/write-firebase-config.mjs
 
-      - name: Build and publish to GitHub Releases
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release
+      - name: Build web app
+        run: npm run build
