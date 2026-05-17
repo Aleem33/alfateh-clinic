@@ -5,6 +5,7 @@ import { formatDate, nowISO } from '../lib/utils';
 import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
 import { transliteratePrescriptionMedicineNames } from '../lib/translate';
+import { withPrescriptionListUrdu } from '../lib/prescriptionOptions';
 
 export function Prescriptions() {
   const [consultations, setConsultations] = useState<any[]>([]);
@@ -56,7 +57,7 @@ export function Prescriptions() {
   };
 
   const handlePrint = async (c: any) => {
-    const prescriptions = await transliteratePrescriptionMedicineNames(c.prescriptions || []);
+    const prescriptions = withPrescriptionListUrdu(await transliteratePrescriptionMedicineNames(c.prescriptions || []));
     printPrescription({
       hospitalName: hospitalSettings.name,
       hospitalAddress: hospitalSettings.address,

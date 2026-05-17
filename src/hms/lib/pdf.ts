@@ -60,16 +60,21 @@ export function printPrescription(data: {
     <div class="med-item">
       <div class="med-num">${String(i + 1)}.</div>
       <div class="med-body">
-        <div class="med-en">${p.name}&nbsp;<span class="med-dosage">${p.dosage}</span></div>
-        ${p.nameUrdu ? `<div class="med-ur">${p.nameUrdu}&nbsp;<span class="med-dosage-ur">${p.dosageUrdu || ''}</span></div>` : ''}
-        <div class="med-detail">
-          ${p.frequency}&nbsp;&middot;&nbsp;${p.duration}
-          ${p.instructions ? `&nbsp;&middot;&nbsp;${p.instructions}` : ''}
+        <div class="med-line">
+          <span class="med-en">${p.name}</span>
+          ${p.nameUrdu ? `<span class="med-ur-inline">${p.nameUrdu}</span>` : ''}
+          <span class="med-dosage">${p.dosage}</span>
+          ${p.dosageUrdu ? `<span class="med-ur-inline muted">${p.dosageUrdu}</span>` : ''}
         </div>
-        ${(p.frequencyUrdu || p.durationUrdu || p.instructionsUrdu) ? `
-        <div class="med-detail-ur">
-          ${p.frequencyUrdu || ''}${p.durationUrdu ? `&nbsp;&middot;&nbsp;${p.durationUrdu}` : ''}${p.instructionsUrdu ? `&nbsp;&middot;&nbsp;${p.instructionsUrdu}` : ''}
-        </div>` : ''}
+        <div class="med-detail">
+          <span>${p.frequency}</span>
+          ${p.frequencyUrdu ? `<span class="med-ur-inline">${p.frequencyUrdu}</span>` : ''}
+          <span>&middot;</span>
+          <span>${p.duration}</span>
+          ${p.durationUrdu ? `<span class="med-ur-inline">${p.durationUrdu}</span>` : ''}
+          ${p.instructions ? `<span>&middot;</span><span>${p.instructions}</span>` : ''}
+          ${p.instructionsUrdu ? `<span class="med-ur-inline">${p.instructionsUrdu}</span>` : ''}
+        </div>
       </div>
     </div>`).join('');
 
@@ -245,8 +250,21 @@ body { font-family: Arial, sans-serif; background:#fff; font-size:12px; }
 .med-item { display: flex; gap: 6px; margin-bottom: 10px; page-break-inside: avoid; }
 .med-num { color: #1a237e; font-weight: 700; font-size: 13px; min-width: 20px; padding-top: 1px; }
 .med-body { flex: 1; }
+.med-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .med-en { font-size: 13px; font-weight: 700; color: #1a237e; }
 .med-dosage { font-weight: 400; font-size: 11px; color: #374151; }
+.med-ur-inline {
+  font-family: 'Noto Nastaliq Urdu', serif;
+  font-size: 12.5px;
+  color: #1a7a1a;
+  font-weight: 700;
+  direction: rtl;
+}
+.med-ur-inline.muted {
+  font-size: 11px;
+  font-weight: 500;
+  color: #4b5563;
+}
 .med-ur {
   font-family: 'Noto Nastaliq Urdu', serif;
   font-size: 13px;
@@ -255,7 +273,7 @@ body { font-family: Arial, sans-serif; background:#fff; font-size:12px; }
   direction: rtl;
   margin-top: 2px;
 }
-.med-detail { font-size: 10.5px; color: #6b7280; margin-top: 2px; }
+.med-detail { font-size: 10.5px; color: #6b7280; margin-top: 2px; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .med-detail-ur {
   font-family: 'Noto Nastaliq Urdu', serif;
   font-size: 11px;

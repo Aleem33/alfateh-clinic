@@ -6,12 +6,21 @@ import { logAudit } from '../lib/audit';
 import { Plus, Search, X, Stethoscope, FlaskConical, Printer, Eye, ArrowRight, Send, Loader2, History, ChevronDown, ChevronUp, RotateCcw, Clock, Pill, BookOpen, MessageCircle, CheckSquare, Square, TrendingUp } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
 import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescriptionMedicineNames } from '../lib/translate';
+import { DOSAGE_OPTIONS, DURATION_OPTIONS, FREQUENCY_OPTIONS, INSTRUCTION_OPTIONS, getDosageUrdu, getDurationUrdu, getFrequencyUrdu, getInstructionUrdu, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology'];
-const FREQUENCIES = ['Once daily', 'Twice daily', 'Three times daily', 'Four times daily', 'As needed', 'Before meals', 'After meals', 'At bedtime'];
-const DURATIONS = ['3 days', '5 days', '7 days', '10 days', '14 days', '1 month', 'Ongoing'];
+
+function getPatientHistory(consultations: any[], patientId: string) {
+  return consultations
+    .filter((c: any) => c.patientId === patientId)
+    .sort((a: any, b: any) => {
+      const aTime = a.createdAt || a.date || '';
+      const bTime = b.createdAt || b.date || '';
+      return bTime > aTime ? 1 : bTime < aTime ? -1 : 0;
+    });
+}
 
 export function OPD() {
   const navigate = useNavigate();
@@ -121,9 +130,14 @@ export function OPD() {
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); };
   }, []);
 
+  useEffect(() => {
+    if (!showModal || !form.patientId) return;
+    setPatientHistory(getPatientHistory(consultations, form.patientId));
+  }, [consultations, form.patientId, showModal]);
+
   // ── Template helpers ────────────────────────────────────────────────────────
   const applyTemplate = (t: any) => {
-    const toAdd = (t.medicines || []).filter((m: any) => !prescriptions.find(rx => rx.medicineId === m.medicineId || rx.name === m.name));
+    const toAdd = withPrescriptionListUrdu((t.medicines || []).filter((m: any) => !prescriptions.find(rx => rx.medicineId === m.medicineId || rx.name === m.name)));
     setPrescriptions(prev => [...prev, ...toAdd]);
     if (t.diagnosis && !form.diagnosis) setForm(p => ({ ...p, diagnosis: t.diagnosis }));
     setShowTemplates(false);
@@ -155,7 +169,7 @@ export function OPD() {
     setBatchPrinting(true);
     toPrint.forEach((c: any, i) => {
       setTimeout(async () => {
-        const rx = await transliteratePrescriptionMedicineNames(c.prescriptions || []);
+        const rx = withPrescriptionListUrdu(await transliteratePrescriptionMedicineNames(c.prescriptions || []));
         printPrescription({
           hospitalName: 'Al-Fateh Clinic', patientName: c.patientName, patientMRN: c.patientMRN,
           patientAge: c.patientAge, patientGender: c.patientGender,
@@ -205,14 +219,7 @@ export function OPD() {
     setExpandedVisit(null);
     setHistoryError('');
     // Filter directly from already-loaded consultations state — no extra Firestore call needed
-    const history = consultations
-      .filter((c: any) => c.patientId === p.id)
-      .sort((a: any, b: any) => {
-        const aTime = a.createdAt || a.date || '';
-        const bTime = b.createdAt || b.date || '';
-        return bTime > aTime ? 1 : bTime < aTime ? -1 : 0;
-      });
-    setPatientHistory(history);
+    setPatientHistory(getPatientHistory(consultations, p.id));
   };
 
   const addPrescription = async (med: any) => {
@@ -222,13 +229,13 @@ export function OPD() {
       name: med.name,
       nameUrdu: med.nameUrdu || '',
       dosage: '1 tablet',
-      dosageUrdu: '',
+      dosageUrdu: getDosageUrdu('1 tablet'),
       frequency: 'Twice daily',
-      frequencyUrdu: '',
+      frequencyUrdu: getFrequencyUrdu('Twice daily'),
       duration: '7 days',
-      durationUrdu: '',
+      durationUrdu: getDurationUrdu('7 days'),
       instructions: '',
-      instructionsUrdu: '',
+      instructionsUrdu: getInstructionUrdu(''),
     };
     setPrescriptions(p => [...p, newRx]);
     setMedSearch('');
@@ -257,7 +264,7 @@ export function OPD() {
 
   const reuseFromHistory = async (visit: any) => {
     if (!visit.prescriptions?.length) return;
-    const toAdd = visit.prescriptions.filter((p: any) => !prescriptions.find(rx => rx.medicineId === p.medicineId));
+    const toAdd = withPrescriptionListUrdu(visit.prescriptions.filter((p: any) => !prescriptions.find(rx => rx.medicineId === p.medicineId)));
     if (!toAdd.length) return;
     setPrescriptions(prev => [...prev, ...toAdd]);
     // Also copy complaints/diagnosis if current fields are empty
@@ -280,7 +287,7 @@ export function OPD() {
         department:    c.department   || '',
         diagnosis:     c.diagnosis    || '',
         date:          c.date,
-        prescriptions: c.prescriptions,
+        prescriptions: withPrescriptionListUrdu(c.prescriptions || []),
         status:        'pending',
         createdAt:     nowISO(),
       });
@@ -288,13 +295,21 @@ export function OPD() {
   };
 
   const updatePrescription = (idx: number, key: string, val: string) => {
-    setPrescriptions(p => p.map((item, i) => i === idx ? { ...item, [key]: val } : item));
+    setPrescriptions(p => p.map((item, i) => {
+      if (i !== idx) return item;
+      const next = { ...item, [key]: val };
+      if (key === 'dosage') next.dosageUrdu = getDosageUrdu(val);
+      if (key === 'frequency') next.frequencyUrdu = getFrequencyUrdu(val);
+      if (key === 'duration') next.durationUrdu = getDurationUrdu(val);
+      if (key === 'instructions') next.instructionsUrdu = getInstructionUrdu(val);
+      return next;
+    }));
   };
 
   const printConsultation = async (consult: any) => {
     setTranslating(true);
     try {
-      const rx = await transliteratePrescriptionMedicineNames(consult.prescriptions || []);
+      const rx = withPrescriptionListUrdu(await transliteratePrescriptionMedicineNames(consult.prescriptions || []));
       printPrescription({
         hospitalName: 'Al-Fateh Clinic',
         hospitalAddress: '',
@@ -335,9 +350,10 @@ export function OPD() {
       const paid = Math.min(Number(paidAmount) || 0, fee);
       const balance = Math.max(0, fee - paid);
       const paymentStatus = paid >= fee ? 'paid' : paid > 0 ? 'partial' : 'pending';
+      const prescriptionPayload = withPrescriptionListUrdu(prescriptions);
 
       // Save consultation
-      const data = { ...formRest, fee, prescriptions, labOrders, vitals, appointmentId: appointmentId || '', createdAt: nowISO() };
+      const data = { ...formRest, fee, prescriptions: prescriptionPayload, labOrders, vitals, appointmentId: appointmentId || '', createdAt: nowISO() };
       const ref = await addDoc(collection(db, 'consultations'), data);
       await logAudit('create', 'consultation', ref.id, `${form.patientName} — ${form.diagnosis || form.complaints.slice(0, 40)}`);
 
@@ -839,11 +855,13 @@ export function OPD() {
                             </td>
                             {/* Dosage EN + UR */}
                             <td className="px-2 py-2 min-w-[90px]">
-                              <input
+                              <select
                                 value={p.dosage}
                                 onChange={e => updatePrescription(i, 'dosage', e.target.value)}
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                              />
+                              >
+                                {DOSAGE_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
+                              </select>
                               {p.dosageUrdu && (
                                 <div className="mt-1 text-green-700 text-xs text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{p.dosageUrdu}</div>
                               )}
@@ -858,7 +876,7 @@ export function OPD() {
                                 }}
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               >
-                                {FREQUENCIES.map(f => <option key={f}>{f}</option>)}
+                                {FREQUENCY_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
                               </select>
                               {p.frequencyUrdu && (
                                 <div className="mt-1 text-green-700 text-xs text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{p.frequencyUrdu}</div>
@@ -874,7 +892,7 @@ export function OPD() {
                                 }}
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               >
-                                {DURATIONS.map(d => <option key={d}>{d}</option>)}
+                                {DURATION_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
                               </select>
                               {p.durationUrdu && (
                                 <div className="mt-1 text-green-700 text-xs text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{p.durationUrdu}</div>
@@ -882,12 +900,13 @@ export function OPD() {
                             </td>
                             {/* Instructions EN + UR */}
                             <td className="px-2 py-2 min-w-[120px]">
-                              <input
+                              <select
                                 value={p.instructions || ''}
                                 onChange={e => updatePrescription(i, 'instructions', e.target.value)}
-                                placeholder="e.g. After meal"
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                              />
+                              >
+                                {INSTRUCTION_OPTIONS.map(option => <option key={option.en || 'none'} value={option.en}>{option.en || 'No instruction'}</option>)}
+                              </select>
                               <input
                                 value={p.instructionsUrdu || ''}
                                 onChange={e => updatePrescription(i, 'instructionsUrdu', e.target.value)}
