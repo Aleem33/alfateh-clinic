@@ -5,7 +5,7 @@ import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Search, X, Stethoscope, FlaskConical, Printer, Eye, ArrowRight, Send, Loader2, History, ChevronDown, ChevronUp, RotateCcw, Clock, Pill, BookOpen, MessageCircle, CheckSquare, Square, TrendingUp } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
-import { translateBatch, getAnthropicKey } from '../lib/translate';
+import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -154,13 +154,14 @@ export function OPD() {
     if (!toPrint.length) return;
     setBatchPrinting(true);
     toPrint.forEach((c: any, i) => {
-      setTimeout(() => {
+      setTimeout(async () => {
+        const rx = await transliteratePrescriptionMedicineNames(c.prescriptions || []);
         printPrescription({
           hospitalName: 'Al-Fateh Clinic', patientName: c.patientName, patientMRN: c.patientMRN,
           patientAge: c.patientAge, patientGender: c.patientGender,
           doctorName: c.doctorName || '', department: c.department || '',
           date: formatDate(c.date), complaints: c.complaints || '', diagnosis: c.diagnosis || '',
-          prescriptions: c.prescriptions || [], labOrders: c.labOrders || [],
+          prescriptions: rx, labOrders: c.labOrders || [],
           followUpDate: c.followUpDate ? formatDate(c.followUpDate) : undefined,
           notes: c.notes, vitals: c.vitals || {},
         });
@@ -232,25 +233,14 @@ export function OPD() {
     setPrescriptions(p => [...p, newRx]);
     setMedSearch('');
 
-    if (getAnthropicKey()) {
+    if (getGeminiKey()) {
       setTranslating(true);
       try {
-        const toTranslate = [
-          newRx.nameUrdu ? null : med.name,
-          newRx.dosage,
-          newRx.frequency,
-          newRx.duration,
-        ];
-        const [nameUr, dosageUr, freqUr, durUr] = await translateBatch(
-          toTranslate.map(t => t || '')
-        );
+        const [nameUr] = await transliterateMedicineNamesToUrdu([med.name]);
         setPrescriptions(p => p.map(rx =>
           rx.medicineId === med.id ? {
             ...rx,
             nameUrdu:      newRx.nameUrdu || nameUr || rx.nameUrdu,
-            dosageUrdu:    dosageUr || '',
-            frequencyUrdu: freqUr   || '',
-            durationUrdu:  durUr    || '',
           } : rx
         ));
       } finally {
@@ -299,6 +289,40 @@ export function OPD() {
 
   const updatePrescription = (idx: number, key: string, val: string) => {
     setPrescriptions(p => p.map((item, i) => i === idx ? { ...item, [key]: val } : item));
+  };
+
+  const printConsultation = async (consult: any) => {
+    setTranslating(true);
+    try {
+      const rx = await transliteratePrescriptionMedicineNames(consult.prescriptions || []);
+      printPrescription({
+        hospitalName: 'Al-Fateh Clinic',
+        hospitalAddress: '',
+        hospitalPhone: '',
+        patientName: consult.patientName,
+        patientMRN: consult.patientMRN,
+        patientAge: consult.patientAge,
+        patientGender: consult.patientGender,
+        doctorName: consult.doctorName || '',
+        department: consult.department || '',
+        date: formatDate(consult.date),
+        complaints: consult.complaints || '',
+        diagnosis: consult.diagnosis || '',
+        prescriptions: rx,
+        labOrders: consult.labOrders || [],
+        followUpDate: consult.followUpDate ? formatDate(consult.followUpDate) : undefined,
+        notes: consult.notes,
+        vitals: {
+          bp: consult.vitals?.bp || consult.bp || '',
+          temperature: consult.vitals?.temperature || consult.temperature || '',
+          weight: consult.vitals?.weight || consult.weight || '',
+          pulse: consult.vitals?.pulse || consult.pulse || '',
+          spo2: consult.vitals?.spo2 || consult.spo2 || '',
+        },
+      });
+    } finally {
+      setTranslating(false);
+    }
   };
 
   const handleSave = async () => {
@@ -744,7 +768,7 @@ export function OPD() {
                   <label className="text-xs font-semibold text-gray-700">PRESCRIPTION</label>
                   {translating && (
                     <span className="flex items-center gap-1 text-xs text-purple-600 font-medium ml-2">
-                      <Loader2 className="w-3 h-3 animate-spin" /> Translating to Urdu...
+                      <Loader2 className="w-3 h-3 animate-spin" /> Transliterating medicine names...
                     </span>
                   )}
                   <div className="ml-auto flex items-center gap-2">
@@ -818,16 +842,6 @@ export function OPD() {
                               <input
                                 value={p.dosage}
                                 onChange={e => updatePrescription(i, 'dosage', e.target.value)}
-                                onBlur={async e => {
-                                  const val = e.target.value.trim();
-                                  if (val && getAnthropicKey()) {
-                                    setTranslating(true);
-                                    try {
-                                      const [ur] = await translateBatch([val]);
-                                      if (ur) updatePrescription(i, 'dosageUrdu', ur);
-                                    } finally { setTranslating(false); }
-                                  }
-                                }}
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               />
                               {p.dosageUrdu && (
@@ -841,13 +855,6 @@ export function OPD() {
                                 onChange={async e => {
                                   const val = e.target.value;
                                   updatePrescription(i, 'frequency', val);
-                                  if (getAnthropicKey()) {
-                                    setTranslating(true);
-                                    try {
-                                      const [ur] = await translateBatch([val]);
-                                      if (ur) updatePrescription(i, 'frequencyUrdu', ur);
-                                    } finally { setTranslating(false); }
-                                  }
                                 }}
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               >
@@ -864,13 +871,6 @@ export function OPD() {
                                 onChange={async e => {
                                   const val = e.target.value;
                                   updatePrescription(i, 'duration', val);
-                                  if (getAnthropicKey()) {
-                                    setTranslating(true);
-                                    try {
-                                      const [ur] = await translateBatch([val]);
-                                      if (ur) updatePrescription(i, 'durationUrdu', ur);
-                                    } finally { setTranslating(false); }
-                                  }
                                 }}
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               >
@@ -885,16 +885,6 @@ export function OPD() {
                               <input
                                 value={p.instructions || ''}
                                 onChange={e => updatePrescription(i, 'instructions', e.target.value)}
-                                onBlur={async e => {
-                                  const val = e.target.value.trim();
-                                  if (val && !p.instructionsUrdu && getAnthropicKey()) {
-                                    setTranslating(true);
-                                    try {
-                                      const [ur] = await translateBatch([val]);
-                                      if (ur) updatePrescription(i, 'instructionsUrdu', ur);
-                                    } finally { setTranslating(false); }
-                                  }
-                                }}
                                 placeholder="e.g. After meal"
                                 className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               />
@@ -1028,27 +1018,7 @@ export function OPD() {
             <div className="flex items-center justify-between p-5 border-b border-gray-100 print:hidden">
               <h2 className="font-semibold text-gray-900">Consultation Details</h2>
               <div className="flex items-center gap-2">
-                <button onClick={() => {
-                  const hs = { name: 'Al-Fateh Clinic', address: '', phone: '' };
-                  printPrescription({
-                    hospitalName: hs.name, hospitalAddress: hs.address, hospitalPhone: hs.phone,
-                    patientName: viewConsult.patientName, patientMRN: viewConsult.patientMRN,
-                    patientAge: viewConsult.patientAge, patientGender: viewConsult.patientGender,
-                    doctorName: viewConsult.doctorName || '', department: viewConsult.department || '',
-                    date: formatDate(viewConsult.date), complaints: viewConsult.complaints || '',
-                    diagnosis: viewConsult.diagnosis || '', prescriptions: viewConsult.prescriptions || [],
-                    labOrders: viewConsult.labOrders || [],
-                    followUpDate: viewConsult.followUpDate ? formatDate(viewConsult.followUpDate) : undefined,
-                    notes: viewConsult.notes,
-                    vitals: {
-                      bp: viewConsult.vitals?.bp || viewConsult.bp || '',
-                      temperature: viewConsult.vitals?.temperature || viewConsult.temperature || '',
-                      weight: viewConsult.vitals?.weight || viewConsult.weight || '',
-                      pulse: viewConsult.vitals?.pulse || viewConsult.pulse || '',
-                      spo2: viewConsult.vitals?.spo2 || viewConsult.spo2 || '',
-                    },
-                  });
-                }} className="flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-sm border border-gray-200 px-3 py-1.5 rounded-lg">
+                <button onClick={() => printConsultation(viewConsult)} className="flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-sm border border-gray-200 px-3 py-1.5 rounded-lg">
                   <Printer className="w-4 h-4" /> Print PDF
                 </button>
                 {viewConsult.prescriptions?.length > 0 && (

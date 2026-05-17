@@ -5,7 +5,7 @@ import { db, auth, registerUser } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { Building2, Download, Upload, Trash2, AlertTriangle, UserPlus, X, Lock, Eye, EyeOff, Bot, CheckCircle, RefreshCw } from 'lucide-react';
 import { AppUpdater } from '../../components/AppUpdater';
-import { getAnthropicKey, setAnthropicKey } from '../lib/translate';
+import { getGeminiKey, setGeminiKey } from '../lib/translate';
 
 const ALL_COLS = ['patients','appointments','consultations','admissions','labOrders','labTests','medicines','purchases','bills','staff','expenses'];
 const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier'];
@@ -79,12 +79,12 @@ export function Settings() {
   const [clearText, setClearText] = useState('');
   const [clearing, setClearing] = useState(false);
 
-  const [anthropicKey, setAnthropicKeyState] = useState('');
+  const [geminiKey, setGeminiKeyState] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [keyMsg, setKeyMsg] = useState('');
 
-  const saveAnthropicKey = () => {
-    setAnthropicKey(anthropicKey);
+  const saveGeminiKey = () => {
+    setGeminiKey(geminiKey);
     setKeyMsg('✓ API key saved!');
     setTimeout(() => setKeyMsg(''), 3000);
   };
@@ -99,7 +99,7 @@ export function Settings() {
     getDoc(doc(db, 'settings', 'hospital')).then(snap => {
       if (snap.exists()) setHospital({ ...emptyHospital, ...snap.data() });
     });
-    setAnthropicKeyState(getAnthropicKey());
+    setGeminiKeyState(getGeminiKey());
   }, []);
 
   const saveHospital = async () => {
@@ -320,25 +320,25 @@ export function Settings() {
         </div>
       </div>
 
-      {/* Anthropic API Key — Auto Urdu Translation */}
+      {/* Gemini API Key - Auto Urdu Transliteration */}
       <div className="bg-white rounded-xl border border-purple-100 shadow-sm p-6">
         <div className="flex items-center gap-2 mb-1">
           <Bot className="w-5 h-5 text-purple-600" />
-          <h2 className="font-semibold text-gray-900">AI Urdu Auto-Translation</h2>
+          <h2 className="font-semibold text-gray-900">AI Urdu Auto-Transliteration</h2>
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          Enter your Anthropic API key to automatically translate medicine names and instructions to Urdu when writing prescriptions.
+          Enter your Gemini API key to automatically transliterate medicine names into Urdu script when writing or printing prescriptions.
           Your key is saved locally on this device only.
         </p>
         <div className="flex gap-3 items-end">
           <div className="flex-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Anthropic API Key</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Gemini API Key</label>
             <div className="relative">
               <input
                 type={showKey ? 'text' : 'password'}
-                value={anthropicKey}
-                onChange={e => setAnthropicKeyState(e.target.value)}
-                placeholder="sk-ant-api03-..."
+                value={geminiKey}
+                onChange={e => setGeminiKeyState(e.target.value)}
+                placeholder="AIza..."
                 className="w-full border border-purple-200 rounded-lg px-3 py-2 pr-10 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-400"
               />
               <button type="button" onClick={() => setShowKey(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -346,14 +346,14 @@ export function Settings() {
               </button>
             </div>
           </div>
-          <button onClick={saveAnthropicKey}
+          <button onClick={saveGeminiKey}
             className="flex items-center gap-2 px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 whitespace-nowrap">
             <CheckCircle className="w-4 h-4" /> Save Key
           </button>
         </div>
         {keyMsg && <p className="text-sm font-medium text-green-600 mt-2">{keyMsg}</p>}
         <p className="text-xs text-gray-400 mt-3">
-          Get your key at <span className="text-purple-600 font-medium">console.anthropic.com</span> → API Keys
+          Get your key from <span className="text-purple-600 font-medium">Google AI Studio</span> → API Keys
         </p>
       </div>
 
@@ -449,3 +449,4 @@ export function Settings() {
     </div>
   );
 }
+

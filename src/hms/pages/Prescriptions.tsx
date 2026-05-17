@@ -4,6 +4,7 @@ import { db } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
+import { transliteratePrescriptionMedicineNames } from '../lib/translate';
 
 export function Prescriptions() {
   const [consultations, setConsultations] = useState<any[]>([]);
@@ -54,7 +55,8 @@ export function Prescriptions() {
     } catch (e: any) { alert('Error: ' + e.message); }
   };
 
-  const handlePrint = (c: any) => {
+  const handlePrint = async (c: any) => {
+    const prescriptions = await transliteratePrescriptionMedicineNames(c.prescriptions || []);
     printPrescription({
       hospitalName: hospitalSettings.name,
       hospitalAddress: hospitalSettings.address,
@@ -68,7 +70,7 @@ export function Prescriptions() {
       date: formatDate(c.date),
       complaints: c.complaints || '',
       diagnosis: c.diagnosis || '',
-      prescriptions: c.prescriptions || [],
+      prescriptions,
       labOrders: c.labOrders || [],
       followUpDate: c.followUpDate ? formatDate(c.followUpDate) : undefined,
       notes: c.notes,

@@ -1,59 +1,109 @@
 /**
- * Al-Fateh Clinic — Auto-translate medicine names to Urdu
- * Uses Claude API (key stored in localStorage under 'anthropic_api_key')
+ * Al-Fateh Clinic - Gemini Urdu transliteration helpers.
+ * The Gemini API key is saved locally on this device only.
  */
 
 const CACHE = new Map<string, string>();
+const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_KEY_STORAGE = 'gemini_api_key';
 
-export function getAnthropicKey(): string {
-  return localStorage.getItem('anthropic_api_key') || '';
+function cleanUrdu(value: string): string {
+  return value
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-export function setAnthropicKey(key: string) {
-  localStorage.setItem('anthropic_api_key', key.trim());
-}
-
-export async function translateToUrdu(text: string): Promise<string> {
-  if (!text.trim()) return '';
-
-  const cacheKey = text.trim().toLowerCase();
-  if (CACHE.has(cacheKey)) return CACHE.get(cacheKey)!;
-
-  const key = getAnthropicKey();
-  if (!key) return '';
-
+function parseJsonArray(text: string): string[] {
+  const trimmed = text.trim();
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-client-side-allow-unsafe': 'true',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 60,
-        messages: [{
-          role: 'user',
-          content: `Translate this medicine/drug name or medical instruction to Urdu script only. Return ONLY the Urdu translation, nothing else, no explanation, no romanization, no English.
-
-Text: "${text}"`,
-        }],
-      }),
-    });
-
-    if (!res.ok) return '';
-    const data = await res.json();
-    const urdu = data.content?.[0]?.text?.trim() || '';
-    if (urdu) CACHE.set(cacheKey, urdu);
-    return urdu;
+    const parsed = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? parsed.map(v => cleanUrdu(String(v || ''))) : [];
   } catch {
-    return '';
+    const match = trimmed.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    try {
+      const parsed = JSON.parse(match[0]);
+      return Array.isArray(parsed) ? parsed.map(v => cleanUrdu(String(v || ''))) : [];
+    } catch {
+      return [];
+    }
   }
 }
 
-/** Translate multiple strings in parallel */
-export async function translateBatch(texts: string[]): Promise<string[]> {
-  return Promise.all(texts.map(t => translateToUrdu(t)));
+export function getGeminiKey(): string {
+  return localStorage.getItem(GEMINI_KEY_STORAGE) || '';
+}
+
+export function setGeminiKey(key: string) {
+  localStorage.setItem(GEMINI_KEY_STORAGE, key.trim());
+}
+
+export async function transliterateMedicineNamesToUrdu(names: string[]): Promise<string[]> {
+  const normalized = names.map(name => name.trim());
+  const results = normalized.map(name => CACHE.get(name.toLowerCase()) || '');
+  const missing = normalized
+    .map((name, index) => ({ name, index }))
+    .filter(item => item.name && !results[item.index]);
+
+  const key = getGeminiKey();
+  if (!key || missing.length === 0) return results;
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': key,
+      },
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [{
+            text: `Transliterate these medicine or drug brand names into Urdu script.
+Do not translate meaning. Preserve brand pronunciation as Urdu phonetics.
+Return only a JSON array of strings in the same order, with no explanation.
+
+Names:
+${JSON.stringify(missing.map(item => item.name))}`,
+          }],
+        }],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: 'application/json',
+        },
+      }),
+    });
+
+    if (!res.ok) return results;
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.map((part: any) => part.text || '').join('').trim() || '';
+    const urduValues = parseJsonArray(text);
+
+    missing.forEach((item, missingIndex) => {
+      const urdu = cleanUrdu(urduValues[missingIndex] || '');
+      if (!urdu) return;
+      CACHE.set(item.name.toLowerCase(), urdu);
+      results[item.index] = urdu;
+    });
+  } catch {
+    return results;
+  }
+
+  return results;
+}
+
+export async function transliteratePrescriptionMedicineNames<T extends { name?: string; nameUrdu?: string } = any>(prescriptions: T[]): Promise<T[]> {
+  const missing = prescriptions
+    .map((rx, index) => ({ rx, index }))
+    .filter(item => item.rx.name?.trim() && !item.rx.nameUrdu?.trim());
+
+  if (!getGeminiKey() || missing.length === 0) return prescriptions;
+
+  const urduNames = await transliterateMedicineNamesToUrdu(missing.map(item => item.rx.name || ''));
+  return prescriptions.map((rx, index) => {
+    const missingIndex = missing.findIndex(item => item.index === index);
+    if (missingIndex === -1 || !urduNames[missingIndex]) return rx;
+    return { ...rx, nameUrdu: urduNames[missingIndex] };
+  });
 }
