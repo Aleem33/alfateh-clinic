@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { collection, getDocs, deleteDoc, addDoc, writeBatch, doc } from 'firebase/firestore';
+import { downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database } from 'lucide-react';
 
@@ -50,16 +51,8 @@ export function Settings() {
       }
 
       const json = JSON.stringify(backup, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
       const date = new Date().toISOString().split('T')[0];
-      a.href = url;
-      a.download = `alfateh-pharmacy-backup-${date}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      await downloadOrShare(json, `alfateh-pharmacy-backup-${date}.json`, 'application/json');
 
       setExportProgress('✓ Backup downloaded successfully!');
       setTimeout(() => setExportProgress(''), 4000);
