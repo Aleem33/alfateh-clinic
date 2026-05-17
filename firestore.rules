@@ -1,0 +1,188 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin()        { return isAuth() && userRole() == 'admin'; }
+    function isDoctor()       { return isAuth() && userRole() == 'doctor'; }
+    function isReceptionist() { return isAuth() && userRole() == 'receptionist'; }
+    function isPharmacist()   { return isAuth() && userRole() == 'pharmacist'; }
+    function isLab()          { return isAuth() && userRole() == 'lab'; }
+    function isAccountant()   { return isAuth() && userRole() == 'accountant'; }
+    function isNurse()        { return isAuth() && userRole() == 'nurse'; }
+    function isClinical()     { return isDoctor() || isNurse(); }
+
+    // ── Users ──────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isAuth() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // ── Settings ───────────────────────────────────────────────────────────────
+    match /settings/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Plans ──────────────────────────────────────────────────────────────────
+    match /plans/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Patients ───────────────────────────────────────────────────────────────
+    match /patients/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isReceptionist() || isClinical();
+      allow delete: if isAdmin();
+    }
+
+    // ── Appointments ───────────────────────────────────────────────────────────
+    match /appointments/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isReceptionist() || isClinical();
+      allow delete: if isAdmin() || isReceptionist();
+    }
+
+    // ── Consultations (OPD) ────────────────────────────────────────────────────
+    match /consultations/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isClinical() || isReceptionist();
+      allow delete: if isAdmin();
+    }
+
+    // ── Staff ──────────────────────────────────────────────────────────────────
+    match /staff/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Medicines ──────────────────────────────────────────────────────────────
+    match /medicines/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    // ── Pharmacy Orders ────────────────────────────────────────────────────────
+    match /pharmacyOrders/{doc} {
+      allow read: if isAuth();
+      allow create: if isAdmin() || isClinical() || isReceptionist();
+      allow update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    // ── Lab Tests (definitions) ────────────────────────────────────────────────
+    match /labTests/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin() || isLab();
+    }
+
+    // ── Lab Orders ─────────────────────────────────────────────────────────────
+    match /labOrders/{doc} {
+      allow read: if isAuth();
+      allow create: if isAdmin() || isClinical() || isReceptionist();
+      allow update: if isAdmin() || isLab() || isClinical();
+      allow delete: if isAdmin();
+    }
+
+    // ── Billing ────────────────────────────────────────────────────────────────
+    match /bills/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isReceptionist() || isAccountant();
+      allow delete: if isAdmin();
+    }
+
+    // ── Payments ───────────────────────────────────────────────────────────────
+    match /payments/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isReceptionist() || isAccountant();
+      allow delete: if isAdmin();
+    }
+
+    // ── Expenses ───────────────────────────────────────────────────────────────
+    match /expenses/{doc} {
+      allow read: if isAdmin() || isAccountant() || isReceptionist();
+      allow create, update: if isAdmin() || isAccountant();
+      allow delete: if isAdmin();
+    }
+
+    // ── Suppliers ──────────────────────────────────────────────────────────────
+    match /suppliers/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin() || isAccountant() || isPharmacist();
+    }
+
+    // ── IPD ────────────────────────────────────────────────────────────────────
+    match /ipdAdmissions/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isClinical() || isReceptionist();
+      allow delete: if isAdmin();
+    }
+
+    match /beds/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin() || isClinical() || isReceptionist();
+    }
+
+    // ── Audit Logs (append-only) ───────────────────────────────────────────────
+    match /auditLogs/{doc} {
+      allow read: if isAdmin();
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+
+    // ── Notifications ──────────────────────────────────────────────────────────
+    match /notifications/{doc} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAdmin() || resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // ── Schedules ──────────────────────────────────────────────────────────────
+    match /schedules/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin() || isReceptionist();
+    }
+
+    // ── Counters (MRN, bill number sequences) ──────────────────────────────────
+    match /counters/{doc} {
+      allow read, write: if isAuth();
+    }
+
+    // ── POS collections ────────────────────────────────────────────────────────
+    match /posSales/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    match /posPurchases/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    match /posExpenses/{doc} {
+      allow read: if isAdmin() || isAccountant() || isPharmacist();
+      allow create, update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    // ── Catch-all: only admin can touch anything not listed above ──────────────
+    match /{collection}/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+  }
+}
