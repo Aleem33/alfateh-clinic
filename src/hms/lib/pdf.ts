@@ -441,18 +441,24 @@ export function printBill(data: {
   billNo: string; date: string; patientName: string; patientMRN: string;
   patientAge?: string; patientGender?: string;
   doctorName?: string; department?: string;
-  items: { description: string; qty: number; unitPrice: number; total: number }[];
-  subtotal: number; discount?: number; tax?: number; grandTotal: number;
-  paidAmount: number; balance: number; paymentMethod?: string;
+  items: { description: string; qty?: number; quantity?: number; unitPrice?: number; rate?: number; total?: number; amount?: number }[];
+  subtotal: number; discount?: number; tax?: number; grandTotal?: number; total?: number;
+  paidAmount?: number; paid?: number; balance: number; paymentMethod?: string; paymentStatus?: string;
   hospitalName?: string; hospitalAddress?: string; hospitalPhone?: string;
+  hospitalFooter?: string;
 }) {
   const rows = data.items.map(it => `
     <tr>
       <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6">${it.description}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:center">${it.qty}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right">Rs ${it.unitPrice.toLocaleString()}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600">Rs ${it.total.toLocaleString()}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:center">${it.qty ?? it.quantity ?? 1}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right">Rs ${(it.unitPrice ?? it.rate ?? 0).toLocaleString()}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600">Rs ${(it.total ?? it.amount ?? 0).toLocaleString()}</td>
     </tr>`).join('');
+  const grandTotal = data.grandTotal ?? data.total ?? 0;
+  const paidAmount = data.paidAmount ?? data.paid ?? 0;
+  const hospitalName = data.hospitalName || 'AL-FATEH CLINIC';
+  const hospitalLine = [data.hospitalAddress || 'Dhandi Road Kot Sabzal', data.hospitalPhone || '0304-7459201'].filter(Boolean).join(' &nbsp;|&nbsp; ');
+  const footer = data.hospitalFooter || 'Thank you for choosing Al-Fateh Clinic &nbsp;|&nbsp; Not Valid For Court';
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
 <title>Bill #${data.billNo}</title>
@@ -476,8 +482,8 @@ thead th:nth-child(2){text-align:center;}
 .footer{margin-top:20px;text-align:center;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:10px;}
 </style></head><body>
 <div class="header">
-  <div class="clinic">AL-FATEH CLINIC</div>
-  <div class="addr">Dhandi Road Kot Sabzal &nbsp;|&nbsp; 0304-7459201 &nbsp;|&nbsp; 0301-6373904</div>
+  <div class="clinic">${hospitalName}</div>
+  <div class="addr">${hospitalLine}</div>
 </div>
 <div class="bill-meta">
   <div class="block">
@@ -501,24 +507,49 @@ thead th:nth-child(2){text-align:center;}
     <div class="tot-row"><span>Subtotal</span><span>Rs ${data.subtotal.toLocaleString()}</span></div>
     ${data.discount ? `<div class="tot-row"><span>Discount</span><span>- Rs ${data.discount.toLocaleString()}</span></div>` : ''}
     ${data.tax ? `<div class="tot-row"><span>Tax</span><span>Rs ${data.tax.toLocaleString()}</span></div>` : ''}
-    <div class="tot-row grand"><span>Grand Total</span><span>Rs ${data.grandTotal.toLocaleString()}</span></div>
+    <div class="tot-row grand"><span>Grand Total</span><span>Rs ${grandTotal.toLocaleString()}</span></div>
   </div>
 </div>
 <div class="paid">
-  <span>Paid: <strong>Rs ${data.paidAmount.toLocaleString()}</strong></span>
+  <span>Paid: <strong>Rs ${paidAmount.toLocaleString()}</strong></span>
   <span>Balance: <strong style="color:${data.balance > 0 ? '#dc2626' : '#16a34a'}">Rs ${data.balance.toLocaleString()}</strong></span>
 </div>
-<div class="footer">Thank you for choosing Al-Fateh Clinic &nbsp;|&nbsp; Not Valid For Court</div>
+<div class="footer">${footer}</div>
 </body></html>`;
   printHTML(html);
 }
 
 // ─── RECEIPT ──────────────────────────────────────────────────────────────────
 export function printReceipt(data: {
-  receiptNo: string; date: string; patientName: string; patientMRN: string;
-  amount: number; paymentMethod: string; description: string;
+  receiptNo: string; date: string; paymentMethod: string;
+  patientName?: string; patientMRN?: string; amount?: number; description?: string;
   hospitalName?: string; hospitalPhone?: string;
+  shopName?: string; shopAddress?: string; shopPhone?: string; cashier?: string;
+  items?: { name: string; qty: number; price: number; total: number }[];
+  subtotal?: number; discount?: number; total?: number; paid?: number; change?: number;
 }) {
+  const receiptName = data.shopName || data.hospitalName || 'AL-FATEH CLINIC';
+  const receiptAddress = data.shopAddress || 'Dhandi Road Kot Sabzal';
+  const receiptPhone = data.shopPhone || data.hospitalPhone || '0304-7459201';
+  const amount = data.amount ?? data.total ?? 0;
+  const itemRows = data.items?.map(item => `
+<div class="item">
+  <span>${item.name} x ${item.qty}</span>
+  <span>Rs ${item.total.toLocaleString()}</span>
+</div>`).join('') || '';
+  const saleDetails = data.items?.length ? `
+<div class="divider"></div>
+${itemRows}
+<div class="divider"></div>
+<div class="row"><span>Subtotal</span><span>Rs ${(data.subtotal ?? amount).toLocaleString()}</span></div>
+${data.discount ? `<div class="row"><span>Discount</span><span>- Rs ${data.discount.toLocaleString()}</span></div>` : ''}
+<div class="row bold"><span>Total</span><span>Rs ${amount.toLocaleString()}</span></div>
+${data.cashier ? `<div class="row"><span>Cashier</span><span>${data.cashier}</span></div>` : ''}` : `
+<div class="row"><span>Patient</span><span class="bold">${data.patientName || ''}</span></div>
+<div class="row"><span>MRN</span><span>${data.patientMRN || ''}</span></div>
+<div class="divider"></div>
+<div class="row"><span>For</span><span>${data.description || ''}</span></div>
+<div class="amount">Rs ${amount.toLocaleString()}</div>`;
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
 <title>Receipt</title>
 <style>
@@ -529,24 +560,22 @@ body{font-family:Arial,sans-serif;font-size:11px;color:#111;width:72mm;}
 .clinic{font-size:16px;font-weight:900;color:#1a237e;letter-spacing:-0.5px;}
 .divider{border-top:1px dashed #9ca3af;margin:8px 0;}
 .row{display:flex;justify-content:space-between;padding:2px 0;}
+.item{display:flex;justify-content:space-between;gap:8px;padding:3px 0;}
+.item span:first-child{max-width:46mm;}
 .amount{font-size:18px;font-weight:900;color:#1a237e;text-align:center;padding:8px 0;}
 .footer{text-align:center;font-size:9px;color:#9ca3af;margin-top:8px;}
 </style></head><body>
 <div class="center">
-  <div class="clinic">AL-FATEH CLINIC</div>
-  <div style="font-size:9px;color:#555">Dhandi Road Kot Sabzal</div>
-  <div style="font-size:9px;color:#555">0304-7459201</div>
+  <div class="clinic">${receiptName}</div>
+  <div style="font-size:9px;color:#555">${receiptAddress}</div>
+  <div style="font-size:9px;color:#555">${receiptPhone}</div>
 </div>
 <div class="divider"></div>
 <div class="center bold" style="font-size:13px;margin-bottom:6px">RECEIPT</div>
 <div class="row"><span>Receipt #</span><span class="bold">${data.receiptNo}</span></div>
 <div class="row"><span>Date</span><span>${data.date}</span></div>
-<div class="row"><span>Patient</span><span class="bold">${data.patientName}</span></div>
-<div class="row"><span>MRN</span><span>${data.patientMRN}</span></div>
-<div class="divider"></div>
-<div class="row"><span>For</span><span>${data.description}</span></div>
 <div class="row"><span>Method</span><span>${data.paymentMethod}</span></div>
-<div class="amount">Rs ${data.amount.toLocaleString()}</div>
+${saleDetails}
 <div class="divider"></div>
 <div class="footer">Thank you &nbsp;|&nbsp; Not Valid For Court</div>
 </body></html>`;

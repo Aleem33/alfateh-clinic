@@ -283,7 +283,9 @@ export function Medicines() {
                         {med.expiryDate ? format(new Date(med.expiryDate), 'MMM dd, yyyy') : 'N/A'}
                       </span>
                       {isExpiringSoon(med.expiryDate) && (
-                        <AlertCircle className="w-4 h-4 text-red-500" title="Expiring Soon" />
+                        <span title="Expiring Soon">
+                          <AlertCircle className="w-4 h-4 text-red-500" />
+                        </span>
                       )}
                     </div>
                   </td>
