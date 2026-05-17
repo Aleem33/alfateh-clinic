@@ -1,5 +1,5 @@
 const { autoUpdater }         = require('electron-updater');
-const { app, dialog, BrowserWindow } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
 
@@ -71,26 +71,6 @@ function initAutoUpdater(getMainWindow) {
       message: `Version ${info.version} downloaded — ready to install.`,
     });
 
-    const win    = getMainWindow();
-    const parent = win && !win.isDestroyed() ? win : null;
-
-    dialog.showMessageBox(parent, {
-      type:      'info',
-      title:     'Update Ready',
-      message:   `Al-Fateh Clinic ${info.version} is ready`,
-      detail:    'A new version has been downloaded. Restart now to apply the update.',
-      buttons:   ['Restart Now', 'Later'],
-      defaultId: 0,
-      cancelId:  1,
-      icon:      path.join(__dirname, 'assets', 'icon.png'),
-    }).then(({ response }) => {
-      if (response === 0) {
-        log('User chose Restart Now');
-        autoUpdater.quitAndInstall(false, true);
-      } else {
-        log('User chose Later');
-      }
-    }).catch((e) => log(`Dialog error: ${e.message}`));
   });
 
   autoUpdater.on('error', (err) => {

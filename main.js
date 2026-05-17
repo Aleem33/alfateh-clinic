@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const path = require('path');
 const { initAutoUpdater, checkForUpdates, installUpdate } = require('./updater');
 
@@ -63,7 +63,16 @@ app.on('window-all-closed', () => {
 
 app.on('render-process-gone', (_event, _wc, details) => {
   if (details.reason !== 'clean-exit') {
-    dialog.showErrorBox('Error', 'The app encountered an error. Please restart.');
-    app.quit();
+    const message = 'The app window encountered an error and was reloaded.';
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.once('did-finish-load', () => {
+        mainWindow?.webContents.send('app:message', {
+          type: 'error',
+          title: 'App Reloaded',
+          message,
+        });
+      });
+      mainWindow.reload();
+    }
   }
 });

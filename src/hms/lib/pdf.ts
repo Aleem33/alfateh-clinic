@@ -60,21 +60,13 @@ export function printPrescription(data: {
     <div class="med-item">
       <div class="med-num">${String(i + 1)}.</div>
       <div class="med-body">
-        <div class="med-line">
-          <span class="med-en">${p.name}</span>
-          ${p.nameUrdu ? `<span class="med-ur-inline">${p.nameUrdu}</span>` : ''}
-          <span class="med-dosage">${p.dosage}</span>
-          ${p.dosageUrdu ? `<span class="med-ur-inline muted">${p.dosageUrdu}</span>` : ''}
+        <div class="med-line med-en-line">
+          ${p.name} ${p.dosage} - ${p.frequency} - ${p.duration}${p.instructions ? ` - ${p.instructions}` : ''}
         </div>
-        <div class="med-detail">
-          <span>${p.frequency}</span>
-          ${p.frequencyUrdu ? `<span class="med-ur-inline">${p.frequencyUrdu}</span>` : ''}
-          <span>&middot;</span>
-          <span>${p.duration}</span>
-          ${p.durationUrdu ? `<span class="med-ur-inline">${p.durationUrdu}</span>` : ''}
-          ${p.instructions ? `<span>&middot;</span><span>${p.instructions}</span>` : ''}
-          ${p.instructionsUrdu ? `<span class="med-ur-inline">${p.instructionsUrdu}</span>` : ''}
-        </div>
+        ${(p.nameUrdu || p.dosageUrdu || p.frequencyUrdu || p.durationUrdu || p.instructionsUrdu) ? `
+        <div class="med-line med-ur-line">
+          ${[p.nameUrdu, p.dosageUrdu, p.frequencyUrdu, p.durationUrdu, p.instructionsUrdu].filter(Boolean).join(' - ')}
+        </div>` : ''}
       </div>
     </div>`).join('');
 
@@ -125,20 +117,21 @@ body { font-family: Arial, sans-serif; background:#fff; font-size:12px; }
 /* ── HEADER ── */
 .header {
   display: grid;
-  grid-template-columns: 1fr 172px;
+  grid-template-columns: 1fr 190px;
   border-bottom: 2px solid #1a7a1a;
+  min-height: 128px;
 }
 .header-left {
-  padding: 10px 14px 10px 12px;
+  padding: 12px 14px 10px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
   border-right: 2px solid #1a7a1a;
 }
-.logo { width: 80px; height: 80px; object-fit: contain; }
+.logo { width: 86px; height: 86px; object-fit: contain; }
 .clinic-name {
   font-family: 'Arial Black', Impact, Arial, sans-serif;
-  font-size: 38px;
+  font-size: 36px;
   font-weight: 900;
   color: #1a237e;
   letter-spacing: -2px;
@@ -146,45 +139,41 @@ body { font-family: Arial, sans-serif; background:#fff; font-size:12px; }
   font-style: italic;
 }
 .clinic-addr {
-  font-size: 14px;
+  font-size: 15px;
   color: #1a7a1a;
   font-style: italic;
   font-weight: 700;
   margin-top: 6px;
 }
 .header-right {
-  padding: 3px 7px 3px 7px;
+  padding: 4px 8px;
   display: block;
 }
 .dr-block {
-  height: 27px;
-  padding: 1px 0;
+  min-height: 27px;
+  padding: 2px 0 3px;
   border-bottom: 1px solid #c8e6c9;
-  overflow: hidden;
   position: relative;
 }
-.dr-block:last-child { border-bottom: none; height: 22px; }
+.dr-block:last-child { border-bottom: none; min-height: 21px; }
 .dr-ur {
   font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 11.5px;
+  font-size: 13px;
   color: #1a7a1a;
   font-weight: 700;
   direction: rtl;
   text-align: right;
-  line-height: 1;
+  line-height: 1.05;
   display: block;
-  height: 16px;
-  overflow: hidden;
   white-space: nowrap;
 }
 .dr-qual {
-  font-size: 6px;
+  font-size: 7px;
   color: #1a237e;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.12;
   text-align: right;
   display: block;
-  overflow: hidden;
 }
 
 /* ── PATIENT BAR ── */
@@ -211,7 +200,7 @@ body { font-family: Arial, sans-serif; background:#fff; font-size:12px; }
 /* ── BODY ── */
 .body {
   display: grid;
-  grid-template-columns: 1fr 172px;
+  grid-template-columns: 1fr 190px;
   border-bottom: 2px solid #1a7a1a;
 }
 
@@ -250,20 +239,20 @@ body { font-family: Arial, sans-serif; background:#fff; font-size:12px; }
 .med-item { display: flex; gap: 6px; margin-bottom: 10px; page-break-inside: avoid; }
 .med-num { color: #1a237e; font-weight: 700; font-size: 13px; min-width: 20px; padding-top: 1px; }
 .med-body { flex: 1; }
-.med-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.med-en { font-size: 13px; font-weight: 700; color: #1a237e; }
-.med-dosage { font-weight: 400; font-size: 11px; color: #374151; }
-.med-ur-inline {
+.med-line { line-height: 1.35; }
+.med-en-line {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a237e;
+}
+.med-ur-line {
   font-family: 'Noto Nastaliq Urdu', serif;
   font-size: 12.5px;
   color: #1a7a1a;
   font-weight: 700;
   direction: rtl;
-}
-.med-ur-inline.muted {
-  font-size: 11px;
-  font-weight: 500;
-  color: #4b5563;
+  text-align: right;
+  margin-top: 2px;
 }
 .med-ur {
   font-family: 'Noto Nastaliq Urdu', serif;

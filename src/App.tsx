@@ -5,6 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { AppSelector } from './landing/AppSelector';
 import { HMSApp } from './hms/HMSApp';
 import { POSApp } from './pos/POSApp';
+import { GlobalAppNotifications } from './components/GlobalAppNotifications';
 
 type AppMode = 'hms' | 'pos' | null;
 
@@ -88,6 +89,7 @@ export default function App() {
   if (user === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <GlobalAppNotifications />
         <div className="text-center">
           <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-slate-500 text-sm font-medium">Loading Al-Fateh Clinic...</p>
@@ -98,43 +100,67 @@ export default function App() {
 
   // ── Step 1: App Selection ───────────────────────────────────────────────────
   if (!appMode) {
-    return <AppSelector onSelect={handleSelectApp} authError={authError} />;
+    return (
+      <>
+        <GlobalAppNotifications />
+        <AppSelector onSelect={handleSelectApp} authError={authError} />
+      </>
+    );
   }
 
   // ── Step 2: Login for selected app (sessionAuthed not yet set) ─────────────
   if (!sessionAuthed) {
     if (appMode === 'hms') {
-      return <HMSApp
-        userRole={null}
-        userEmail=""
-        onSwitchApp={handleSwitchApp}
-        onLoginSuccess={handleLoginSuccess}
-        onBack={() => setAppMode(null)}
-      />;
+      return (
+        <>
+          <GlobalAppNotifications />
+          <HMSApp
+            userRole={null}
+            userEmail=""
+            onSwitchApp={handleSwitchApp}
+            onLoginSuccess={handleLoginSuccess}
+            onBack={() => setAppMode(null)}
+          />
+        </>
+      );
     }
-    return <POSApp
-      userRole={null}
-      onSwitchApp={handleSwitchApp}
-      onLoginSuccess={handleLoginSuccess}
-      onBack={() => setAppMode(null)}
-    />;
+    return (
+      <>
+        <GlobalAppNotifications />
+        <POSApp
+          userRole={null}
+          onSwitchApp={handleSwitchApp}
+          onLoginSuccess={handleLoginSuccess}
+          onBack={() => setAppMode(null)}
+        />
+      </>
+    );
   }
 
   // ── Step 3: Inside the app ──────────────────────────────────────────────────
   if (appMode === 'hms') {
-    return <HMSApp
-      userRole={userRole}
-      userEmail={userEmail}
-      onSwitchApp={handleSwitchApp}
-      onLoginSuccess={handleLoginSuccess}
-      onLogout={handleLogout}
-    />;
+    return (
+      <>
+        <GlobalAppNotifications />
+        <HMSApp
+          userRole={userRole}
+          userEmail={userEmail}
+          onSwitchApp={handleSwitchApp}
+          onLoginSuccess={handleLoginSuccess}
+          onLogout={handleLogout}
+        />
+      </>
+    );
   }
-  return <POSApp
-    userRole={userRole}
-    onSwitchApp={handleSwitchApp}
-    onLoginSuccess={handleLoginSuccess}
-    onLogout={handleLogout}
-  />;
+  return (
+    <>
+      <GlobalAppNotifications />
+      <POSApp
+        userRole={userRole}
+        onSwitchApp={handleSwitchApp}
+        onLoginSuccess={handleLoginSuccess}
+        onLogout={handleLogout}
+      />
+    </>
+  );
 }
-

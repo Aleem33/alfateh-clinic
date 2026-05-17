@@ -13,11 +13,18 @@ export interface UpdateStatus {
   message?: string;
 }
 
+export interface AppMessage {
+  type: 'error' | 'info' | 'success';
+  title?: string;
+  message: string;
+}
+
 export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   checkForUpdates: () => Promise<{ ok: boolean; message?: string }>;
   installUpdate: () => Promise<void>;
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
+  onAppMessage: (callback: (message: AppMessage) => void) => () => void;
 }
 
 declare global {
