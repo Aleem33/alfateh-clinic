@@ -3,9 +3,15 @@ import { collection, getDocs, deleteDoc, doc, getDoc, setDoc, writeBatch } from 
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db, auth, registerUser } from '../../firebase';
 import { nowISO } from '../lib/utils';
-import { Building2, Download, Upload, Trash2, AlertTriangle, UserPlus, X, Lock, Eye, EyeOff, Bot, CheckCircle, RefreshCw } from 'lucide-react';
+import { Building2, Download, Upload, Trash2, AlertTriangle, UserPlus, X, Lock, Eye, EyeOff, Bot, CheckCircle, RefreshCw, Printer } from 'lucide-react';
 import { AppUpdater } from '../../components/AppUpdater';
 import { getGeminiKey, setGeminiKey } from '../lib/translate';
+import {
+  DEFAULT_PRESCRIPTION_PRINT_SETTINGS,
+  getPrescriptionPrintSettings,
+  savePrescriptionPrintSettings,
+  type PrescriptionPrintSettings,
+} from '../lib/prescriptionPrintSettings';
 
 const ALL_COLS = ['patients','appointments','consultations','admissions','labOrders','labTests','medicines','purchases','bills','staff','expenses'];
 const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier'];
@@ -82,11 +88,19 @@ export function Settings() {
   const [geminiKey, setGeminiKeyState] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [keyMsg, setKeyMsg] = useState('');
+  const [printSettings, setPrintSettings] = useState<PrescriptionPrintSettings>(DEFAULT_PRESCRIPTION_PRINT_SETTINGS);
+  const [printSettingsMsg, setPrintSettingsMsg] = useState('');
 
   const saveGeminiKey = () => {
     setGeminiKey(geminiKey);
     setKeyMsg('✓ API key saved!');
     setTimeout(() => setKeyMsg(''), 3000);
+  };
+
+  const savePrintSettings = () => {
+    savePrescriptionPrintSettings(printSettings);
+    setPrintSettingsMsg('✓ Prescription print settings saved!');
+    setTimeout(() => setPrintSettingsMsg(''), 3000);
   };
 
   // New user
@@ -100,6 +114,7 @@ export function Settings() {
       if (snap.exists()) setHospital({ ...emptyHospital, ...snap.data() });
     });
     setGeminiKeyState(getGeminiKey());
+    setPrintSettings(getPrescriptionPrintSettings());
   }, []);
 
   const saveHospital = async () => {
@@ -317,6 +332,64 @@ export function Settings() {
             </label>
             {importMsg && <p className={`text-xs mt-2 font-medium ${importMsg.startsWith('✓') ? 'text-green-600' : importMsg.startsWith('Error') ? 'text-red-500' : 'text-gray-500'}`}>{importMsg}</p>}
           </div>
+        </div>
+      </div>
+
+      {/* Prescription Printing */}
+      <div className="bg-white rounded-xl border border-blue-100 shadow-sm p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Printer className="w-5 h-5 text-blue-600" />
+          <h2 className="font-semibold text-gray-900">Prescription Printing</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          Use pre-printed pad overlay when printing on existing Al-Fateh pads. Print one test on plain paper first, then adjust offsets if needed.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Print Mode</label>
+            <select
+              value={printSettings.mode}
+              onChange={e => setPrintSettings(s => ({ ...s, mode: e.target.value as PrescriptionPrintSettings['mode'] }))}
+              className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="full">Full letterhead print</option>
+              <option value="preprinted">Pre-printed pad overlay</option>
+            </select>
+          </div>
+          <F
+            label="Horizontal Offset (mm)"
+            type="number"
+            value={String(printSettings.offsetX)}
+            onChange={(v: string) => setPrintSettings(s => ({ ...s, offsetX: Number(v) || 0 }))}
+          />
+          <F
+            label="Vertical Offset (mm)"
+            type="number"
+            value={String(printSettings.offsetY)}
+            onChange={(v: string) => setPrintSettings(s => ({ ...s, offsetY: Number(v) || 0 }))}
+          />
+          <F
+            label="Font Scale (%)"
+            type="number"
+            value={String(printSettings.fontScale)}
+            onChange={(v: string) => setPrintSettings(s => ({ ...s, fontScale: Number(v) || 100 }))}
+          />
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() => setPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS)}
+              className="w-full border border-gray-200 text-gray-600 rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Reset Defaults
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mt-4">
+          <button onClick={savePrintSettings}
+            className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            <CheckCircle className="w-4 h-4" /> Save Print Settings
+          </button>
+          {printSettingsMsg && <span className="text-sm font-medium text-green-600">{printSettingsMsg}</span>}
         </div>
       </div>
 
