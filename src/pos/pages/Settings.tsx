@@ -1,21 +1,7 @@
 import React, { useState } from 'react';
-import { collection, getDocs, deleteDoc, addDoc, writeBatch, doc } from 'firebase/firestore';
 import { downloadOrShare } from '../lib/nativeUtils';
-import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database } from 'lucide-react';
-
-const ALL_COLLECTIONS = [
-  'medicines',
-  'sales',
-  'purchases',
-  'saleReturns',
-  'purchaseReturns',
-  'customers',
-  'customerPayments',
-  'suppliers',
-  'expenses',
-  'pharmacyOrders',
-];
+import { deleteAllAppData, exportAllAppData, GLOBAL_DATA_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 
 export function Settings() {
   const [isDeleting, setIsDeleting] = useState(false);
@@ -40,23 +26,12 @@ export function Settings() {
     setIsExporting(true);
     setExportProgress('Reading data...');
     try {
-      const backup: any = {
-        exportedAt: new Date().toISOString(),
-        version: '1.0',
-        collections: {},
-      };
-
-      for (const col of ALL_COLLECTIONS) {
-        setExportProgress(`Exporting ${col}...`);
-        const snap = await getDocs(collection(db, col));
-        backup.collections[col] = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
-      }
-
+      const backup = await exportAllAppData(setExportProgress);
       const json = JSON.stringify(backup, null, 2);
       const date = new Date().toISOString().split('T')[0];
-      await downloadOrShare(json, `alfateh-pharmacy-backup-${date}.json`, 'application/json');
+      await downloadOrShare(json, `alfateh-suite-backup-${date}.json`, 'application/json');
 
-      setExportProgress('✓ Backup downloaded successfully!');
+      setExportProgress('Done: complete HMS + Pharmacy backup downloaded!');
       setTimeout(() => setExportProgress(''), 4000);
     } catch (error) {
       setExportProgress('Error during export. Please try again.');
@@ -65,7 +40,7 @@ export function Settings() {
     }
   };
 
-  // ── Import ──────────────────────────────────────────────
+  // Import ──────────────────────────────────────────────
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -97,34 +72,8 @@ export function Settings() {
     setImportError('');
 
     try {
-      const { collections } = pendingImportData;
-      let totalDocs = 0;
-
-      for (const colName of ALL_COLLECTIONS) {
-        const docs = collections[colName];
-        if (!docs || docs.length === 0) continue;
-
-        setImportProgress(`Importing ${colName} (${docs.length} records)...`);
-
-        // Write in batches of 500 (Firestore limit)
-        const chunks = [];
-        for (let i = 0; i < docs.length; i += 400) {
-          chunks.push(docs.slice(i, i + 400));
-        }
-
-        for (const chunk of chunks) {
-          const batch = writeBatch(db);
-          for (const docData of chunk) {
-            const { _id, ...data } = docData;
-            const ref = doc(collection(db, colName), _id);
-            batch.set(ref, data);
-          }
-          await batch.commit();
-          totalDocs += chunk.length;
-        }
-      }
-
-      setImportSuccess(`✓ Import complete! ${totalDocs} records restored.`);
+      const totalDocs = await restoreAllAppData(pendingImportData, setImportProgress);
+      setImportSuccess(`Done: ${totalDocs} records restored across HMS and Pharmacy.`);
       setImportProgress('');
       setTimeout(() => setImportSuccess(''), 6000);
     } catch (error) {
@@ -136,38 +85,21 @@ export function Settings() {
     }
   };
 
-  // ── Delete ──────────────────────────────────────────────
-  const deleteCollection = async (collectionName: string) => {
-    setDeleteProgress(`Deleting ${collectionName}...`);
-    const snapshot = await getDocs(collection(db, collectionName));
-    const promises = snapshot.docs.map(d => deleteDoc(d.ref));
-    await Promise.all(promises);
-  };
-
+  // Delete ──────────────────────────────────────────────
   const handleResetData = async () => {
     if (confirmText !== 'DELETE ALL DATA') return;
     setShowConfirmModal(false);
     setIsDeleting(true);
     try {
-      for (const col of ALL_COLLECTIONS) {
-        await deleteCollection(col);
-      }
-      setDeleteProgress('All data successfully deleted.');
+      const totalDocs = await deleteAllAppData(setDeleteProgress);
+      setDeleteProgress(`Done: deleted ${totalDocs} records across HMS and Pharmacy.`);
       setConfirmText('');
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'multiple_collections');
       setDeleteProgress('Error deleting data. Check console.');
     } finally {
       setIsDeleting(false);
       setTimeout(() => setDeleteProgress(''), 3000);
     }
-  };
-
-  const getSummary = (data: any) => {
-    return ALL_COLLECTIONS
-      .filter(c => data.collections[c]?.length > 0)
-      .map(c => `${data.collections[c].length} ${c}`)
-      .join(', ');
   };
 
   return (
@@ -180,17 +112,17 @@ export function Settings() {
           <Download className="w-6 h-6 text-green-600" />
           <div>
             <h2 className="text-lg font-bold text-green-900">Export / Backup Data</h2>
-            <p className="text-sm text-green-700 mt-0.5">Download all your data as a JSON backup file</p>
+            <p className="text-sm text-green-700 mt-0.5">Download HMS and Pharmacy data as one JSON backup file</p>
           </div>
         </div>
         <div className="p-6 space-y-4">
           <p className="text-gray-600 text-sm">
-            Exports all collections: Medicines, Sales, Purchases, Returns, Customers, Suppliers, and Expenses into a single backup file. Use this to migrate to a new Firebase project or keep an offline backup.
+            Exports the complete clinic suite, including HMS records, pharmacy inventory, sales, purchases, returns, customers, suppliers, settings, templates, and logs.
           </p>
           <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
             <div>
               <h3 className="font-bold text-gray-900">Download Full Backup</h3>
-              <p className="text-sm text-gray-500 mt-1">All {ALL_COLLECTIONS.length} collections will be exported</p>
+              <p className="text-sm text-gray-500 mt-1">All {GLOBAL_DATA_COLLECTIONS.length} suite collections will be exported</p>
             </div>
             <button
               onClick={handleExport}
@@ -213,7 +145,7 @@ export function Settings() {
           <Upload className="w-6 h-6 text-blue-600" />
           <div>
             <h2 className="text-lg font-bold text-blue-900">Import / Restore Data</h2>
-            <p className="text-sm text-blue-700 mt-0.5">Restore data from a backup file into this Firebase project</p>
+            <p className="text-sm text-blue-700 mt-0.5">Restore HMS and Pharmacy data from a backup file</p>
           </div>
         </div>
         <div className="p-6 space-y-4">
@@ -227,7 +159,7 @@ export function Settings() {
           <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
             <div>
               <h3 className="font-bold text-gray-900">Restore from Backup File</h3>
-              <p className="text-sm text-gray-500 mt-1">Select a .json file exported from this app</p>
+              <p className="text-sm text-gray-500 mt-1">Select a .json suite backup file</p>
             </div>
             <label className={`px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 flex items-center gap-2 whitespace-nowrap cursor-pointer ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
               <Upload className="w-4 h-4" />
@@ -272,7 +204,7 @@ export function Settings() {
             <div>
               <h3 className="font-bold text-gray-900">Factory Reset (Delete All Data)</h3>
               <p className="text-sm text-gray-500 mt-1">
-                Permanently deletes all records across all collections. User accounts will NOT be deleted.
+                Permanently deletes every Firestore record used by HMS and Pharmacy. Firebase Authentication accounts will not be deleted.
               </p>
             </div>
             <button
@@ -304,7 +236,7 @@ export function Settings() {
               </p>
               <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700">
                 <p className="font-medium mb-1">Records to import:</p>
-                <p className="text-gray-600 leading-relaxed">{getSummary(pendingImportData)}</p>
+                <p className="text-gray-600 leading-relaxed">{summarizeBackup(pendingImportData)}</p>
               </div>
               <p className="text-sm text-amber-700 bg-amber-50 p-3 rounded-lg">
                 Existing records with the same IDs will be overwritten. New records will be added.

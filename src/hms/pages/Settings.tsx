@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, getDocs, deleteDoc, doc, getDoc, setDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db, auth, registerUser } from '../../firebase';
 import { nowISO } from '../lib/utils';
@@ -12,8 +12,8 @@ import {
   savePrescriptionPrintSettings,
   type PrescriptionPrintSettings,
 } from '../lib/prescriptionPrintSettings';
+import { deleteAllAppData, exportAllAppData, GLOBAL_DATA_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 
-const ALL_COLS = ['patients','appointments','consultations','admissions','labOrders','labTests','medicines','purchases','bills','staff','expenses'];
 const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier'];
 
 function F({ label, value, onChange, type = 'text', placeholder = '' }: {
@@ -84,6 +84,7 @@ export function Settings() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearText, setClearText] = useState('');
   const [clearing, setClearing] = useState(false);
+  const [clearMsg, setClearMsg] = useState('');
 
   const [geminiKey, setGeminiKeyState] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -130,18 +131,13 @@ export function Settings() {
   const handleExport = async () => {
     setExporting(true); setExportMsg('Reading data...');
     try {
-      const backup: any = { exportedAt: nowISO(), version: '1.0', collections: {} };
-      for (const col of ALL_COLS) {
-        setExportMsg(`Exporting ${col}...`);
-        const snap = await getDocs(collection(db, col));
-        backup.collections[col] = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
-      }
+      const backup = await exportAllAppData(setExportMsg);
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `alfateh-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.href = url; a.download = `alfateh-suite-backup-${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      setExportMsg('✓ Backup downloaded!');
+      setExportMsg('Done: complete HMS + Pharmacy backup downloaded!');
       setTimeout(() => setExportMsg(''), 4000);
     } catch (e: any) { setExportMsg('Error: ' + e.message); }
     finally { setExporting(false); }
@@ -165,16 +161,8 @@ export function Settings() {
     if (!pendingImport) return;
     setImporting(true); setShowImportConfirm(false); setImportMsg('Importing...');
     try {
-      for (const [colName, docs] of Object.entries(pendingImport.collections) as [string, any[]][]) {
-        const batch = writeBatch(db);
-        for (const d of docs) {
-          const { _id, ...data } = d;
-          batch.set(doc(db, colName, _id), data);
-        }
-        await batch.commit();
-        setImportMsg(`Imported ${colName}...`);
-      }
-      setImportMsg('✓ Import complete!');
+      const totalDocs = await restoreAllAppData(pendingImport, setImportMsg);
+      setImportMsg(`Done: ${totalDocs} records restored across HMS and Pharmacy.`);
       setTimeout(() => setImportMsg(''), 5000);
     } catch (e: any) { setImportMsg('Error: ' + e.message); }
     finally { setImporting(false); setPendingImport(null); }
@@ -182,17 +170,15 @@ export function Settings() {
 
   const handleClear = async () => {
     if (clearText !== 'DELETE ALL') return;
+    setShowClearConfirm(false);
     setClearing(true);
+    setClearMsg('Deleting all HMS and Pharmacy data...');
     try {
-      for (const col of ALL_COLS) {
-        const snap = await getDocs(collection(db, col));
-        const batch = writeBatch(db);
-        snap.docs.forEach(d => batch.delete(d.ref));
-        await batch.commit();
-      }
-      setShowClearConfirm(false); setClearText('');
-      alert('All data cleared.');
-    } catch (e: any) { alert('Error: ' + e.message); }
+      const totalDocs = await deleteAllAppData(setClearMsg);
+      setClearText('');
+      setClearMsg(`Done: deleted ${totalDocs} records across HMS and Pharmacy.`);
+      setTimeout(() => setClearMsg(''), 5000);
+    } catch (e: any) { setClearMsg('Error: ' + e.message); }
     finally { setClearing(false); }
   };
 
@@ -316,21 +302,22 @@ export function Settings() {
         <div className="grid grid-cols-2 gap-4">
           <div className="border border-gray-200 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-gray-800 mb-1">Export Backup</h3>
-            <p className="text-xs text-gray-500 mb-3">Download all hospital data as a JSON file.</p>
+            <p className="text-xs text-gray-500 mb-3">Download all HMS and Pharmacy data as one JSON file.</p>
             <button onClick={handleExport} disabled={exporting}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-60">
               <Download className="w-4 h-4" /> {exporting ? 'Exporting...' : 'Download Backup'}
             </button>
-            {exportMsg && <p className={`text-xs mt-2 font-medium ${exportMsg.startsWith('✓') ? 'text-green-600' : 'text-gray-500'}`}>{exportMsg}</p>}
+            {exportMsg && <p className={`text-xs mt-2 font-medium ${exportMsg.startsWith('Done') ? 'text-green-600' : 'text-gray-500'}`}>{exportMsg}</p>}
           </div>
           <div className="border border-gray-200 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-gray-800 mb-1">Restore Backup</h3>
-            <p className="text-xs text-gray-500 mb-3">Upload a JSON backup to restore data.</p>
+            <p className="text-xs text-gray-500 mb-3">Upload a suite backup to restore HMS and Pharmacy data.</p>
             <label className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 cursor-pointer w-fit">
               <Upload className="w-4 h-4" /> Choose File
               <input type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
             </label>
-            {importMsg && <p className={`text-xs mt-2 font-medium ${importMsg.startsWith('✓') ? 'text-green-600' : importMsg.startsWith('Error') ? 'text-red-500' : 'text-gray-500'}`}>{importMsg}</p>}
+            {importMsg && <p className={`text-xs mt-2 font-medium ${importMsg.startsWith('Done') ? 'text-green-600' : importMsg.startsWith('Error') ? 'text-red-500' : 'text-gray-500'}`}>{importMsg}</p>}
+            {pendingImport && <p className="text-xs text-gray-400 mt-2">{summarizeBackup(pendingImport)}</p>}
           </div>
         </div>
       </div>
@@ -445,10 +432,12 @@ export function Settings() {
           <AlertTriangle className="w-5 h-5 text-red-500" />
           <h2 className="font-semibold text-red-600">Danger Zone</h2>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Permanently delete all patient, billing, and clinical data. This cannot be undone.</p>
+        <p className="text-sm text-gray-500 mb-4">Permanently delete every Firestore record used by HMS and Pharmacy. This cannot be undone.</p>
+        <p className="text-xs text-gray-400 mb-4">{GLOBAL_DATA_COLLECTIONS.length} collections included. Firebase Authentication accounts are not deleted by the app.</p>
         <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
           <Trash2 className="w-4 h-4" /> Clear All Data
         </button>
+        {clearMsg && <p className={`text-sm font-medium mt-3 ${clearMsg.startsWith('Done') ? 'text-green-600' : clearMsg.startsWith('Error') ? 'text-red-500' : 'text-blue-600'}`}>{clearMsg}</p>}
       </div>
 
       {/* Import Confirm Modal */}
@@ -456,7 +445,8 @@ export function Settings() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
             <h2 className="font-semibold text-gray-900 mb-2">Confirm Import</h2>
-            <p className="text-sm text-gray-500 mb-4">This will add/overwrite data from the backup file. Existing records with the same ID will be replaced.</p>
+            <p className="text-sm text-gray-500 mb-3">This will add/overwrite HMS and Pharmacy data from the backup file. Existing records with the same ID will be replaced.</p>
+            {pendingImport && <p className="text-xs text-gray-500 mb-4 bg-gray-50 rounded-lg p-3">{summarizeBackup(pendingImport)}</p>}
             <div className="flex gap-3">
               <button onClick={() => { setShowImportConfirm(false); setPendingImport(null); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
               <button onClick={handleImport} disabled={importing} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700">Import</button>
