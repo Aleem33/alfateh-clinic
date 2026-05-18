@@ -4,13 +4,12 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, CalendarDays, Stethoscope, BedDouble,
   FlaskConical, Pill, Receipt, UserCog, BarChart3,
-  Settings as SettingsIcon, LogOut, Truck, Sun, Moon,
+  Settings as SettingsIcon, LogOut, Truck,
   TrendingDown, ClipboardList, ChevronLeft, ChevronRight,
   Shield, CalendarCheck, Hotel, ArrowLeftRight, Monitor, BookOpen,
 } from 'lucide-react';
 import { logout } from '../../firebase';
 import { cn } from '../lib/utils';
-import { useTheme } from '../lib/theme';
 import { TopNavbar } from './TopNavbar';
 
 const NAV = [
@@ -58,7 +57,6 @@ interface Props {
 }
 
 export function Layout({ role, userEmail, onSwitchApp, onLogout }: Props) {
-  const { theme, toggle } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
 
@@ -88,12 +86,11 @@ export function Layout({ role, userEmail, onSwitchApp, onLogout }: Props) {
   }, [navigate]);
 
   return (
-    <div className={theme === 'dark' ? 'dark' : ''}>
-      <div className="flex h-screen bg-slate-100 dark:bg-gray-900 overflow-hidden">
+    <div className="flex h-screen bg-slate-100 overflow-hidden">
 
         {/* Sidebar */}
         <aside className={cn(
-          'bg-[#0f2544] dark:bg-[#020817] flex flex-col shrink-0 print:hidden transition-all duration-300',
+          'bg-[#0f2544] flex flex-col shrink-0 print:hidden transition-all duration-300',
           collapsed ? 'w-16' : 'w-60'
         )}>
           {/* Logo */}
@@ -176,16 +173,6 @@ export function Layout({ role, userEmail, onSwitchApp, onLogout }: Props) {
                 {!collapsed && 'Pharmacy POS'}
               </button>
             )}
-            <button onClick={toggle}
-              title={collapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-blue-100/70 hover:text-white hover:bg-white/10 transition-colors',
-                collapsed && 'justify-center px-2'
-              )}
-            >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              {!collapsed && (theme === 'dark' ? 'Light Mode' : 'Dark Mode')}
-            </button>
             <button onClick={onLogout || logout}
               title={collapsed ? 'Logout' : undefined}
               className={cn(
@@ -202,13 +189,12 @@ export function Layout({ role, userEmail, onSwitchApp, onLogout }: Props) {
         {/* Main content */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <TopNavbar userEmail={userEmail} userRole={role} />
-          <main className="flex-1 overflow-auto dark:bg-gray-900">
+          <main className="flex-1 overflow-auto">
             <div className="p-6 print:p-0 fade-in">
               <Outlet />
             </div>
           </main>
         </div>
-      </div>
     </div>
   );
 }
