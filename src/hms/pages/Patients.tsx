@@ -390,6 +390,14 @@ export function Patients() {
                             <span key={i} className="bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded-full">{t.testName}</span>
                           ))}
                         </div>
+                        {o.reportPdf?.url && (
+                          <button
+                            onClick={() => window.open(o.reportPdf.url, '_blank')}
+                            className="mb-2 inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 border border-red-100 bg-red-50 px-2 py-1 rounded-lg font-medium"
+                          >
+                            Open PDF Report
+                          </button>
+                        )}
                         {o.results?.length > 0 && (
                           <div className="mt-2 border-t border-gray-50 pt-2 space-y-1">
                             {o.results.map((r: any, i: number) => (

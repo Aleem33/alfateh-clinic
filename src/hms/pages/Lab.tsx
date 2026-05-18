@@ -1,10 +1,17 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { db, storage } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
-import { Plus, Search, X, CheckCircle, Clock, BookOpen, Printer } from 'lucide-react';
+import { Plus, Search, X, CheckCircle, Clock, BookOpen, Printer, FileText, Upload } from 'lucide-react';
 
 const CATEGORIES = ['Hematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Imaging', 'Pathology', 'Other'];
+
+const MAX_REPORT_PDF_SIZE = 12 * 1024 * 1024;
+
+function safeFileName(name: string) {
+  return name.replace(/[^a-z0-9._-]+/gi, '_').replace(/^_+|_+$/g, '') || 'lab-report.pdf';
+}
 
 export function Lab() {
   const [labOrders, setLabOrders] = useState<any[]>([]);
@@ -17,8 +24,10 @@ export function Lab() {
   const [showTestModal, setShowTestModal] = useState(false);
   const [editTestId, setEditTestId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [resultError, setResultError] = useState('');
   const [testForm, setTestForm] = useState({ name: '', category: 'Hematology', price: '', unit: '', normalRange: '', turnaround: '24 hours' });
   const [results, setResults] = useState<any[]>([]);
+  const [reportPdf, setReportPdf] = useState<File | null>(null);
   // New Order state
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderPatientSearch, setOrderPatientSearch] = useState('');
@@ -80,6 +89,8 @@ export function Lab() {
       testId: t.testId, testName: t.testName, result: t.result || '', unit: t.unit || '', normalRange: t.normalRange || '', status: 'normal',
     }));
     setResults(preResults);
+    setReportPdf(null);
+    setResultError('');
     setShowResultModal(order);
   };
 
@@ -89,14 +100,53 @@ export function Lab() {
 
   const handleSaveResults = async () => {
     if (!showResultModal) return;
+    if (!results.some(r => r.result?.trim()) && !reportPdf && !showResultModal.reportPdf?.url) {
+      setResultError('Enter at least one result or upload a PDF report.');
+      return;
+    }
     setSaving(true);
+    setResultError('');
     try {
+      let reportPdfData = showResultModal.reportPdf || null;
+      if (reportPdf) {
+        const path = `labReports/${showResultModal.id}/${Date.now()}-${safeFileName(reportPdf.name)}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, reportPdf, { contentType: 'application/pdf' });
+        const url = await getDownloadURL(storageRef);
+        reportPdfData = {
+          name: reportPdf.name,
+          size: reportPdf.size,
+          type: reportPdf.type || 'application/pdf',
+          storagePath: path,
+          url,
+          uploadedAt: nowISO(),
+        };
+      }
       await updateDoc(doc(db, 'labOrders', showResultModal.id), {
-        results, status: 'completed', completedAt: nowISO(), updatedAt: nowISO(),
+        results,
+        reportPdf: reportPdfData,
+        status: 'completed',
+        completedAt: showResultModal.completedAt || nowISO(),
+        updatedAt: nowISO(),
       });
+      setReportPdf(null);
       setShowResultModal(null);
-    } catch (e) { console.error(e); }
+    } catch (e: any) { setResultError(e.message || 'Could not save lab report.'); }
     finally { setSaving(false); }
+  };
+
+  const handlePdfSelect = (file?: File) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setResultError('Please select a PDF file.');
+      return;
+    }
+    if (file.size > MAX_REPORT_PDF_SIZE) {
+      setResultError('PDF must be 12 MB or smaller.');
+      return;
+    }
+    setReportPdf(file);
+    setResultError('');
   };
 
   const updateOrderStatus = async (id: string, status: string) => {
@@ -175,13 +225,13 @@ export function Lab() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>{['Date', 'Patient', 'Doctor', 'Tests', 'Status', 'Actions'].map(h => (
+              <tr>{['Date', 'Patient', 'Doctor', 'Tests', 'Report', 'Status', 'Actions'].map(h => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
               ))}</tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filteredOrders.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-12 text-gray-400">No orders found</td></tr>
+                <tr><td colSpan={7} className="text-center py-12 text-gray-400">No orders found</td></tr>
               ) : filteredOrders.map(o => (
                 <tr key={o.id} className="hover:bg-gray-50/50">
                   <td className="px-4 py-3 text-sm text-gray-600">{formatDate(o.date)}</td>
@@ -196,6 +246,18 @@ export function Lab() {
                         <span key={i} className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{t.testName}</span>
                       ))}
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {o.reportPdf?.url ? (
+                      <button
+                        onClick={() => window.open(o.reportPdf.url, '_blank')}
+                        className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 border border-red-100 bg-red-50 px-2 py-1 rounded-lg font-medium"
+                      >
+                        <FileText className="w-3 h-3" /> PDF
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">{statusBadge(o.status)}</td>
                   <td className="px-4 py-3">
@@ -262,6 +324,40 @@ export function Lab() {
               <button onClick={() => setShowResultModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="p-5 space-y-3">
+              {resultError && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg">{resultError}</div>}
+              <div className="border border-red-100 bg-red-50/60 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 bg-white rounded-lg flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4 text-red-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-900 text-sm">PDF Lab Report</div>
+                    <p className="text-xs text-gray-500 mt-0.5">Upload the finalized report PDF. The file is saved with this lab order.</p>
+                    {showResultModal.reportPdf?.url && !reportPdf && (
+                      <button
+                        onClick={() => window.open(showResultModal.reportPdf.url, '_blank')}
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs text-red-700 bg-white border border-red-100 rounded-lg px-2.5 py-1.5 font-medium hover:bg-red-50"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Open saved PDF
+                      </button>
+                    )}
+                    {reportPdf && (
+                      <div className="mt-2 text-xs text-red-700 bg-white border border-red-100 rounded-lg px-2.5 py-1.5">
+                        {reportPdf.name} ({(reportPdf.size / 1024 / 1024).toFixed(2)} MB)
+                      </div>
+                    )}
+                  </div>
+                  <label className="inline-flex items-center gap-1.5 text-xs bg-red-600 text-white rounded-lg px-3 py-2 font-medium hover:bg-red-700 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" /> {showResultModal.reportPdf?.url ? 'Replace PDF' : 'Upload PDF'}
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="hidden"
+                      onChange={e => handlePdfSelect(e.target.files?.[0])}
+                    />
+                  </label>
+                </div>
+              </div>
               {results.map((r, i) => (
                 <div key={i} className="border border-gray-100 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
@@ -291,8 +387,8 @@ export function Lab() {
             </div>
             <div className="flex gap-3 px-5 pb-5">
               <button onClick={() => setShowResultModal(null)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
-              <button onClick={handleSaveResults} disabled={saving || showResultModal.status === 'completed'} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">
-                {saving ? 'Saving...' : showResultModal.status === 'completed' ? 'Already Saved' : 'Save Results'}
+              <button onClick={handleSaveResults} disabled={saving || (showResultModal.status === 'completed' && !reportPdf)} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">
+                {saving ? 'Saving...' : showResultModal.status === 'completed' && !reportPdf ? 'Already Saved' : 'Save Report'}
               </button>
             </div>
           </div>

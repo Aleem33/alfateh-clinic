@@ -15,12 +15,14 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc,
   increment, enableIndexedDbPersistence,
 } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // ── App instances ─────────────────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db   = getFirestore(app);
+export const storage = getStorage(app);
 
 // Keep user logged in across sessions
 setPersistence(auth, browserLocalPersistence).catch(console.error);
