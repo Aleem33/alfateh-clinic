@@ -60,6 +60,10 @@ export function OPD() {
   const [expandedVisit, setExpandedVisit] = useState<string | null>(null);
   const [templates, setTemplates] = useState<any[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateMsg, setTemplateMsg] = useState('');
   const [printQueue, setPrintQueue] = useState<Set<string>>(new Set());
   const [batchPrinting, setBatchPrinting] = useState(false);
 
@@ -143,15 +147,58 @@ export function OPD() {
     setShowTemplates(false);
   };
 
+  const openSaveTemplateModal = () => {
+    if (!prescriptions.length) {
+      setTemplateMsg('Add medicines before saving a template.');
+      setTimeout(() => setTemplateMsg(''), 3000);
+      return;
+    }
+    setTemplateName(form.diagnosis ? `${form.diagnosis} Protocol` : '');
+    setTemplateMsg('');
+    setShowTemplateModal(true);
+  };
+
+  const normalizeTemplateMedicines = () => withPrescriptionListUrdu(prescriptions).map((p: any) => ({
+    medicineId: p.medicineId || '',
+    name: p.name || '',
+    nameUrdu: p.nameUrdu || '',
+    dosage: p.dosage || '',
+    dosageUrdu: p.dosageUrdu || getDosageUrdu(p.dosage || ''),
+    frequency: p.frequency || '',
+    frequencyUrdu: p.frequencyUrdu || getFrequencyUrdu(p.frequency || ''),
+    duration: p.duration || '',
+    durationUrdu: p.durationUrdu || getDurationUrdu(p.duration || ''),
+    instructions: p.instructions || '',
+    instructionsUrdu: p.instructionsUrdu || getInstructionUrdu(p.instructions || ''),
+  }));
+
   const saveAsTemplate = async () => {
-    if (!prescriptions.length) return alert('Add medicines first');
-    const name = prompt('Template name (e.g. "Viral Fever Protocol"):');
-    if (!name?.trim()) return;
-    await addDoc(collection(db, 'prescriptionTemplates'), {
-      name: name.trim(), diagnosis: form.diagnosis || '', medicines: prescriptions,
-      createdByEmail: auth.currentUser?.email || '', createdAt: nowISO(),
-    });
-    alert('Template saved!');
+    const name = templateName.trim();
+    if (!name) {
+      setTemplateMsg('Template name is required.');
+      return;
+    }
+    setTemplateSaving(true);
+    setTemplateMsg('');
+    try {
+      await addDoc(collection(db, 'prescriptionTemplates'), {
+        name,
+        diagnosis: form.diagnosis || '',
+        medicines: normalizeTemplateMedicines(),
+        createdByEmail: auth.currentUser?.email || '',
+        createdAt: nowISO(),
+      });
+      setTemplateMsg('✓ Template saved!');
+      setTemplateName('');
+      setTimeout(() => {
+        setTemplateMsg('');
+        setShowTemplateModal(false);
+      }, 900);
+    } catch (e: any) {
+      setTemplateMsg('Could not save template: ' + (e.message || 'Unknown error'));
+    } finally {
+      setTemplateSaving(false);
+    }
   };
 
   // ── Print queue helpers ─────────────────────────────────────────────────────
@@ -789,7 +836,7 @@ export function OPD() {
                   )}
                   <div className="ml-auto flex items-center gap-2">
                     {prescriptions.length > 0 && (
-                      <button onClick={saveAsTemplate}
+                      <button onClick={openSaveTemplateModal}
                         className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-2 py-1 transition-colors">
                         <BookOpen className="w-3 h-3" /> Save as Template
                       </button>
@@ -802,6 +849,11 @@ export function OPD() {
                     )}
                   </div>
                 </div>
+                {templateMsg && !showTemplateModal && (
+                  <div className={`mb-3 rounded-lg px-3 py-2 text-xs font-medium ${templateMsg.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                    {templateMsg}
+                  </div>
+                )}
 
                 {/* Template selector */}
                 {showTemplates && (
@@ -1024,6 +1076,72 @@ export function OPD() {
               <button onClick={() => setShowModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
               <button onClick={handleSave} disabled={saving || modalTab === 'history'} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60">
                 {saving ? 'Saving...' : modalTab === 'history' ? 'Switch to Prescription to Save' : 'Save Consultation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Template Modal */}
+      {showTemplateModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center">
+                  <BookOpen className="w-4 h-4 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-gray-900">Save Prescription Template</h2>
+                  <p className="text-xs text-gray-500">{prescriptions.length} medicine{prescriptions.length !== 1 ? 's' : ''} will be saved</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { if (!templateSaving) { setShowTemplateModal(false); setTemplateMsg(''); } }}
+                className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                disabled={templateSaving}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {templateMsg && (
+                <div className={`rounded-lg px-3 py-2 text-sm font-medium ${templateMsg.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                  {templateMsg}
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Template Name</label>
+                <input
+                  value={templateName}
+                  onChange={e => setTemplateName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveAsTemplate(); }}
+                  placeholder='e.g. Viral Fever Protocol'
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+              </div>
+              {form.diagnosis && (
+                <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  <div className="text-xs font-semibold text-blue-700 mb-0.5">Diagnosis</div>
+                  <div className="text-sm text-blue-900">{form.diagnosis}</div>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 p-5 pt-0">
+              <button
+                onClick={() => { setShowTemplateModal(false); setTemplateMsg(''); }}
+                disabled={templateSaving}
+                className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveAsTemplate}
+                disabled={templateSaving}
+                className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60"
+              >
+                {templateSaving ? 'Saving...' : 'Save Template'}
               </button>
             </div>
           </div>
