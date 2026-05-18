@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestor
 import { db } from '../../firebase';
 import { formatCurrency, today } from '../lib/utils';
 import { Users, CalendarDays, BedDouble, FlaskConical, DollarSign, AlertTriangle, Clock, TrendingUp, Plus, UserPlus, ArrowRight, ShoppingCart, Package } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { format, subDays } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
@@ -133,7 +133,7 @@ export function Dashboard() {
             <button onClick={() => navigate('/pharmacy')}
               className="flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-100 transition-colors">
               <AlertTriangle className="w-4 h-4" />
-              {stats.lowStock} medicine{stats.lowStock !== 1 ? 's' : ''} low on stock — click to view
+              {stats.lowStock} medicine{stats.lowStock !== 1 ? 's' : ''} low on stock - click to view
             </button>
           )}
           {stats.expiringMeds > 0 && (
@@ -147,28 +147,32 @@ export function Dashboard() {
       )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map(card => (
           <button key={card.label} onClick={() => navigate(card.path)}
-            className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all text-left group">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2.5 ${colorMap[card.color]}`}>
-              <card.icon className="w-4 h-4" />
+            className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-100 transition-all text-left group">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-2xl font-bold text-gray-900">{loading ? '-' : card.value}</div>
+                <div className="text-xs text-gray-500 mt-1 leading-tight">{card.label}</div>
+              </div>
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${colorMap[card.color]}`}>
+                <card.icon className="w-4 h-4" />
+              </div>
             </div>
-            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{loading ? '—' : card.value}</div>
-            <div className="text-[11px] text-gray-500 mt-0.5 leading-tight">{card.label}</div>
           </button>
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Revenue Chart — OPD + POS */}
-        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm p-5">
+        {/* Revenue Chart - OPD + POS */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h2 className="font-semibold text-gray-900 dark:text-gray-100">Revenue — Last 7 Days (OPD + POS)</h2>
+              <h2 className="font-semibold text-gray-900">Revenue - Last 7 Days (OPD + POS)</h2>
               <p className="text-xs text-gray-400 mt-0.5">
                 OPD: <strong className="text-blue-600">{formatCurrency(stats.todayRevenue)}</strong>
-                &nbsp;·&nbsp; POS: <strong className="text-teal-600">{formatCurrency(stats.todayPosRevenue)}</strong>
+                &nbsp;/&nbsp; POS: <strong className="text-teal-600">{formatCurrency(stats.todayPosRevenue)}</strong>
               </p>
             </div>
             <TrendingUp className="w-5 h-5 text-blue-400" />
@@ -191,9 +195,9 @@ export function Dashboard() {
         {/* Right column: Activity + Low Stock */}
         <div className="space-y-5">
           {/* Activity Feed */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm p-5">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Recent Activity</h2>
+              <h2 className="font-semibold text-gray-900 text-sm">Recent Activity</h2>
               <button onClick={() => navigate('/audit')} className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
                 View all <ArrowRight className="w-3 h-3" />
               </button>
@@ -208,7 +212,7 @@ export function Dashboard() {
                       {a.action}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-xs font-medium text-gray-700 dark:text-gray-300 capitalize truncate">{a.entity} {a.detail ? `— ${a.detail}` : ''}</p>
+                      <p className="text-xs font-medium text-gray-700 capitalize truncate">{a.entity} {a.detail ? `- ${a.detail}` : ''}</p>
                       <p className="text-[10px] text-gray-400 truncate">{a.userEmail}</p>
                     </div>
                   </div>
