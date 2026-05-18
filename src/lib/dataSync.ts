@@ -3,6 +3,8 @@ import { db } from '../firebase';
 
 export const GLOBAL_DATA_COLLECTIONS = [
   'settings',
+  'counters',
+  'schedules',
   'users',
   'patients',
   'appointments',

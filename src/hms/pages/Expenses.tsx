@@ -4,6 +4,7 @@ import { db, auth } from '../../firebase';
 import { formatCurrency, formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, Edit2, Trash2, X, Receipt, TrendingDown, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import { useAppDialog } from '../../components/AppDialog';
 
 const CATEGORIES = [
   'Salaries & Wages', 'Medicine Purchase', 'Medical Equipment',
@@ -19,6 +20,7 @@ const emptyForm = {
 };
 
 export function Expenses() {
+  const { alert } = useAppDialog();
   const [expenses, setExpenses] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('');
@@ -102,7 +104,7 @@ export function Expenses() {
 
   const handleDelete = async (id: string) => {
     try { await deleteDoc(doc(db, 'expenses', id)); setDeleteConfirm(null); }
-    catch (e: any) { alert(e.message); }
+    catch (e: any) { await alert(e.message || 'Expense could not be deleted.', 'Delete Failed'); }
   };
 
   // Month options: current + last 5 months

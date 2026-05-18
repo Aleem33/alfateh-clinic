@@ -3,6 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'fireb
 import { db } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { Plus, Search, Edit2, Trash2, X, Truck, Phone, Mail, MapPin } from 'lucide-react';
+import { useAppDialog } from '../../components/AppDialog';
 
 const CATEGORIES = ['Medicines', 'Medical Equipment', 'Surgical Supplies', 'Lab Supplies', 'Other'];
 
@@ -22,6 +23,7 @@ function F({ label, value, onChange, type = 'text', placeholder = '', required =
 const emptyForm = { name: '', contact: '', email: '', address: '', category: 'Medicines', ntn: '', bankAccount: '', notes: '' };
 
 export function Suppliers() {
+  const { alert } = useAppDialog();
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -69,7 +71,7 @@ export function Suppliers() {
 
   const handleDelete = async (id: string) => {
     try { await deleteDoc(doc(db, 'suppliers', id)); setDeleteConfirm(null); }
-    catch (e: any) { alert(e.message); }
+    catch (e: any) { await alert(e.message || 'Supplier could not be deleted.', 'Delete Failed'); }
   };
 
   return (

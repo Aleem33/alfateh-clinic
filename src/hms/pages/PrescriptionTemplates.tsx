@@ -3,8 +3,10 @@ import { collection, onSnapshot, addDoc, deleteDoc, doc } from 'firebase/firesto
 import { db, auth } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { Stethoscope, Plus, Trash2, Search, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
+import { useAppDialog } from '../../components/AppDialog';
 
 export function PrescriptionTemplates() {
+  const { confirm } = useAppDialog();
   const [templates, setTemplates] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -24,7 +26,7 @@ export function PrescriptionTemplates() {
   );
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this template?')) return;
+    if (!(await confirm('Delete this template?', { title: 'Delete Template', confirmLabel: 'Delete' }))) return;
     setDeleting(id);
     await deleteDoc(doc(db, 'prescriptionTemplates', id));
     setDeleting(null);

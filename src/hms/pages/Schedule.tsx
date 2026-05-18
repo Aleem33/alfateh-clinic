@@ -5,6 +5,7 @@ import { nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Clock, Check, X, Save, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAppDialog } from '../../components/AppDialog';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const TIME_SLOTS = [
@@ -16,6 +17,7 @@ const TIME_SLOTS = [
 type Schedule = Record<string, string[]>; // day -> available slots
 
 export function Schedule() {
+  const { alert } = useAppDialog();
   const [doctors, setDoctors] = useState<any[]>([]);
   const [selectedDoctor, setSelectedDoctor] = useState<any | null>(null);
   const [schedule, setSchedule] = useState<Schedule>({});
@@ -83,7 +85,7 @@ export function Schedule() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e: any) {
-      alert('Failed to save: ' + e.message);
+      await alert('Failed to save: ' + (e.message || 'Unknown error'), 'Schedule Save Failed');
     } finally {
       setSaving(false);
     }

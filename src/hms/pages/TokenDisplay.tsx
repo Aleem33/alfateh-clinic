@@ -4,6 +4,12 @@ import { db } from '../../firebase';
 import { today, formatDate } from '../lib/utils';
 import { Monitor, ChevronRight, Clock, Users, CheckCircle } from 'lucide-react';
 
+const STAT_COLORS: Record<string, { bg: string; text: string }> = {
+  yellow: { bg: 'bg-yellow-100', text: 'text-yellow-600' },
+  blue: { bg: 'bg-blue-100', text: 'text-blue-600' },
+  green: { bg: 'bg-green-100', text: 'text-green-600' },
+};
+
 export function TokenDisplay() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [calling, setCalling] = useState<string | null>(null);
@@ -67,17 +73,19 @@ export function TokenDisplay() {
           { label: 'Waiting', value: waiting.length, color: 'yellow', icon: Clock },
           { label: 'Being Served', value: serving.length, color: 'blue', icon: Users },
           { label: 'Done Today', value: done.length, color: 'green', icon: CheckCircle },
-        ].map(s => (
+        ].map(s => {
+          const colors = STAT_COLORS[s.color] || STAT_COLORS.blue;
+          return (
           <div key={s.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-${s.color}-100`}>
-              <s.icon className={`w-6 h-6 text-${s.color}-600`} />
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${colors.bg}`}>
+              <s.icon className={`w-6 h-6 ${colors.text}`} />
             </div>
             <div>
               <div className="text-3xl font-bold text-gray-900">{s.value}</div>
               <div className="text-sm text-gray-500">{s.label}</div>
             </div>
           </div>
-        ))}
+        )})}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -6,10 +6,12 @@ import { logAudit } from '../lib/audit';
 import { Plus, Search, X, BedDouble, LogOut, Eye, Pill, FileText, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { differenceInDays } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAppDialog } from '../../components/AppDialog';
 
 const TREATMENT_TYPES = ['Medication', 'Procedure', 'Lab Test', 'Vitals', 'Nursing Note', 'Doctor Note'];
 
 export function IPD() {
+  const { alert } = useAppDialog();
   const [admissions, setAdmissions] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
@@ -110,7 +112,7 @@ export function IPD() {
       await logAudit('update', 'admission', showDischarge.id, `${showDischarge.patientName} discharged`);
 
       setShowDischarge(null); setDischargeSummary(''); setDischargeDate(today());
-    } catch (e: any) { alert('Discharge failed: ' + e.message); }
+    } catch (e: any) { await alert('Discharge failed: ' + (e.message || 'Unknown error'), 'Discharge Failed'); }
     finally { setSaving(false); }
   };
 
@@ -125,7 +127,7 @@ export function IPD() {
         addedBy: auth.currentUser?.email || 'staff', createdAt: nowISO(),
       });
       setTreatForm({ type: 'Medication', description: '', date: today(), time: '08:00' });
-    } catch (e: any) { alert(e.message); }
+    } catch (e: any) { await alert(e.message || 'Treatment could not be added.', 'Treatment Failed'); }
     finally { setSaving(false); }
   };
 

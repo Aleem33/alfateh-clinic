@@ -4,6 +4,7 @@ import { db, registerUser } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Search, Edit2, Trash2, X, UserCheck, UserX } from 'lucide-react';
+import { useAppDialog } from '../../components/AppDialog';
 
 const DEPARTMENTS = ['Administration', 'General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Cardiology', 'Neurology', 'Emergency', 'Laboratory', 'Pharmacy', 'Radiology', 'Nursing'];
 const ROLES: Record<string, string> = { admin: 'Admin', receptionist: 'Receptionist', doctor: 'Doctor', pharmacist: 'Pharmacist', lab_technician: 'Lab Technician', cashier: 'Cashier', nurse: 'Nurse' };
@@ -12,6 +13,7 @@ const QUALIFICATIONS = ['MBBS', 'MD', 'MS', 'FCPS', 'BDS', 'B.Pharm', 'Pharm-D',
 const emptyForm = { name: '', role: 'doctor', department: 'General Medicine', phone: '', email: '', qualification: '', salary: '', joiningDate: '', cnic: '', password: '' };
 
 export function Staff() {
+  const { confirm } = useAppDialog();
   const [staff, setStaff] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -79,7 +81,7 @@ export function Staff() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete staff member "${name}"?`)) return;
+    if (!(await confirm(`Delete staff member "${name}"?`, { title: 'Delete Staff Member', confirmLabel: 'Delete' }))) return;
     await deleteDoc(doc(db, 'staff', id));
     await logAudit('delete', 'staff', id, name);
   };

@@ -5,11 +5,13 @@ import { formatCurrency, formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Search, X, Printer, CheckCircle } from 'lucide-react';
 import { printBill } from '../lib/pdf';
+import { useAppDialog } from '../../components/AppDialog';
 
 const PAYMENT_METHODS = ['Cash', 'Card', 'Online Transfer', 'Cheque'];
 const ITEM_CATEGORIES = ['Consultation', 'Lab Test', 'Medicine', 'IPD Charges', 'Procedure', 'Other'];
 
 export function Billing() {
+  const { alert } = useAppDialog();
   const [bills, setBills] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [hospitalSettings, setHospitalSettings] = useState({ name: 'Al-Fateh Clinic', address: '', phone: '', footerNote: 'Thank you for choosing our hospital.' });
@@ -88,7 +90,7 @@ export function Billing() {
       const newStatus = newBalance === 0 ? 'paid' : newPaid > 0 ? 'partial' : 'pending';
       await updateDoc(doc(db, 'bills', payBill.id), { paid: newPaid, balance: newBalance, paymentStatus: newStatus });
       setPayBill(null); setPayAmount('');
-    } catch (e: any) { alert(e.message); }
+    } catch (e: any) { await alert(e.message || 'Payment could not be saved.', 'Payment Failed'); }
     finally { setPayingSaving(false); }
   };
 

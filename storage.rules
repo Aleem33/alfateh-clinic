@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function userRole() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin()      { return isAuth() && userRole() == 'admin'; }
+    function isDoctor()     { return isAuth() && userRole() == 'doctor'; }
+    function isLab()        { return isAuth() && (userRole() == 'lab' || userRole() == 'lab_technician'); }
+    function isClinical()   { return isDoctor(); }
+
+    match /labReports/{orderId}/{fileName} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isLab() || isClinical();
+      allow delete: if isAdmin();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

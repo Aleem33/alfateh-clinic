@@ -6,8 +6,10 @@ import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
 import { transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { withPrescriptionListUrdu } from '../lib/prescriptionOptions';
+import { useAppDialog } from '../../components/AppDialog';
 
 export function Prescriptions() {
+  const { alert } = useAppDialog();
   const [consultations, setConsultations] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [viewConsult, setViewConsult] = useState<any | null>(null);
@@ -53,7 +55,7 @@ export function Prescriptions() {
         diagnosis: c.diagnosis || '', date: c.date,
         prescriptions: c.prescriptions, status: 'pending', createdAt: nowISO(),
       });
-    } catch (e: any) { alert('Error: ' + e.message); }
+    } catch (e: any) { await alert('Error: ' + (e.message || 'Unknown error'), 'Send Failed'); }
   };
 
   const handlePrint = async (c: any) => {

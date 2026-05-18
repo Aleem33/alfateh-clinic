@@ -3,6 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, doc, increment } from 'fireb
 import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
+import { useAppDialog } from '../../components/AppDialog';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '10', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Drops', 'Cream/Ointment', 'Powder', 'Inhaler', 'IV Fluid', 'Other'];
@@ -46,6 +47,7 @@ function calcQty(freq: string, dur: string): number {
 }
 
 export function Pharmacy() {
+  const { alert } = useAppDialog();
   const [medicines, setMedicines]           = useState<any[]>([]);
   const [suppliers, setSuppliers]           = useState<any[]>([]);
   const [purchases, setPurchases]           = useState<any[]>([]);
@@ -110,7 +112,7 @@ export function Pharmacy() {
   const handleDispense = async () => {
     if (!selectedOrder) return;
     const toDispense = dispenseItems.filter(i => i.matchedId && i.qty > 0);
-    if (!toDispense.length) { alert('No medicines linked to stock. Please link each item.'); return; }
+    if (!toDispense.length) { await alert('No medicines linked to stock. Please link each item.', 'Nothing to Dispense'); return; }
     setSaving(true);
     try {
       for (const item of toDispense) {
@@ -121,7 +123,7 @@ export function Pharmacy() {
         dispensedItems: toDispense.map(i => ({ name: i.name, matchedName: i.matchedName, qty: i.qty, frequency: i.frequency, duration: i.duration })),
       });
       setSelectedOrder(null); setDispenseItems([]);
-    } catch (e: any) { alert('Dispense failed: ' + e.message); }
+    } catch (e: any) { await alert('Dispense failed: ' + (e.message || 'Unknown error'), 'Dispense Failed'); }
     finally { setSaving(false); }
   };
 

@@ -5,10 +5,12 @@ import { nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Edit2, Trash2, X, BedDouble, Building2, DoorOpen, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAppDialog } from '../../components/AppDialog';
 
 const BED_TYPES = ['General', 'Private', 'Semi-Private', 'ICU', 'CCU', 'Isolation', 'VIP'];
 
 export function BedManagement() {
+  const { alert, confirm } = useAppDialog();
   const [wards, setWards] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [beds, setBeds] = useState<any[]>([]);
@@ -62,7 +64,7 @@ export function BedManagement() {
   };
 
   const deleteWard = async (id: string, name: string) => {
-    if (!confirm(`Delete ward "${name}"? All rooms and beds in this ward will also be deleted.`)) return;
+    if (!(await confirm(`Delete ward "${name}"? All rooms and beds in this ward will also be deleted.`, { title: 'Delete Ward', confirmLabel: 'Delete' }))) return;
     // Delete all rooms and beds in this ward
     const wardRooms = rooms.filter(r => r.wardId === id);
     const wardBeds = beds.filter(b => b.wardId === id);
@@ -88,7 +90,7 @@ export function BedManagement() {
   };
 
   const deleteRoom = async (id: string, roomNo: string) => {
-    if (!confirm(`Delete room "${roomNo}"? All beds in this room will also be deleted.`)) return;
+    if (!(await confirm(`Delete room "${roomNo}"? All beds in this room will also be deleted.`, { title: 'Delete Room', confirmLabel: 'Delete' }))) return;
     const roomBeds = beds.filter(b => b.roomId === id);
     for (const b of roomBeds) await deleteDoc(doc(db, 'beds', b.id));
     await deleteDoc(doc(db, 'rooms', id));
@@ -112,8 +114,8 @@ export function BedManagement() {
 
   const deleteBed = async (id: string, bedNo: string) => {
     const occupied = admissions.find(a => a.bedId === id);
-    if (occupied) { alert(`Cannot delete — bed "${bedNo}" is currently occupied.`); return; }
-    if (!confirm(`Delete bed "${bedNo}"?`)) return;
+    if (occupied) { await alert(`Cannot delete - bed "${bedNo}" is currently occupied.`, 'Bed Occupied'); return; }
+    if (!(await confirm(`Delete bed "${bedNo}"?`, { title: 'Delete Bed', confirmLabel: 'Delete' }))) return;
     await deleteDoc(doc(db, 'beds', id));
   };
 

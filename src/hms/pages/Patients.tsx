@@ -4,6 +4,7 @@ import { db, getNextMRN } from '../../firebase';
 import { formatDate, formatCurrency, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Search, Plus, Edit2, Trash2, User, Phone, ChevronDown, X, FileText, BedDouble, FlaskConical, Receipt, History } from 'lucide-react';
+import { useAppDialog } from '../../components/AppDialog';
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'Unknown'];
 const GENDERS = ['Male', 'Female', 'Other'];
@@ -14,6 +15,7 @@ const emptyForm = {
 };
 
 export function Patients() {
+  const { confirm } = useAppDialog();
   const [patients, setPatients] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -95,7 +97,7 @@ export function Patients() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete patient "${name}"? This cannot be undone.`)) return;
+    if (!(await confirm(`Delete patient "${name}"? This cannot be undone.`, { title: 'Delete Patient', confirmLabel: 'Delete' }))) return;
     await deleteDoc(doc(db, 'patients', id));
     await logAudit('delete', 'patient', id, name);
   };

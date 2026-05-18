@@ -16,7 +16,8 @@ service cloud.firestore {
     function isDoctor()       { return isAuth() && userRole() == 'doctor'; }
     function isReceptionist() { return isAuth() && userRole() == 'receptionist'; }
     function isPharmacist()   { return isAuth() && userRole() == 'pharmacist'; }
-    function isLab()          { return isAuth() && userRole() == 'lab'; }
+    function isLab()          { return isAuth() && (userRole() == 'lab' || userRole() == 'lab_technician'); }
+    function isCashier()      { return isAuth() && userRole() == 'cashier'; }
     function isAccountant()   { return isAuth() && userRole() == 'accountant'; }
     function isNurse()        { return isAuth() && userRole() == 'nurse'; }
     function isClinical()     { return isDoctor() || isNurse(); }
@@ -105,14 +106,14 @@ service cloud.firestore {
     // ── Billing ────────────────────────────────────────────────────────────────
     match /bills/{doc} {
       allow read: if isAuth();
-      allow create, update: if isAdmin() || isReceptionist() || isAccountant();
+      allow create, update: if isAdmin() || isReceptionist() || isAccountant() || isCashier();
       allow delete: if isAdmin();
     }
 
     // ── Payments ───────────────────────────────────────────────────────────────
     match /payments/{doc} {
       allow read: if isAuth();
-      allow create, update: if isAdmin() || isReceptionist() || isAccountant();
+      allow create, update: if isAdmin() || isReceptionist() || isAccountant() || isCashier();
       allow delete: if isAdmin();
     }
 
@@ -130,15 +131,31 @@ service cloud.firestore {
     }
 
     // ── IPD ────────────────────────────────────────────────────────────────────
-    match /ipdAdmissions/{doc} {
+    match /admissions/{doc} {
       allow read: if isAuth();
       allow create, update: if isAdmin() || isClinical() || isReceptionist();
       allow delete: if isAdmin();
     }
 
+    match /wards/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin() || isClinical() || isReceptionist();
+    }
+
+    match /rooms/{doc} {
+      allow read: if isAuth();
+      allow write: if isAdmin() || isClinical() || isReceptionist();
+    }
+
     match /beds/{doc} {
       allow read: if isAuth();
       allow write: if isAdmin() || isClinical() || isReceptionist();
+    }
+
+    match /bedTreatments/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isClinical() || isReceptionist();
+      allow delete: if isAdmin();
     }
 
     // ── Audit Logs (append-only) ───────────────────────────────────────────────
@@ -174,9 +191,45 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /sales/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isPharmacist() || isCashier();
+      allow delete: if isAdmin();
+    }
+
     match /posPurchases/{doc} {
       allow read: if isAuth();
       allow create, update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    match /purchases/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    match /purchaseReturns/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isPharmacist();
+      allow delete: if isAdmin();
+    }
+
+    match /saleReturns/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isCashier();
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{doc} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin() || isCashier();
+      allow delete: if isAdmin();
+    }
+
+    match /customerPayments/{doc} {
+      allow read: if isAdmin() || isCashier();
+      allow create, update: if isAdmin() || isCashier();
       allow delete: if isAdmin();
     }
 

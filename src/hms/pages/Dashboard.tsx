@@ -59,7 +59,7 @@ export function Dashboard() {
       setChartData(days);
       setLoading(false);
     });
-    const u7 = onSnapshot(collection(db, 'posSales'), snap => {
+    const u7 = onSnapshot(collection(db, 'sales'), snap => {
       const sales = snap.docs.map(d => d.data()) as any[];
       const todayPos = sales.filter(s => (s.date || '').startsWith(todayStr)).reduce((s, p) => s + (p.total || 0), 0);
       setStats(p => ({ ...p, todayPosRevenue: todayPos }));

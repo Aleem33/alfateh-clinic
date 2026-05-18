@@ -9,6 +9,7 @@ import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescripti
 import { DOSAGE_OPTIONS, DURATION_OPTIONS, FREQUENCY_OPTIONS, INSTRUCTION_OPTIONS, getDosageUrdu, getDurationUrdu, getFrequencyUrdu, getInstructionUrdu, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAppDialog } from '../../components/AppDialog';
 
 const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology'];
 
@@ -23,6 +24,7 @@ function getPatientHistory(consultations: any[], patientId: string) {
 }
 
 export function OPD() {
+  const { alert } = useAppDialog();
   const navigate = useNavigate();
   const [consultations, setConsultations] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
@@ -338,7 +340,7 @@ export function OPD() {
         status:        'pending',
         createdAt:     nowISO(),
       });
-    } catch (e: any) { alert('Error sending to pharmacy: ' + e.message); }
+    } catch (e: any) { await alert('Error sending to pharmacy: ' + (e.message || 'Unknown error'), 'Pharmacy Send Failed'); }
   };
 
   const updatePrescription = (idx: number, key: string, val: string) => {
