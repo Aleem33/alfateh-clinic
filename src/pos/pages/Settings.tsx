@@ -11,8 +11,10 @@ const ALL_COLLECTIONS = [
   'saleReturns',
   'purchaseReturns',
   'customers',
+  'customerPayments',
   'suppliers',
   'expenses',
+  'pharmacyOrders',
 ];
 
 export function Settings() {

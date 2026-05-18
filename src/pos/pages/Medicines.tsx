@@ -98,7 +98,7 @@ export function Medicines() {
   };
 
   const handleDownloadTemplate = () => {
-    const headers = ['name','genericName','category','unitsPerBox','costPrice','salePrice','stock','expiryDate','batchNo','supplier'];
+    const headers = ['name','form','unitsPerBox','costPrice','retailPrice','unitPrice','stockBoxes','stockLoose','expiryDate','batchNo'];
     const csv = headers.join(',');
     downloadOrShare(csv, 'medicines_template.csv', 'text/csv;charset=utf-8;');
   };;
@@ -116,12 +116,15 @@ export function Medicines() {
           for (const row of rows) {
             if (!row.name || !row.expiryDate || !row.batchNo) continue;
             const unitsPerBox = parseInt(row.unitsPerBox || '1');
-            const totalStock  = (parseInt(row.stockBoxes || '0') * unitsPerBox) + parseInt(row.stockLoose || '0');
+            const stockFromBoxes = (parseInt(row.stockBoxes || '0') * unitsPerBox) + parseInt(row.stockLoose || '0');
+            const totalStock = row.stock ? parseInt(row.stock || '0') : stockFromBoxes;
+            const retailPrice = parseFloat(row.retailPrice || row.salePrice || '0');
+            const unitPrice = parseFloat(row.unitPrice || (unitsPerBox > 0 ? (retailPrice / unitsPerBox).toFixed(2) : '0'));
             await addDoc(collection(db, 'medicines'), {
               name: row.name, form: row.form || 'Tablet', unitsPerBox,
               costPrice:   parseFloat(row.costPrice   || '0'),
-              retailPrice: parseFloat(row.retailPrice || '0'),
-              unitPrice:   parseFloat(row.unitPrice   || '0'),
+              retailPrice,
+              unitPrice,
               stock: totalStock, expiryDate: row.expiryDate, batchNo: row.batchNo,
               createdAt: new Date().toISOString(),
             });

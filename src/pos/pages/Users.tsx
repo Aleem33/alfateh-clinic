@@ -1,296 +1,246 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { signOut, updateEmail, updatePassword } from 'firebase/auth';
-import { db, auth, secondaryAuth, registerSecondaryUser, handleFirestoreError, OperationType } from '../../firebase';
-import { Plus, Trash2, Shield, User as UserIcon, Edit2 } from 'lucide-react';
+import { db, registerSecondaryUser, usernameToEmail, handleFirestoreError, OperationType } from '../../firebase';
+import { Plus, Trash2, Shield, User as UserIcon, Edit2, X } from 'lucide-react';
 import { format } from 'date-fns';
+
+const ROLES = [
+  { value: 'cashier', label: 'Cashier (Billing Only)' },
+  { value: 'pharmacist', label: 'Pharmacist (Inventory & Billing)' },
+  { value: 'admin', label: 'Admin (Full Access)' },
+];
+
+const emptyForm = { name: '', username: '', password: '', role: 'cashier' };
 
 export function Users() {
   const [users, setUsers] = useState<any[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [infoMsg, setInfoMsg] = useState('');
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    role: 'cashier'
-  });
+  const [form, setForm] = useState(emptyForm);
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<any | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const usersList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUsers(usersList);
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'users'));
+    const unsub = onSnapshot(collection(db, 'users'), snap =>
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => a.name > b.name ? 1 : -1)),
+      error => handleFirestoreError(error, OperationType.GET, 'users')
+    );
     return () => unsub();
   }, []);
 
+  const openAdd = () => { setForm(emptyForm); setEditingId(null); setError(''); setShowModal(true); };
+  const openEdit = (u: any) => {
+    setForm({ name: u.name, username: u.username || '', password: '', role: u.role || 'cashier' });
+    setEditingId(u.id);
+    setError('');
+    setShowModal(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.name.trim()) { setError('Name is required.'); return; }
+    if (!editingId && !form.username.trim()) { setError('Username is required.'); return; }
+    if (!editingId && form.password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+
     setLoading(true);
     setError('');
-
     try {
       if (editingId) {
-        // Update existing user in Firestore
         await updateDoc(doc(db, 'users', editingId), {
-          name: formData.username,
-          email: formData.email,
-          role: formData.role
+          name: form.name.trim(),
+          role: form.role,
+          updatedAt: new Date().toISOString(),
         });
-
-        // If editing self, update Auth profile
-        if (editingId === auth.currentUser?.uid) {
-          if (formData.email && formData.email !== auth.currentUser.email) {
-            await updateEmail(auth.currentUser, formData.email);
-          }
-          if (formData.password) {
-            await updatePassword(auth.currentUser, formData.password);
-          }
-        } else if (formData.password || (formData.email && formData.email !== users.find(u => u.id === editingId)?.email)) {
-          // Cannot update other users' auth credentials from client SDK
-          setInfoMsg("Note: Firestore profile updated. However, changing the login Email or Password for OTHER users requires them to do it themselves, or an admin must use the Firebase Console.");
-          setTimeout(() => setInfoMsg(''), 6000);
-        }
-
-        setIsModalOpen(false);
-        setEditingId(null);
-        setFormData({ username: '', email: '', password: '', role: 'cashier' });
       } else {
-        // Create new user
-        const emailToUse = formData.email || `${formData.username.toLowerCase().replace(/\s+/g, '')}@alfateh-pharmacy.internal`;
-        
-        // Create user in Firebase Auth using secondary app
-        const userCredential = await registerSecondaryUser(emailToUse, formData.password);
-        
-        // Add user to Firestore
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
-          name: formData.username,
-          email: emailToUse,
-          role: formData.role,
-          createdAt: new Date().toISOString()
+        const username = form.username.trim().toLowerCase();
+        const cred = await registerSecondaryUser(username, form.password);
+        await setDoc(doc(db, 'users', cred.user.uid), {
+          name: form.name.trim(),
+          username,
+          email: usernameToEmail(username),
+          role: form.role,
+          app: 'pos',
+          createdAt: new Date().toISOString(),
         });
-
-        // Sign out the secondary auth instance so it doesn't interfere
-        await signOut(secondaryAuth);
-
-        setIsModalOpen(false);
-        setFormData({ username: '', email: '', password: '', role: 'cashier' });
       }
-    } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        setError('A user with this email/username already exists.');
-      } else if (err.code === 'auth/requires-recent-login') {
-        setError('Changing your email/password requires a recent login. Please log out and log back in.');
+      setShowModal(false);
+      setForm(emptyForm);
+      setEditingId(null);
+    } catch (e: any) {
+      const msg = e.message || 'Failed to save user.';
+      if (msg.includes('email-already-in-use')) {
+        setError('Username already taken. Choose a different one.');
       } else {
-        setError(err.message || 'Failed to save user.');
+        setError(msg);
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEdit = (user: any) => {
-    setFormData({
-      username: user.name,
-      email: user.email,
-      password: '', // Leave blank, only fill if they want to change it
-      role: user.role
-    });
-    setEditingId(user.id);
-    setError('');
-    setIsModalOpen(true);
-  };
-
-  const handleDelete = async (id: string) => {
-    setConfirmDeleteId(id);
-  };
-
   const confirmDelete = async () => {
-    if (!confirmDeleteId) return;
+    if (!confirmDeleteUser) return;
     try {
-      await deleteDoc(doc(db, 'users', confirmDeleteId));
+      await deleteDoc(doc(db, 'users', confirmDeleteUser.id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${confirmDeleteId}`);
+      handleFirestoreError(error, OperationType.DELETE, `users/${confirmDeleteUser.id}`);
     } finally {
-      setConfirmDeleteId(null);
+      setConfirmDeleteUser(null);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Info Toast */}
-      {infoMsg && (
-        <div className="fixed top-4 right-4 bg-blue-600 text-white px-5 py-3 rounded-lg shadow-lg z-50 max-w-sm text-sm">
-          {infoMsg}
-        </div>
-      )}
-
-      {/* Confirm Delete Modal */}
-      {confirmDeleteId && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
+    <div className="space-y-5">
+      {confirmDeleteUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
             <h3 className="text-lg font-bold text-gray-900 mb-2">Delete User</h3>
-            <p className="text-gray-600 mb-1">Are you sure you want to delete this user?</p>
-            <p className="text-sm text-amber-700 bg-amber-50 rounded p-2 mb-6">Note: This only removes their access role. Their auth account must be deleted in Firebase Console.</p>
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setConfirmDeleteId(null)} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700">Delete</button>
+            <p className="text-sm text-gray-600 mb-1">
+              Delete <strong>{confirmDeleteUser.name}</strong> from app access?
+            </p>
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-lg p-3 mb-6">
+              This removes their role record. The Firebase Auth account must be removed from Firebase Console if needed.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setConfirmDeleteUser(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700">
+                Delete
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
-        <button
-          onClick={() => {
-            setEditingId(null);
-            setError('');
-            setFormData({ username: '', email: '', password: '', role: 'cashier' });
-            setIsModalOpen(true);
-          }}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700"
-        >
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Users</h1>
+          <p className="text-sm text-gray-500">{users.length} user accounts</p>
+        </div>
+        <button onClick={openAdd}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 text-sm font-medium">
           <Plus className="w-4 h-4" /> Add User
         </button>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full">
             <thead>
-              <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-100">
-                <th className="p-4 font-medium">Name</th>
-                <th className="p-4 font-medium">Email</th>
-                <th className="p-4 font-medium">Role</th>
-                <th className="p-4 font-medium">Created At</th>
-                <th className="p-4 font-medium text-right">Actions</th>
+              <tr className="bg-gray-50 text-gray-500 text-xs font-semibold uppercase border-b border-gray-100">
+                <th className="px-4 py-3 text-left">Name</th>
+                <th className="px-4 py-3 text-left">Username</th>
+                <th className="px-4 py-3 text-left">Role</th>
+                <th className="px-4 py-3 text-left">Created</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
-              {users.map((user) => (
-                <tr key={user.id} className="hover:bg-gray-50">
-                  <td className="p-4 font-medium text-gray-900 flex items-center gap-2">
-                    <UserIcon className="w-4 h-4 text-gray-400" />
-                    {user.name}
+            <tbody className="divide-y divide-gray-50">
+              {users.map(u => (
+                <tr key={u.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center shrink-0">
+                        <UserIcon className="w-3.5 h-3.5 text-blue-600" />
+                      </div>
+                      {u.name}
+                    </div>
                   </td>
-                  <td className="p-4 text-gray-600">{user.email}</td>
-                  <td className="p-4">
+                  <td className="px-4 py-3 text-sm text-gray-500 font-mono">
+                    {u.username || u.email?.split('@')[0] || '-'}
+                  </td>
+                  <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 
-                      user.role === 'pharmacist' ? 'bg-blue-100 text-blue-800' : 
+                      u.role === 'admin' ? 'bg-purple-100 text-purple-800' :
+                      u.role === 'pharmacist' ? 'bg-blue-100 text-blue-800' :
                       'bg-green-100 text-green-800'
                     }`}>
-                      {user.role === 'admin' && <Shield className="w-3 h-3" />}
-                      {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                      {u.role === 'admin' && <Shield className="w-3 h-3" />}
+                      {u.role?.charAt(0).toUpperCase() + u.role?.slice(1)}
                     </span>
                   </td>
-                  <td className="p-4 text-gray-600">
-                    {user.createdAt ? format(new Date(user.createdAt), 'MMM dd, yyyy') : 'N/A'}
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {u.createdAt ? format(new Date(u.createdAt), 'MMM dd, yyyy') : '-'}
                   </td>
-                  <td className="p-4 flex justify-end gap-2">
-                    <button 
-                      onClick={() => handleEdit(user)} 
-                      className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                      title="Edit User"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => handleDelete(user.id)} 
-                      className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                      title="Delete User"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => openEdit(u)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => setConfirmDeleteUser(u)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {users.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="p-8 text-center text-gray-500">
-                    No users found.
-                  </td>
-                </tr>
+                <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400 text-sm">No users found</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal */}
-      {isModalOpen && (
+      {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-6 border-b border-gray-100">
-              <h2 className="text-xl font-bold text-gray-900">
-                {editingId ? 'Edit User' : 'Add New User'}
-              </h2>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">{editingId ? 'Edit User' : 'Add New User'}</h2>
+              <button onClick={() => { setShowModal(false); setError(''); }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              {error && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm">
-                  {error}
-                </div>
+            <form onSubmit={handleSubmit} className="p-5 space-y-4">
+              {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm border border-red-100">{error}</div>}
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Full Name *</label>
+                <input required type="text" value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g. Ahmed Khan" />
+              </div>
+
+              {!editingId && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Username * (used to log in)</label>
+                    <input required type="text" value={form.username}
+                      onChange={e => setForm(f => ({ ...f, username: e.target.value.replace(/\s+/g, '.').toLowerCase() }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      placeholder="e.g. ahmed.cashier" />
+                    <p className="text-xs text-gray-400 mt-1">No spaces. Use dots instead, for example john.doe.</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Password *</label>
+                    <input required type="password" minLength={6} value={form.password}
+                      onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Min 6 characters" />
+                  </div>
+                </>
               )}
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input 
-                  required 
-                  type="text" 
-                  value={formData.username} 
-                  onChange={e => setFormData({...formData, username: e.target.value})} 
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" 
-                  placeholder="e.g. John Doe"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input 
-                  required={!editingId}
-                  type="email" 
-                  value={formData.email} 
-                  onChange={e => setFormData({...formData, email: e.target.value})} 
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" 
-                  placeholder="e.g. john@alfateh-pharmacy.internal"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {editingId ? 'New Password (leave blank to keep current)' : 'Password'}
-                </label>
-                <input 
-                  required={!editingId}
-                  type="password" 
-                  minLength={6}
-                  value={formData.password} 
-                  onChange={e => setFormData({...formData, password: e.target.value})} 
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" 
-                  placeholder={editingId ? 'Enter new password...' : ''}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select 
-                  value={formData.role} 
-                  onChange={e => setFormData({...formData, role: e.target.value})} 
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="cashier">Cashier (Billing Only)</option>
-                  <option value="pharmacist">Pharmacist (Inventory & Suppliers)</option>
-                  <option value="admin">Admin (Full Access)</option>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Role *</label>
+                <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
-              <div className="pt-4 flex justify-end gap-3">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md font-medium">
-                  Cancel
-                </button>
-                <button type="submit" disabled={loading} className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50">
+
+              {editingId && (
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2">
+                  Username and password changes are handled by Firebase Auth. This screen updates the display name and role.
+                </p>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => { setShowModal(false); setError(''); }}
+                  className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={loading}
+                  className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
                   {loading ? 'Saving...' : editingId ? 'Save Changes' : 'Create User'}
                 </button>
               </div>
