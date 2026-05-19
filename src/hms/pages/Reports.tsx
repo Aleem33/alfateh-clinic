@@ -55,7 +55,7 @@ export function Reports() {
       onSnapshot(collection(db, 'labOrders'),      s => setLabOrders(s.docs.map(d => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'expenses'),       s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'medicines'),      s => setMedicines(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'posSales'),       s => setPosSales(s.docs.map(d => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, 'sales'),          s => setPosSales(s.docs.map(d => ({ id: d.id, ...d.data() })))),
     ];
     return () => u.forEach(f => f());
   }, []);

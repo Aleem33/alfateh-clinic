@@ -115,7 +115,7 @@ export function Login({ onLoginSuccess, onBack }: Props) {
           </p>
         </div>
 
-        <p className="text-center text-blue-300/50 text-xs mt-6">Al-Fateh Clinic HMS v2.0</p>
+        <p className="text-center text-blue-300/50 text-xs mt-6">Al-Fateh Clinic HMS v{__APP_VERSION__}</p>
       </div>
     </div>
   );
