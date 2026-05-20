@@ -1,18 +1,33 @@
-const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, screen } = require('electron');
 const path = require('path');
 const { initAutoUpdater, checkForUpdates, installUpdate } = require('./updater');
 
 let mainWindow;
 
+function getInitialWindowBounds() {
+  const { workAreaSize } = screen.getPrimaryDisplay();
+  const margin = 24;
+  const availableWidth = Math.max(640, workAreaSize.width - margin);
+  const availableHeight = Math.max(480, workAreaSize.height - margin);
+  const width = Math.min(1440, availableWidth);
+  const height = Math.min(900, availableHeight);
+
+  return {
+    width,
+    height,
+    minWidth: Math.min(1100, width),
+    minHeight: Math.min(700, height),
+  };
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, 'assets', 'icon.png');
+  const windowBounds = getInitialWindowBounds();
 
   mainWindow = new BrowserWindow({
     icon: iconPath,
-    width: 1440,
-    height: 900,
-    minWidth: 1100,
-    minHeight: 700,
+    ...windowBounds,
+    center: true,
     frame: false,
     webPreferences: {
       nodeIntegration: false,
@@ -35,6 +50,7 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
     mainWindow.show();
     mainWindow.focus();
   });
