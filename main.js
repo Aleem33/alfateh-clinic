@@ -13,6 +13,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
+    frame: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -38,6 +39,14 @@ function createWindow() {
     mainWindow.focus();
   });
 
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('window:maximized-changed', true);
+  });
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('window:maximized-changed', false);
+  });
+
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -48,6 +57,22 @@ function getMainWindow() {
 ipcMain.handle('app:get-version', () => app.getVersion());
 ipcMain.handle('updater:check', () => checkForUpdates());
 ipcMain.handle('updater:install', () => installUpdate());
+ipcMain.handle('window:minimize', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+ipcMain.handle('window:toggle-maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return false;
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+  return win.isMaximized();
+});
+ipcMain.handle('window:close', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close();
+});
+ipcMain.handle('window:is-maximized', (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.isMaximized() || false;
+});
 
 app.whenReady().then(() => {
   createWindow();

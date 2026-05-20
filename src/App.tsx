@@ -8,6 +8,7 @@ import { HMSApp } from './hms/HMSApp';
 import { POSApp } from './pos/POSApp';
 import { GlobalAppNotifications } from './components/GlobalAppNotifications';
 import { AppDialogProvider } from './components/AppDialog';
+import { DesktopTitleBar } from './components/DesktopTitleBar';
 
 type AppMode = 'hms' | 'pos' | null;
 
@@ -91,7 +92,14 @@ export default function App() {
   const withShell = (node: ReactNode) => (
     <AppDialogProvider>
       <GlobalAppNotifications />
-      {node}
+      {window.electronAPI ? (
+        <div className="electron-app-shell h-screen overflow-hidden bg-slate-100">
+          <DesktopTitleBar />
+          <div className="electron-app-content overflow-hidden">
+            {node}
+          </div>
+        </div>
+      ) : node}
     </AppDialogProvider>
   );
 

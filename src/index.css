@@ -6,6 +6,31 @@
 
 * { font-family: 'DM Sans', sans-serif; }
 
+:root {
+  --desktop-titlebar-height: 2.25rem;
+}
+
+.desktop-titlebar {
+  -webkit-app-region: drag;
+}
+
+.desktop-window-controls,
+.desktop-window-controls button {
+  -webkit-app-region: no-drag;
+}
+
+.electron-app-content {
+  height: calc(100vh - var(--desktop-titlebar-height));
+}
+
+.electron-app-content .h-screen {
+  height: calc(100vh - var(--desktop-titlebar-height));
+}
+
+.electron-app-content .min-h-screen {
+  min-height: calc(100vh - var(--desktop-titlebar-height));
+}
+
 /* Urdu text utility */
 .font-urdu {
   font-family: 'Noto Nastaliq Urdu', serif !important;
