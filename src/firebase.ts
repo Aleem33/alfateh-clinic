@@ -12,8 +12,8 @@ import {
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc,
-  increment, enableIndexedDbPersistence, runTransaction,
+  initializeFirestore, doc, getDoc, setDoc, updateDoc,
+  increment, persistentLocalCache, persistentMultipleTabManager, runTransaction,
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -21,16 +21,15 @@ import firebaseConfig from '../firebase-applet-config.json';
 // ── App instances ─────────────────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db   = getFirestore(app);
+export const db   = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
+});
 export const storage = getStorage(app);
 
 // Keep user logged in across sessions
 setPersistence(auth, browserLocalPersistence).catch(console.error);
-
-// Enable offline support (data cached locally when internet drops)
-enableIndexedDbPersistence(db).catch(() => {
-  // Fails silently if multiple tabs open — that's fine
-});
 
 // Secondary app — creates new users without logging out the current admin
 const secondaryApp = initializeApp(firebaseConfig, 'SecondaryApp');
