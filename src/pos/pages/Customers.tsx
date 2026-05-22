@@ -6,6 +6,7 @@ import {
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { printOrShare } from '../lib/nativeUtils';
+import { getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
 import {
   Plus, Edit2, Trash2, Search, ChevronDown, ChevronUp,
   Eye, X, Wallet, CheckCircle, Clock, CreditCard, Receipt, Printer
@@ -152,7 +153,7 @@ export function Customers() {
     const totalPaidAmt = custSales.reduce((s, r) => s + (r.amountPaid ?? r.total ?? 0), 0);
     const totalPending = custSales.reduce((s, r) => s + (r.pendingAmount || 0), 0);
 
-    const rows = custSales.map((sale, idx) => {
+    const rows = custSales.map((sale) => {
       const itemLines = (sale.items || []).map((item: any) =>
         `<tr>
           <td style="padding:3px 6px;color:#555;font-size:11px;">${item.name}</td>
@@ -165,7 +166,7 @@ export function Customers() {
       return `
         <div style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
           <div style="background:#f3f4f6;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;">
-            <span style="font-weight:700;font-size:12px;color:#374151;">Bill #${idx + 1} &nbsp;—&nbsp; ${sale.date ? new Date(sale.date).toLocaleDateString('en-PK') : 'N/A'}</span>
+            <span style="font-weight:700;font-size:12px;color:#374151;">Receipt #${getSaleReceiptNo(sale)} &nbsp;-&nbsp; ${sale.date ? new Date(sale.date).toLocaleDateString('en-PK') : 'N/A'}</span>
             ${pending > 0
               ? `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;">DUE Rs.${pending.toFixed(2)}</span>`
               : `<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;">✓ PAID</span>`
@@ -369,6 +370,7 @@ export function Customers() {
                                   <p className="text-xs font-semibold text-gray-700">
                                     {sale.date ? format(new Date(sale.date), 'MMM dd, yyyy') : 'N/A'}
                                   </p>
+                                  <p className="text-xs text-blue-500 font-mono">{getSaleReceiptLabel(sale)}</p>
                                   <p className="text-xs text-gray-400">{sale.items?.length || 0} item(s)</p>
                                 </div>
                                 <button onClick={() => setSelectedSale(sale)}
@@ -417,6 +419,7 @@ export function Customers() {
                             <thead>
                               <tr className="bg-blue-100 text-blue-700 text-xs font-semibold uppercase tracking-wider">
                                 <th className="p-3">Date</th>
+                                <th className="p-3">Receipt No</th>
                                 <th className="p-3">Items</th>
                                 <th className="p-3 text-right">Total</th>
                                 <th className="p-3 text-right">Paid</th>
@@ -430,6 +433,7 @@ export function Customers() {
                                   <td className="p-3 text-gray-700 whitespace-nowrap">
                                     {sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
                                   </td>
+                                  <td className="p-3 text-gray-500 font-mono text-xs">{getSaleReceiptNo(sale)}</td>
                                   <td className="p-3 text-gray-600">{sale.items?.length || 0} item(s)</td>
                                   <td className="p-3 text-right font-semibold text-gray-900">{formatCurrency(sale.total)}</td>
                                   <td className="p-3 text-right text-green-700 font-medium">{formatCurrency(sale.amountPaid ?? sale.total)}</td>
@@ -449,7 +453,7 @@ export function Customers() {
                             </tbody>
                             <tfoot>
                               <tr className="bg-blue-50 border-t-2 border-blue-200 text-xs font-bold">
-                                <td className="p-3 text-blue-800" colSpan={2}>TOTAL — {custSales.length} sale(s)</td>
+                                <td className="p-3 text-blue-800" colSpan={3}>TOTAL — {custSales.length} sale(s)</td>
                                 <td className="p-3 text-right text-blue-900">{formatCurrency(custSales.reduce((s, r) => s + (r.total || 0), 0))}</td>
                                 <td className="p-3 text-right text-green-700">{formatCurrency(custSales.reduce((s, r) => s + (r.amountPaid ?? r.total ?? 0), 0))}</td>
                                 <td className="p-3 text-right text-red-600">{formatCurrency(custSales.reduce((s, r) => s + (r.pendingAmount || 0), 0))}</td>
@@ -657,7 +661,7 @@ export function Customers() {
                 <h2 className="text-lg font-bold text-gray-900">Sale Details</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
                   {selectedSale.date ? format(new Date(selectedSale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
-                  {' '}• ID: {selectedSale.id.slice(0, 10)}…
+                  {' '}- {getSaleReceiptLabel(selectedSale)}
                 </p>
               </div>
               <button onClick={() => setSelectedSale(null)}

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
 import { printOrShare } from '../lib/nativeUtils';
-import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
+import { db, auth, handleFirestoreError, OperationType, getNextPosSaleReturnNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
+import { getReturnNo, getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -15,10 +16,10 @@ function SaleReturnSlip({ data }: { data: any }) {
         <div style={{ fontWeight: 'bold', letterSpacing: '2px', marginTop: '2px' }}>SALE RETURN SLIP</div>
         <div>{format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
         <div style={{ fontSize: '10px', marginTop: '2px' }}>
-          Return ID: {data.id?.slice(0, 10) ?? 'N/A'}
+          Return No: {getReturnNo(data)}
         </div>
         <div style={{ fontSize: '10px' }}>
-          Orig. Sale: {data.originalSaleId?.slice(0, 10)}…
+          Orig. Receipt: {data.originalReceiptNo || 'Unnumbered'}
         </div>
       </div>
 
@@ -96,6 +97,7 @@ export function SalesReturns() {
   }, []);
 
   const filteredSales = sales.filter(s =>
+    getSaleReceiptNo(s, '').toLowerCase().includes(search.toLowerCase()) ||
     s.id.toLowerCase().includes(search.toLowerCase()) ||
     (s.date && format(new Date(s.date), 'MMM dd, yyyy').toLowerCase().includes(search.toLowerCase()))
   );
@@ -161,8 +163,8 @@ export function SalesReturns() {
           <div style="font-size:16px;font-weight:bold">Al-Fateh Pharmacy</div>
           <div style="font-weight:bold;letter-spacing:2px;margin-top:2px">SALE RETURN SLIP</div>
           <div>${format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
-          <div style="font-size:10px;margin-top:2px">Return ID: ${data.id?.slice(0,10) ?? 'N/A'}</div>
-          <div style="font-size:10px">Orig. Sale: ${data.originalSaleId?.slice(0,10)}...</div>
+          <div style="font-size:10px;margin-top:2px">Return No: ${getReturnNo(data)}</div>
+          <div style="font-size:10px">Orig. Receipt: ${data.originalReceiptNo || 'Unnumbered'}</div>
         </div>
         <div style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:6px 0;margin-bottom:6px">
           <table style="width:100%;border-collapse:collapse;font-size:11px">
@@ -201,6 +203,7 @@ export function SalesReturns() {
     if (!hasAnyReturn || !selectedSale || submitting) return;
     setSubmitting(true);
     try {
+      const returnNo = await getNextPosSaleReturnNo();
       const itemsToReturn = returnItems.filter(i => i.returnQty > 0).map(i => ({
         cartItemId: i.cartItemId,
         medicineId: i.medicineId,
@@ -213,7 +216,9 @@ export function SalesReturns() {
       }));
 
       const returnDoc = {
+        returnNo,
         originalSaleId: selectedSale.id,
+        originalReceiptNo: getSaleReceiptNo(selectedSale),
         originalDate: selectedSale.date,
         items: itemsToReturn,
         totalRefund: returnTotal,
@@ -263,7 +268,7 @@ export function SalesReturns() {
               <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by Sale ID or date..."
+                placeholder="Search by receipt no or date..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -279,7 +284,7 @@ export function SalesReturns() {
                     <p className="font-medium text-gray-900 text-sm">
                       {sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
                     </p>
-                    <p className="text-xs text-gray-400 font-mono">ID: {sale.id.slice(0, 12)}…</p>
+                    <p className="text-xs text-gray-400 font-mono">{getSaleReceiptLabel(sale)}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{sale.items?.length || 0} items • {formatCurrency(sale.total)}</p>
                     {returned.length > 0 && (
                       <span className="inline-block mt-1 text-[10px] bg-orange-100 text-orange-700 font-semibold px-1.5 py-0.5 rounded">
@@ -315,7 +320,8 @@ export function SalesReturns() {
                     <p className="text-sm font-medium text-gray-900">
                       {r.date ? format(new Date(r.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
                     </p>
-                    <p className="text-xs text-gray-400">Orig. Sale: {r.originalSaleId?.slice(0, 10)}…</p>
+                    <p className="text-xs text-gray-400 font-mono">Return #{getReturnNo(r)}</p>
+                    <p className="text-xs text-gray-400">Orig. Receipt: {r.originalReceiptNo || 'Unnumbered'}</p>
                     {r.reason && <p className="text-xs text-gray-500 mt-0.5 italic">"{r.reason}"</p>}
                     <p className="text-xs text-gray-500 mt-1">{r.items?.length} item(s) returned</p>
                   </div>

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
 import { printOrShare, printPageOrShare } from '../lib/nativeUtils';
-import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
+import { db, auth, handleFirestoreError, OperationType, getNextPosReceiptNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
+import { getSaleReceiptNo } from '../lib/receiptNumbers';
 import {
   Search, Plus, Minus, Trash2, Printer, ShoppingCart, Tag,
   User, UserCheck, UserX, ChevronDown, Percent, DollarSign,
@@ -222,7 +223,9 @@ export function Billing() {
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     try {
+      const receiptNo = await getNextPosReceiptNo();
       const saleData: any = {
+        receiptNo,
         items: cart, grossSubtotal, totalItemDiscounts,
         subtotal: subtotalAfterItemDisc, orderDiscount: orderDiscountAmount,
         discount: orderDiscountAmount + totalItemDiscounts, total: grandTotal,
@@ -680,7 +683,7 @@ export function Billing() {
           <h2 className="text-xl font-bold">Al-Fateh Pharmacy</h2>
           <p>Receipt</p>
           <p>{lastReceipt?.date ? format(new Date(lastReceipt.date), 'dd/MM/yyyy HH:mm') : format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
-          {lastReceipt?.id && <p className="text-xs mt-1">ID: {lastReceipt.id.slice(0, 8)}</p>}
+          {lastReceipt && <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(lastReceipt)}</p>}
           <p className="text-xs mt-1 uppercase font-bold border border-black inline-block px-2 py-0.5">
             {lastReceipt?.customerType || customerType}
           </p>

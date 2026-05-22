@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, orderBy, doc, updateDoc } from 'firebase
 import { printPageOrShare, downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
+import { getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
 import {
   Search, FileText, Eye, X, Printer, Download,
   Users, Building2, LayoutList, Table2,
@@ -66,6 +67,7 @@ export function SalesHistory() {
   const applyFilters = (list: any[], tf: typeof typeFilter, df: string, dt: string, q: string) =>
     list.filter(s => {
       const matchSearch =
+        getSaleReceiptNo(s, '').toLowerCase().includes(q.toLowerCase()) ||
         s.id.toLowerCase().includes(q.toLowerCase()) ||
         (s.date && format(new Date(s.date), 'MMM dd, yyyy').toLowerCase().includes(q.toLowerCase())) ||
         (s.customerName && s.customerName.toLowerCase().includes(q.toLowerCase())) ||
@@ -201,7 +203,7 @@ export function SalesHistory() {
   const doExport = () => {
     const exportSales = applyFilters(sales, exportType, exportDateFrom, exportDateTo, '');
     const rows: string[][] = [
-      ['Date & Time','Sale ID','Sale Type','Customer','Item Name','Sell Type','Quantity','Unit Price','Item Total','Gross Subtotal','Sale Discount','Sale Total','Amount Paid','Pending Amount'],
+      ['Date & Time','Receipt No','Sale Type','Customer','Item Name','Sell Type','Quantity','Unit Price','Item Total','Gross Subtotal','Sale Discount','Sale Total','Amount Paid','Pending Amount'],
     ];
     exportSales.forEach(sale => {
       const dateStr  = sale.date ? format(new Date(sale.date), 'dd/MM/yyyy HH:mm') : 'N/A';
@@ -213,7 +215,7 @@ export function SalesHistory() {
       if (sale.items?.length) {
         sale.items.forEach((item: any, idx: number) => {
           rows.push([
-            dateStr, sale.id, saleType, custName,
+            dateStr, getSaleReceiptNo(sale), saleType, custName,
             item.name || '', item.sellType || '',
             String(item.quantity || 0), String(item.price || 0), String(item.total || 0),
             idx === 0 ? String(gross)              : '',
@@ -224,7 +226,7 @@ export function SalesHistory() {
           ]);
         });
       } else {
-        rows.push([dateStr, sale.id, saleType, custName, '(no items)', '', '', '', '',
+        rows.push([dateStr, getSaleReceiptNo(sale), saleType, custName, '(no items)', '', '', '', '',
           String(gross), String(sale.discount || 0), String(sale.total || 0), String(paid), String(pend)]);
       }
     });
@@ -266,7 +268,7 @@ export function SalesHistory() {
             <h2 className="text-xl font-bold">Al-Fateh Pharmacy</h2>
             <p>Receipt (Reprint)</p>
             <p>{selectedSale.date ? format(new Date(selectedSale.date), 'dd/MM/yyyy HH:mm') : 'N/A'}</p>
-            <p className="text-xs mt-1">ID: {selectedSale.id.slice(0, 8)}</p>
+            <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(selectedSale)}</p>
             {selectedSale.customerName && <p className="text-xs mt-1">Customer: {selectedSale.customerName}</p>}
           </div>
           <table className="w-full mb-4">
@@ -344,7 +346,7 @@ export function SalesHistory() {
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder="Search by date, customer, item…" value={search}
+                <input type="text" placeholder="Search by receipt no, date, customer, item..." value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
               </div>
@@ -463,7 +465,7 @@ export function SalesHistory() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100 text-sm">
                     <th className={thClass(summarySort.col === 'date')}     onClick={() => toggleSummarySort('date')}><span className="flex items-center">Date & Time <SortIcon col="date" sort={summarySort} /></span></th>
-                    <th className="p-4 font-medium text-gray-500">Sale ID</th>
+                    <th className="p-4 font-medium text-gray-500">Receipt No</th>
                     <th className="p-4 font-medium text-gray-500">Customer</th>
                     <th className={thClass(summarySort.col === 'type')}     onClick={() => toggleSummarySort('type')}><span className="flex items-center">Type <SortIcon col="type" sort={summarySort} /></span></th>
                     <th className={thClass(summarySort.col === 'items')}    onClick={() => toggleSummarySort('items')}><span className="flex items-center">Items <SortIcon col="items" sort={summarySort} /></span></th>
@@ -477,7 +479,7 @@ export function SalesHistory() {
                   {sortedSummary.map(sale => (
                     <tr key={sale.id} className="hover:bg-gray-50">
                       <td className="p-4 text-gray-900 font-medium">{sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}</td>
-                      <td className="p-4 text-gray-500 font-mono text-sm">{sale.id.slice(0, 8)}…</td>
+                      <td className="p-4 text-gray-500 font-mono text-sm">{getSaleReceiptNo(sale)}</td>
                       <td className="p-4 text-sm">
                         {sale.customerName ? <span className="font-medium text-gray-800">{sale.customerName}</span> : <span className="text-gray-300 italic text-xs">—</span>}
                         {sale.pendingAmount > 0 && <span className="ml-1.5 inline-block px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold">Due {formatCurrency(sale.pendingAmount)}</span>}
@@ -529,7 +531,7 @@ export function SalesHistory() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
                     <th className={thClass(excelSort.col === 'date')}      onClick={() => toggleExcelSort('date')}><span className="flex items-center">Date & Time <SortIcon col="date" sort={excelSort} /></span></th>
-                    <th className="p-4 font-medium text-gray-500 whitespace-nowrap">Sale ID</th>
+                    <th className="p-4 font-medium text-gray-500 whitespace-nowrap">Receipt No</th>
                     <th className={thClass(excelSort.col === 'type')}      onClick={() => toggleExcelSort('type')}><span className="flex items-center">Type <SortIcon col="type" sort={excelSort} /></span></th>
                     <th className={thClass(excelSort.col === 'itemName')}  onClick={() => toggleExcelSort('itemName')}><span className="flex items-center">Item Name <SortIcon col="itemName" sort={excelSort} /></span></th>
                     <th className={thClass(excelSort.col === 'sellType')}  onClick={() => toggleExcelSort('sellType')}><span className="flex items-center">Sell Type <SortIcon col="sellType" sort={excelSort} /></span></th>
@@ -545,7 +547,7 @@ export function SalesHistory() {
                   {sortedExcel.map(({ sale, item }, idx) => (
                     <tr key={`${sale.id}-${idx}`} className="hover:bg-gray-50">
                       <td className="p-3 text-gray-700 whitespace-nowrap">{sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}</td>
-                      <td className="p-3 text-gray-400 font-mono text-xs">{sale.id.slice(0, 8)}…</td>
+                      <td className="p-3 text-gray-400 font-mono text-xs">{getSaleReceiptNo(sale)}</td>
                       <td className="p-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${sale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{sale.customerType || 'customer'}</span></td>
                       <td className="p-3 text-gray-900 font-medium">{item?.name || <span className="text-gray-400 italic">—</span>}</td>
                       <td className="p-3">{item ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold uppercase ${item.sellType === 'box' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{item.sellType}</span> : '—'}</td>
@@ -592,7 +594,7 @@ export function SalesHistory() {
                   <h2 className="text-lg font-bold text-gray-900">Sale Details</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {selectedSale.date ? format(new Date(selectedSale.date), 'MMM dd, yyyy HH:mm') : 'N/A'} •{' '}
-                    <span className="font-mono">{selectedSale.id.slice(0, 10)}…</span>
+                    <span className="font-mono">{getSaleReceiptLabel(selectedSale)}</span>
                     <span className={`ml-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${selectedSale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                       {selectedSale.customerType || 'customer'}
                     </span>
@@ -717,7 +719,7 @@ export function SalesHistory() {
                 <div>
                   <h2 className="text-lg font-bold text-gray-900">Edit Sale</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {editingSale.date ? format(new Date(editingSale.date), 'MMM dd, yyyy HH:mm') : 'N/A'} • <span className="font-mono">{editingSale.id.slice(0,10)}…</span>
+                    {editingSale.date ? format(new Date(editingSale.date), 'MMM dd, yyyy HH:mm') : 'N/A'} - <span className="font-mono">{getSaleReceiptLabel(editingSale)}</span>
                   </p>
                 </div>
                 <button onClick={() => setEditingSale(null)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full"><X className="w-5 h-5" /></button>

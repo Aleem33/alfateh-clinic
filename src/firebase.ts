@@ -13,7 +13,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc,
-  increment, enableIndexedDbPersistence,
+  increment, enableIndexedDbPersistence, runTransaction,
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -80,6 +80,31 @@ export async function getNextBillNo(): Promise<string> {
   await updateDoc(ref, { value: increment(1) });
   const next = (snap.data().value as number) + 1;
   return `BILL-${String(next).padStart(5, '0')}`;
+}
+
+// ── POS counter helpers ───────────────────────────────────────────────────────
+async function getNextCounterNumber(counterId: string): Promise<string> {
+  const ref = doc(db, 'counters', counterId);
+  const next = await runTransaction(db, async transaction => {
+    const snap = await transaction.get(ref);
+    const current = snap.exists() ? Number(snap.data().value || 0) : 0;
+    const value = current + 1;
+    transaction.set(ref, { value }, { merge: true });
+    return value;
+  });
+  return String(next).padStart(6, '0');
+}
+
+export async function getNextPosReceiptNo(): Promise<string> {
+  return getNextCounterNumber('posReceipt');
+}
+
+export async function getNextPosSaleReturnNo(): Promise<string> {
+  return getNextCounterNumber('posSaleReturn');
+}
+
+export async function getNextPosPurchaseReturnNo(): Promise<string> {
+  return getNextCounterNumber('posPurchaseReturn');
 }
 
 // ── Firestore error handler ───────────────────────────────────────────────────

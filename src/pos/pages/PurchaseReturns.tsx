@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
 import { printOrShare } from '../lib/nativeUtils';
-import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
+import { db, auth, handleFirestoreError, OperationType, getNextPosPurchaseReturnNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
+import { getReturnNo } from '../lib/receiptNumbers';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -27,7 +28,7 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
         <div style="font-size:16px;font-weight:bold">Al-Fateh Pharmacy</div>
         <div style="font-weight:bold;letter-spacing:2px;margin-top:2px">PURCHASE RETURN</div>
         <div>${format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
-        <div style="font-size:10px;margin-top:2px">Return ID: ${data.id?.slice(0,10) ?? 'N/A'}</div>
+        <div style="font-size:10px;margin-top:2px">Return No: ${getReturnNo(data)}</div>
       </div>
       <div style="border-top:1px dashed #000;padding:6px 0;border-bottom:1px dashed #000;margin-bottom:6px">
         <table style="width:100%;font-size:11px;border-collapse:collapse">
@@ -132,7 +133,9 @@ export function PurchaseReturns() {
     if (!isValid || !selectedPurchase || submitting) return;
     setSubmitting(true);
     try {
+      const returnNo = await getNextPosPurchaseReturnNo();
       const returnDoc = {
+        returnNo,
         originalPurchaseId: selectedPurchase.id,
         medicineId: selectedPurchase.medicineId,
         medicineName: selectedPurchase.medicineName,
@@ -240,6 +243,7 @@ export function PurchaseReturns() {
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{r.medicineName}</p>
                     <p className="text-xs text-gray-500">{r.supplierName}</p>
+                    <p className="text-xs text-gray-400 font-mono">Return #{getReturnNo(r)}</p>
                     <p className="text-xs text-gray-400">{r.date ? format(new Date(r.date), 'MMM dd, yyyy HH:mm') : ''}</p>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {r.boxesReturned > 0 ? `${r.boxesReturned} box` : ''}
