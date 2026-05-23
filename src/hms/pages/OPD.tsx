@@ -14,6 +14,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import { useAppDialog } from '../../components/AppDialog';
 
 const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology'];
+const FOLLOW_UP_DAYS = Array.from({ length: 14 }, (_, i) => i + 1);
 
 function getPatientHistory(consultations: any[], patientId: string) {
   return consultations
@@ -33,6 +34,15 @@ function getPatientLabHistory(labOrders: any[], patientId: string) {
       const bTime = b.createdAt || b.date || '';
       return bTime > aTime ? 1 : bTime < aTime ? -1 : 0;
     });
+}
+
+function dateAfterDays(date: string, days: string): string {
+  const count = Number(days);
+  if (!date || !count) return '';
+  const next = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(next.getTime())) return '';
+  next.setDate(next.getDate() + count);
+  return next.toISOString().slice(0, 10);
 }
 
 export function OPD() {
@@ -56,7 +66,7 @@ export function OPD() {
   const [form, setForm] = useState({
     patientId: '', patientName: '', patientMRN: '', patientAge: '', patientGender: '',
     doctorId: '', doctorName: '', department: 'General Medicine',
-    date: today(), complaints: '', diagnosis: '', notes: '', followUpDate: '', fee: '500',
+    date: today(), complaints: '', diagnosis: '', notes: '', followUpDays: '', fee: '500',
     paidAmount: '0', paymentMethod: 'Cash',
     appointmentId: '',
     // Vitals
@@ -480,16 +490,17 @@ export function OPD() {
     if (!form.patientId || !form.complaints) { setError('Patient and complaints are required.'); return; }
     setSaving(true); setError('');
     try {
-      const { bp, temperature, weight, pulse, spo2, appointmentId, paidAmount, paymentMethod, ...formRest } = form;
+      const { bp, temperature, weight, pulse, spo2, appointmentId, paidAmount, paymentMethod, followUpDays, ...formRest } = form;
       const vitals = { bp, temperature, weight, pulse, spo2 };
       const fee = Number(form.fee) || 0;
       const paid = Math.min(Number(paidAmount) || 0, fee);
       const balance = Math.max(0, fee - paid);
       const paymentStatus = paid >= fee ? 'paid' : paid > 0 ? 'partial' : 'pending';
       const prescriptionPayload = withPrescriptionListUrdu(withMedicineForms(prescriptions));
+      const followUpDate = dateAfterDays(form.date, followUpDays);
 
       // Save consultation
-      const data = { ...formRest, fee, prescriptions: prescriptionPayload, labOrders, vitals, appointmentId: appointmentId || '', createdAt: nowISO() };
+      const data = { ...formRest, followUpDays: followUpDays || '', followUpDate, fee, prescriptions: prescriptionPayload, labOrders, vitals, appointmentId: appointmentId || '', createdAt: nowISO() };
       const ref = await addDoc(collection(db, 'consultations'), data);
       await logAudit('create', 'consultation', ref.id, `${form.patientName} — ${form.diagnosis || form.complaints.slice(0, 40)}`);
 
@@ -547,7 +558,7 @@ export function OPD() {
           <p className="text-sm text-gray-500">Today: {visibleConsultations.filter(c => c.date === todayStr).length} consultations{currentRole === 'doctor' ? ' · Showing your patients only' : ''}</p>
         </div>
         <button onClick={() => {
-          setForm({ patientId: '', patientName: '', patientMRN: '', patientAge: '', patientGender: '', doctorId: '', doctorName: '', department: 'General Medicine', date: today(), complaints: '', diagnosis: '', notes: '', followUpDate: '', fee: '500', paidAmount: '0', paymentMethod: 'Cash', bp: '', temperature: '', weight: '', pulse: '', spo2: '', appointmentId: '' });
+          setForm({ patientId: '', patientName: '', patientMRN: '', patientAge: '', patientGender: '', doctorId: '', doctorName: '', department: 'General Medicine', date: today(), complaints: '', diagnosis: '', notes: '', followUpDays: '', fee: '500', paidAmount: '0', paymentMethod: 'Cash', bp: '', temperature: '', weight: '', pulse: '', spo2: '', appointmentId: '' });
           setPrescriptions([]); setLabOrders([]); setError(''); setPatientSearch(''); setMedSearch(''); setLabSearch('');
           setModalTab('prescription'); setPatientHistory([]); setPatientLabHistory([]); setExpandedVisit(null); setHistoryError('');
           setShowModal(true);
@@ -1196,8 +1207,16 @@ export function OPD() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Follow-up Date</label>
-                  <input type="date" value={form.followUpDate} onChange={e => f('followUpDate', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Follow-up After</label>
+                  <select value={form.followUpDays} onChange={e => f('followUpDays', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">No follow-up</option>
+                    {FOLLOW_UP_DAYS.map(day => (
+                      <option key={day} value={String(day)}>{day} day{day !== 1 ? 's' : ''}</option>
+                    ))}
+                  </select>
+                  {form.followUpDays && (
+                    <p className="mt-1 text-xs text-gray-400">Date: {formatDate(dateAfterDays(form.date, form.followUpDays))}</p>
+                  )}
                 </div>
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-gray-600 mb-1">Additional Notes</label>
