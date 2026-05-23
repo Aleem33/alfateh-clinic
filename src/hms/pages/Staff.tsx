@@ -6,9 +6,9 @@ import { logAudit } from '../lib/audit';
 import { Plus, Search, Edit2, Trash2, X, UserCheck, UserX } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
 
-const DEPARTMENTS = ['Administration', 'General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Cardiology', 'Neurology', 'Emergency', 'Laboratory', 'Pharmacy', 'Radiology', 'Nursing'];
+const DEPARTMENTS = ['Administration', 'General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Cardiology', 'Neurology', 'Emergency', 'Laboratory', 'Pharmacy', 'Radiology', 'Nursing', 'Anesthesia'];
 const ROLES: Record<string, string> = { admin: 'Admin', receptionist: 'Receptionist', doctor: 'Doctor', pharmacist: 'Pharmacist', lab_technician: 'Lab Technician', cashier: 'Cashier', nurse: 'Nurse' };
-const QUALIFICATIONS = ['MBBS', 'MD', 'MS', 'FCPS', 'BDS', 'B.Pharm', 'Pharm-D', 'PMDC', 'BSc Nursing', 'Other'];
+const QUALIFICATIONS = ['MBBS', 'MD', 'MS', 'FCPS', 'MCPS', 'BDS', 'B.Pharm', 'Pharm-D', 'PMDC', 'BSc Nursing', 'Other'];
 
 const emptyForm = { name: '', role: 'doctor', department: 'General Medicine', phone: '', email: '', qualification: '', salary: '', joiningDate: '', cnic: '', password: '' };
 

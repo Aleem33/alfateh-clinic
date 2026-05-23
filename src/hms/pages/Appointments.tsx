@@ -15,7 +15,7 @@ import {
 } from 'date-fns';
 import { cn } from '../lib/utils';
 
-const DEPARTMENTS = ['General Medicine','Surgery','Gynecology','Pediatrics','ENT','Orthopedics','Dermatology','Cardiology','Neurology','Ophthalmology','Dentistry','Radiology'];
+const DEPARTMENTS = ['General Medicine','Surgery','Gynecology','Pediatrics','ENT','Orthopedics','Dermatology','Cardiology','Neurology','Ophthalmology','Dentistry','Radiology','Anesthesia'];
 const TYPES = ['OPD','Follow-up','Emergency','Procedure'];
 const BLOOD_GROUPS = ['A+','A-','B+','B-','AB+','AB-','O+','O-','Unknown'];
 

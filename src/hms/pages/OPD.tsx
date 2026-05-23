@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppDialog } from '../../components/AppDialog';
 
-const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology'];
+const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology', 'Anesthesia'];
 const FOLLOW_UP_DAYS = Array.from({ length: 14 }, (_, i) => i + 1);
 
 function getPatientHistory(consultations: any[], patientId: string) {
