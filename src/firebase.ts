@@ -95,7 +95,8 @@ async function getNextCounterNumber(counterId: string): Promise<string> {
 }
 
 export async function getNextPosReceiptNo(): Promise<string> {
-  return getNextCounterNumber('posReceipt');
+  const next = await getNextCounterNumber('posReceipt');
+  return `SALE-${next}`;
 }
 
 export async function getNextPosSaleReturnNo(): Promise<string> {
