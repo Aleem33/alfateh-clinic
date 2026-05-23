@@ -7,6 +7,7 @@ import { Plus, Search, X, Stethoscope, FlaskConical, Printer, Eye, ArrowRight, S
 import { printPrescription } from '../lib/pdf';
 import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { DOSAGE_OPTIONS, DURATION_OPTIONS, FREQUENCY_OPTIONS, INSTRUCTION_OPTIONS, getDosageUrdu, getDurationUrdu, getFrequencyUrdu, getInstructionUrdu, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
+import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppDialog } from '../../components/AppDialog';
@@ -27,6 +28,7 @@ export function OPD() {
   const { alert } = useAppDialog();
   const navigate = useNavigate();
   const [consultations, setConsultations] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
   const [labTests, setLabTests] = useState<any[]>([]);
@@ -78,6 +80,11 @@ export function OPD() {
     const u4 = onSnapshot(collection(db, 'labTests'), snap => setLabTests(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const u5 = onSnapshot(collection(db, 'medicines'), snap => setMedicines(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const u6 = onSnapshot(collection(db, 'prescriptionTemplates'), snap => setTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const u8 = onSnapshot(collection(db, 'appointments'), snap =>
+      setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) =>
+        `${a.date || ''}${a.time || ''}` > `${b.date || ''}${b.time || ''}` ? 1 : -1
+      ))
+    );
     // Determine current user role and doctor ID
     getDoc(doc(db, 'users', auth.currentUser?.uid || 'x')).then(snap => {
       if (snap.exists()) {
@@ -133,7 +140,7 @@ export function OPD() {
       setPharmacySentIds(new Set(snap.docs.map(d => d.data().consultationId).filter(Boolean)));
     });
 
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); };
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); };
   }, []);
 
   useEffect(() => {
@@ -163,6 +170,7 @@ export function OPD() {
   const normalizeTemplateMedicines = () => withPrescriptionListUrdu(prescriptions).map((p: any) => ({
     medicineId: p.medicineId || '',
     name: p.name || '',
+    form: p.form || p.category || p.type || '',
     nameUrdu: p.nameUrdu || '',
     dosage: p.dosage || '',
     dosageUrdu: p.dosageUrdu || getDosageUrdu(p.dosage || ''),
@@ -252,6 +260,17 @@ export function OPD() {
   const visibleConsultations = currentRole === 'doctor' && currentDoctorId
     ? consultations.filter(c => c.doctorId === currentDoctorId)
     : consultations;
+  const activeAppointmentStatuses = new Set(['scheduled', 'waiting', 'serving']);
+  const visibleAppointments = currentRole === 'doctor' && currentDoctorId
+    ? appointments.filter(a => a.doctorId === currentDoctorId)
+    : appointments;
+  const opdAppointments = visibleAppointments.filter(a => {
+    const isActive = activeAppointmentStatuses.has(a.status || 'scheduled');
+    const alreadyConsulted = consultations.some(c => c.appointmentId === a.id);
+    const matchTab = tab === 'today' ? a.date === todayStr : true;
+    const matchSearch = !search || a.patientName?.toLowerCase().includes(search.toLowerCase()) || a.patientMRN?.includes(search) || a.doctorName?.toLowerCase().includes(search.toLowerCase());
+    return isActive && !alreadyConsulted && matchTab && matchSearch;
+  });
   const filteredConsultations = visibleConsultations.filter(c => {
     const matchTab    = tab === 'today' ? c.date === todayStr : true;
     const matchSearch = !search || c.patientName?.toLowerCase().includes(search.toLowerCase()) || c.patientMRN?.includes(search);
@@ -261,6 +280,40 @@ export function OPD() {
   const filteredPatients = patients.filter(p => !patientSearch || p.name?.toLowerCase().includes(patientSearch.toLowerCase()) || p.mrn?.includes(patientSearch)).slice(0, 5);
   const filteredMeds = medicines.filter(m => medSearch && m.name?.toLowerCase().includes(medSearch.toLowerCase()) && m.stock > 0).slice(0, 5);
   const filteredLabTests = labTests.filter(t => labSearch && t.name?.toLowerCase().includes(labSearch.toLowerCase())).slice(0, 5);
+
+  const openAppointmentInOPD = (appt: any) => {
+    setForm(prev => ({
+      ...prev,
+      patientId: appt.patientId || '',
+      patientName: appt.patientName || '',
+      patientMRN: appt.patientMRN || '',
+      patientAge: appt.patientAge || '',
+      patientGender: appt.patientGender || '',
+      doctorId: appt.doctorId || '',
+      doctorName: appt.doctorName || '',
+      department: appt.department || 'General Medicine',
+      date: appt.date || today(),
+      fee: String(appt.fee || '500'),
+      notes: appt.notes || '',
+      bp: appt.vitals?.bp || '',
+      temperature: appt.vitals?.temperature || '',
+      weight: appt.vitals?.weight || '',
+      pulse: appt.vitals?.pulse || '',
+      spo2: appt.vitals?.spo2 || '',
+      appointmentId: appt.id || '',
+    }));
+    setPrescriptions([]);
+    setLabOrders([]);
+    setError('');
+    setPatientSearch('');
+    setMedSearch('');
+    setLabSearch('');
+    setModalTab('prescription');
+    setPatientHistory(appt.patientId ? getPatientHistory(consultations, appt.patientId) : []);
+    setExpandedVisit(null);
+    setHistoryError('');
+    setShowModal(true);
+  };
 
   const selectPatient = (p: any) => {
     setForm(prev => ({ ...prev, patientId: p.id, patientName: p.name, patientMRN: p.mrn, patientAge: String(p.age), patientGender: p.gender }));
@@ -276,6 +329,7 @@ export function OPD() {
     const newRx = {
       medicineId: med.id,
       name: med.name,
+      form: med.form || med.category || '',
       nameUrdu: med.nameUrdu || '',
       dosage: '1 tablet',
       dosageUrdu: getDosageUrdu('1 tablet'),
@@ -389,6 +443,14 @@ export function OPD() {
     }
   };
 
+  const withMedicineForms = (items: any[]) => items.map((item: any) => {
+    const med = medicines.find((m: any) => m.id === item.medicineId || m.name?.toLowerCase().trim() === item.name?.toLowerCase().trim());
+    return {
+      ...item,
+      form: item.form || item.category || item.type || med?.form || med?.category || '',
+    };
+  });
+
   const handleSave = async () => {
     if (!form.patientId || !form.complaints) { setError('Patient and complaints are required.'); return; }
     setSaving(true); setError('');
@@ -399,12 +461,21 @@ export function OPD() {
       const paid = Math.min(Number(paidAmount) || 0, fee);
       const balance = Math.max(0, fee - paid);
       const paymentStatus = paid >= fee ? 'paid' : paid > 0 ? 'partial' : 'pending';
-      const prescriptionPayload = withPrescriptionListUrdu(prescriptions);
+      const prescriptionPayload = withPrescriptionListUrdu(withMedicineForms(prescriptions));
 
       // Save consultation
       const data = { ...formRest, fee, prescriptions: prescriptionPayload, labOrders, vitals, appointmentId: appointmentId || '', createdAt: nowISO() };
       const ref = await addDoc(collection(db, 'consultations'), data);
       await logAudit('create', 'consultation', ref.id, `${form.patientName} — ${form.diagnosis || form.complaints.slice(0, 40)}`);
+
+      if (appointmentId) {
+        await updateDoc(doc(db, 'appointments', appointmentId), {
+          status: 'completed',
+          consultationId: ref.id,
+          updatedAt: nowISO(),
+        });
+        await logAudit('update', 'appointment', appointmentId, `completed from OPD: ${ref.id}`);
+      }
 
       // Auto-generate bill from OPD consultation
       if (fee > 0) {
@@ -472,6 +543,39 @@ export function OPD() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by patient name or MRN..." className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
       </div>
+
+      {opdAppointments.length > 0 && (
+        <div className="bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-b border-blue-100">
+            <div>
+              <h2 className="text-sm font-semibold text-blue-900">Appointments waiting for OPD</h2>
+              <p className="text-xs text-blue-600">{opdAppointments.length} appointment{opdAppointments.length !== 1 ? 's' : ''} assigned{currentRole === 'doctor' ? ' to you' : ''}</p>
+            </div>
+            <Clock className="w-4 h-4 text-blue-500" />
+          </div>
+          <div className="divide-y divide-gray-100">
+            {opdAppointments.map((appt: any) => (
+              <div key={appt.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <div className="w-20 text-sm font-semibold text-gray-700">{appt.time || '--:--'}</div>
+                <div className="flex-1 min-w-[180px]">
+                  <div className="text-sm font-medium text-gray-900">{appt.patientName}</div>
+                  <div className="text-xs text-gray-400">{appt.patientMRN || 'No MRN'} · {appt.type || 'OPD'}</div>
+                </div>
+                <div className="min-w-[160px] text-sm text-gray-600">
+                  <div>{appt.doctorName || 'No doctor selected'}</div>
+                  <div className="text-xs text-gray-400">{appt.department || 'General Medicine'}</div>
+                </div>
+                <button
+                  onClick={() => openAppointmentInOPD(appt)}
+                  className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700"
+                >
+                  <Stethoscope className="w-3.5 h-3.5" /> Start OPD
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Batch Print Bar */}
       {printQueue.size > 0 && (
@@ -721,7 +825,7 @@ export function OPD() {
                                     {visit.prescriptions.map((rx: any, i: number) => (
                                       <div key={i} className="flex items-start gap-2 bg-blue-50 rounded-lg px-3 py-2">
                                         <div className="flex-1 min-w-0">
-                                          <div className="text-xs font-semibold text-blue-900">{rx.name}</div>
+                                          <div className="text-xs font-semibold text-blue-900">{formatMedicineNameWithForm(rx.name, rx.form || rx.category || rx.type)}</div>
                                           {rx.nameUrdu && (
                                             <div className="text-xs text-green-700 font-medium" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{rx.nameUrdu}</div>
                                           )}
@@ -897,7 +1001,7 @@ export function OPD() {
                           <tr key={i} className="align-top">
                             {/* Medicine name EN + UR */}
                             <td className="px-3 py-2 min-w-[130px]">
-                              <div className="font-medium text-gray-800">{p.name}</div>
+                              <div className="font-medium text-gray-800">{formatMedicineNameWithForm(p.name, p.form || p.category || p.type)}</div>
                               <input
                                 value={p.nameUrdu || ''}
                                 onChange={e => updatePrescription(i, 'nameUrdu', e.target.value)}
@@ -1196,7 +1300,7 @@ export function OPD() {
                   <span className="text-xs font-semibold text-gray-500 block mb-2">PRESCRIPTION</span>
                   {viewConsult.prescriptions.map((p: any, i: number) => (
                     <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0 text-sm">
-                      <span className="font-medium text-gray-800">{p.name}</span>
+                      <span className="font-medium text-gray-800">{formatMedicineNameWithForm(p.name, p.form || p.category || p.type)}</span>
                       <span className="text-gray-500 text-xs">{p.dosage} · {p.frequency} · {p.duration}</span>
                     </div>
                   ))}

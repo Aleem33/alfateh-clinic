@@ -6,6 +6,7 @@ import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
 import { transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { withPrescriptionListUrdu } from '../lib/prescriptionOptions';
+import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
 import { useAppDialog } from '../../components/AppDialog';
 
 export function Prescriptions() {
@@ -239,7 +240,7 @@ export function Prescriptions() {
                       <tbody className="divide-y divide-gray-50">
                         {viewConsult.prescriptions.map((p: any, i: number) => (
                           <tr key={i}>
-                            <td className="px-3 py-2.5 font-medium text-gray-800">{p.name}</td>
+                            <td className="px-3 py-2.5 font-medium text-gray-800">{formatMedicineNameWithForm(p.name, p.form || p.category || p.type)}</td>
                             <td className="px-3 py-2.5 text-green-700 font-medium" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>
                               {p.nameUrdu || '—'}
                             </td>
