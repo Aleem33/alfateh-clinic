@@ -57,6 +57,7 @@ export function OPD() {
   const [translating, setTranslating] = useState(false);
   const [currentDoctorId, setCurrentDoctorId] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState('');
+  const [roleLoaded, setRoleLoaded] = useState(false);
   const [pharmacySentIds, setPharmacySentIds] = useState<Set<string>>(new Set());
   const [modalTab, setModalTab] = useState<'prescription' | 'history'>('prescription');
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
@@ -88,7 +89,7 @@ export function OPD() {
     // Determine current user role and doctor ID
     getDoc(doc(db, 'users', auth.currentUser?.uid || 'x')).then(snap => {
       if (snap.exists()) {
-        const role = snap.data().role;
+        const role = String(snap.data().role || '').toLowerCase();
         setCurrentRole(role);
         if (role === 'doctor') {
           onSnapshot(collection(db, 'staff'), s => {
@@ -97,7 +98,8 @@ export function OPD() {
           });
         }
       }
-    });
+      setRoleLoaded(true);
+    }).catch(() => setRoleLoaded(true));
 
     // Pre-fill from appointment if navigated from Appointments page
     const prefill = sessionStorage.getItem('opd_prefill');
@@ -257,13 +259,18 @@ export function OPD() {
 
 
   const todayStr = today();
-  const visibleConsultations = currentRole === 'doctor' && currentDoctorId
-    ? consultations.filter(c => c.doctorId === currentDoctorId)
-    : consultations;
+  const isDoctor = currentRole === 'doctor';
+  const visibleConsultations = !roleLoaded
+    ? []
+    : isDoctor
+      ? (currentDoctorId ? consultations.filter(c => c.doctorId === currentDoctorId) : [])
+      : consultations;
   const activeAppointmentStatuses = new Set(['scheduled', 'waiting', 'serving']);
-  const visibleAppointments = currentRole === 'doctor' && currentDoctorId
-    ? appointments.filter(a => a.doctorId === currentDoctorId)
-    : appointments;
+  const visibleAppointments = !roleLoaded
+    ? []
+    : isDoctor
+      ? (currentDoctorId ? appointments.filter(a => a.doctorId === currentDoctorId) : [])
+      : appointments;
   const opdAppointments = visibleAppointments.filter(a => {
     const isActive = activeAppointmentStatuses.has(a.status || 'scheduled');
     const alreadyConsulted = consultations.some(c => c.appointmentId === a.id);

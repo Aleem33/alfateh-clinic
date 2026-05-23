@@ -69,6 +69,7 @@ export function Appointments() {
   // Detect if current user is a doctor
   const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState<string>('');
+  const [roleLoaded, setRoleLoaded] = useState(false);
 
   // Patient search / creation
   const [patientSearch, setPatientSearch] = useState('');
@@ -106,7 +107,7 @@ export function Appointments() {
     // Determine current user's staff record and role
     getDoc(doc(db, 'users', auth.currentUser?.uid || 'x')).then(snap => {
       if (snap.exists()) {
-        const role = snap.data().role;
+        const role = String(snap.data().role || '').toLowerCase();
         setCurrentRole(role);
         if (role === 'doctor') {
           // Find staff record by email
@@ -116,14 +117,18 @@ export function Appointments() {
           });
         }
       }
-    });
+      setRoleLoaded(true);
+    }).catch(() => setRoleLoaded(true));
     return () => { u1(); u2(); u3(); };
   }, []);
 
   // Doctors only see their own appointments
-  const visibleAppointments = currentRole === 'doctor' && currentStaffId
-    ? appointments.filter(a => a.doctorId === currentStaffId)
-    : appointments;
+  const isDoctor = currentRole === 'doctor';
+  const visibleAppointments = !roleLoaded
+    ? []
+    : isDoctor
+      ? (currentStaffId ? appointments.filter(a => a.doctorId === currentStaffId) : [])
+      : appointments;
 
   const todayStr = today();
   const filtered = visibleAppointments.filter(a => {
