@@ -16,15 +16,9 @@ service firebase.storage {
     }
 
     function isAdmin()      { return hasRole(['admin', 'Admin']); }
-    function isDoctor()     { return hasRole(['doctor', 'Doctor']); }
-    function isLab()        { return hasRole(['lab', 'Lab', 'lab_technician', 'Lab Technician']); }
-    function isClinical()   { return isDoctor(); }
-
     match /labReports/{orderId}/{fileName} {
       allow read: if isAuth();
-      allow create, update: if (isAdmin() || isLab() || isClinical())
-        && request.resource.size <= 12 * 1024 * 1024
-        && request.resource.contentType == 'application/pdf';
+      allow create, update: if isAuth() && request.resource.size <= 12 * 1024 * 1024;
       allow delete: if isAdmin();
     }
 
