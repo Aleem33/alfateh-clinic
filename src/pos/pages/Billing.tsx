@@ -284,7 +284,7 @@ export function Billing() {
   // ── Shared panel components ───────────────────────────────────────────────
 
   const MedicinesPanel = () => (
-    <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="p-4 border-b border-gray-100">
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -311,7 +311,7 @@ export function Billing() {
           </button>
         </div>
       </div>
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 min-h-0 overflow-auto p-4">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {filteredMedicines.map(med => (
             <div key={med.id} className="p-3 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all bg-white flex flex-col">
@@ -353,7 +353,7 @@ export function Billing() {
   );
 
   const CartPanel = () => (
-    <div className="flex-1 md:w-96 md:flex-none bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col">
+    <div className="flex-1 min-h-0 md:w-96 md:flex-none bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
       {/* Cart header */}
       <div className="p-4 border-b border-gray-100 bg-gray-50 space-y-3">
         <h2 className="text-lg font-bold text-gray-900 hidden md:block">Current Sale</h2>
@@ -754,15 +754,15 @@ export function Billing() {
       </div>
 
       {/* ── DESKTOP LAYOUT: side-by-side ── */}
-      <div className="hidden md:flex h-full gap-6 print:hidden">
+      <div className="hidden md:flex h-full min-h-0 gap-6 print:hidden">
         {MedicinesPanel()}
-        <div className="w-96 flex flex-col">
+        <div className="w-96 min-h-0 flex flex-col">
           {CartPanel()}
         </div>
       </div>
 
       {/* ── MOBILE LAYOUT: tab switcher ── */}
-      <div className="flex md:hidden flex-col h-full print:hidden">
+      <div className="flex md:hidden flex-col h-full min-h-0 print:hidden">
         {/* Tab bar */}
         <div className="flex bg-white rounded-xl shadow-sm border border-gray-100 mb-3 p-1 gap-1 shrink-0">
           <button
@@ -786,11 +786,11 @@ export function Billing() {
         </div>
 
         {/* Both panels stay mounted — only visibility toggled — so search input never loses focus */}
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <div className={mobileTab === 'medicines' ? 'flex flex-col flex-1 overflow-hidden' : 'hidden'}>
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <div className={mobileTab === 'medicines' ? 'flex flex-col flex-1 min-h-0 overflow-hidden' : 'hidden'}>
             {MedicinesPanel()}
           </div>
-          <div className={mobileTab === 'cart' ? 'flex flex-col flex-1 overflow-hidden' : 'hidden'}>
+          <div className={mobileTab === 'cart' ? 'flex flex-col flex-1 min-h-0 overflow-hidden' : 'hidden'}>
             {CartPanel()}
           </div>
         </div>

@@ -90,8 +90,8 @@ export function Layout({ role, onSwitchApp, onLogout }: Props) {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 flex print:bg-white">
-      <aside className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col print:hidden shrink-0">
+    <div className="h-screen min-h-0 bg-gray-50 flex overflow-hidden print:h-auto print:min-h-0 print:overflow-visible print:bg-white">
+      <aside className="hidden md:flex h-full min-h-0 w-64 bg-white border-r border-gray-200 flex-col print:hidden shrink-0">
         <div className="h-20 flex items-center px-4 border-b border-gray-200 bg-blue-600">
           <div className="flex items-center gap-3">
             <img src={logoUrl} alt="Al-Fateh Pharmacy" className="w-10 h-10 object-contain shrink-0 rounded-full border-2 border-white bg-white shadow" />
@@ -101,7 +101,7 @@ export function Layout({ role, onSwitchApp, onLogout }: Props) {
             </div>
           </div>
         </div>
-        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 min-h-0 py-4 px-3 space-y-1 overflow-y-auto">
           <NavItems />
         </nav>
         <div className="p-4 border-t border-gray-200">
@@ -118,7 +118,7 @@ export function Layout({ role, onSwitchApp, onLogout }: Props) {
 
       <aside
         className={cn(
-          'md:hidden fixed top-0 left-0 h-full w-72 bg-white z-50 flex flex-col shadow-xl transition-transform duration-300 print:hidden',
+          'md:hidden fixed top-0 left-0 h-dvh min-h-0 w-72 bg-white z-50 flex flex-col shadow-xl transition-transform duration-300 print:hidden',
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -137,7 +137,7 @@ export function Layout({ role, onSwitchApp, onLogout }: Props) {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <nav className="flex-1 py-3 px-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 min-h-0 py-3 px-3 space-y-1 overflow-y-auto">
           <NavItems onNavigate={() => setDrawerOpen(false)} />
         </nav>
         <div
@@ -148,7 +148,7 @@ export function Layout({ role, onSwitchApp, onLogout }: Props) {
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <header
           className="md:hidden flex items-center gap-3 px-4 bg-blue-600 text-white shrink-0 print:hidden"
           style={{ height: 'calc(56px + env(safe-area-inset-top))', paddingTop: 'env(safe-area-inset-top)' }}
@@ -161,7 +161,7 @@ export function Layout({ role, onSwitchApp, onLogout }: Props) {
           <div className="ml-auto"><SyncStatusBadge compact /></div>
         </header>
 
-        <main className="flex-1 overflow-auto p-4 md:p-6 print:p-0 print:overflow-visible">
+        <main className="flex-1 min-h-0 overflow-auto p-4 md:p-6 print:p-0 print:overflow-visible">
           <div className="hidden md:flex justify-end mb-3 print:hidden">
             <SyncStatusBadge />
           </div>
