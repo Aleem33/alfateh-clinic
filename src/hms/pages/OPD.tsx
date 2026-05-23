@@ -8,6 +8,7 @@ import { printPrescription } from '../lib/pdf';
 import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { DOSAGE_OPTIONS, DURATION_OPTIONS, FREQUENCY_OPTIONS, INSTRUCTION_OPTIONS, getDosageUrdu, getDurationUrdu, getFrequencyUrdu, getInstructionUrdu, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
 import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
+import { filterDoctorRecords, findCurrentDoctorStaff, normalizeRole } from '../lib/doctorAccess';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppDialog } from '../../components/AppDialog';
@@ -57,6 +58,7 @@ export function OPD() {
   const [translating, setTranslating] = useState(false);
   const [currentDoctorId, setCurrentDoctorId] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState('');
+  const [currentUserProfile, setCurrentUserProfile] = useState<any | null>(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
   const [pharmacySentIds, setPharmacySentIds] = useState<Set<string>>(new Set());
   const [modalTab, setModalTab] = useState<'prescription' | 'history'>('prescription');
@@ -89,14 +91,10 @@ export function OPD() {
     // Determine current user role and doctor ID
     getDoc(doc(db, 'users', auth.currentUser?.uid || 'x')).then(snap => {
       if (snap.exists()) {
-        const role = String(snap.data().role || '').toLowerCase();
+        const profile = { id: snap.id, ...snap.data() };
+        const role = normalizeRole((profile as any).role);
+        setCurrentUserProfile(profile);
         setCurrentRole(role);
-        if (role === 'doctor') {
-          onSnapshot(collection(db, 'staff'), s => {
-            const me = s.docs.find(d => d.data().userId === auth.currentUser?.uid);
-            if (me) setCurrentDoctorId(me.id);
-          });
-        }
       }
       setRoleLoaded(true);
     }).catch(() => setRoleLoaded(true));
@@ -149,6 +147,15 @@ export function OPD() {
     if (!showModal || !form.patientId) return;
     setPatientHistory(getPatientHistory(consultations, form.patientId));
   }, [consultations, form.patientId, showModal]);
+
+  useEffect(() => {
+    if (currentRole !== 'doctor') {
+      setCurrentDoctorId(null);
+      return;
+    }
+    const me = findCurrentDoctorStaff(staff, currentUserProfile, auth.currentUser);
+    setCurrentDoctorId(me?.id || null);
+  }, [currentRole, currentUserProfile, staff]);
 
   // ── Template helpers ────────────────────────────────────────────────────────
   const applyTemplate = (t: any) => {
@@ -259,18 +266,9 @@ export function OPD() {
 
 
   const todayStr = today();
-  const isDoctor = currentRole === 'doctor';
-  const visibleConsultations = !roleLoaded
-    ? []
-    : isDoctor
-      ? (currentDoctorId ? consultations.filter(c => c.doctorId === currentDoctorId) : [])
-      : consultations;
+  const visibleConsultations = filterDoctorRecords(consultations, roleLoaded, currentRole, currentDoctorId);
   const activeAppointmentStatuses = new Set(['scheduled', 'waiting', 'serving']);
-  const visibleAppointments = !roleLoaded
-    ? []
-    : isDoctor
-      ? (currentDoctorId ? appointments.filter(a => a.doctorId === currentDoctorId) : [])
-      : appointments;
+  const visibleAppointments = filterDoctorRecords(appointments, roleLoaded, currentRole, currentDoctorId);
   const opdAppointments = visibleAppointments.filter(a => {
     const isActive = activeAppointmentStatuses.has(a.status || 'scheduled');
     const alreadyConsulted = consultations.some(c => c.appointmentId === a.id);

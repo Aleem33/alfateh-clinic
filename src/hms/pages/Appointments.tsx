@@ -4,6 +4,7 @@ import { db, auth, getNextMRN } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { useNavigate } from 'react-router-dom';
+import { filterDoctorRecords, findCurrentDoctorStaff, normalizeRole } from '../lib/doctorAccess';
 import {
   Plus, Search, X, CheckCircle, XCircle, Clock, CalendarDays,
   ChevronLeft, ChevronRight, LayoutList, UserPlus, User, Stethoscope,
@@ -69,6 +70,7 @@ export function Appointments() {
   // Detect if current user is a doctor
   const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState<string>('');
+  const [currentUserProfile, setCurrentUserProfile] = useState<any | null>(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
 
   // Patient search / creation
@@ -107,28 +109,27 @@ export function Appointments() {
     // Determine current user's staff record and role
     getDoc(doc(db, 'users', auth.currentUser?.uid || 'x')).then(snap => {
       if (snap.exists()) {
-        const role = String(snap.data().role || '').toLowerCase();
+        const profile = { id: snap.id, ...snap.data() };
+        const role = normalizeRole((profile as any).role);
+        setCurrentUserProfile(profile);
         setCurrentRole(role);
-        if (role === 'doctor') {
-          // Find staff record by email
-          onSnapshot(collection(db, 'staff'), s => {
-            const me = s.docs.find(d => d.data().userId === auth.currentUser?.uid);
-            if (me) setCurrentStaffId(me.id);
-          });
-        }
       }
       setRoleLoaded(true);
     }).catch(() => setRoleLoaded(true));
     return () => { u1(); u2(); u3(); };
   }, []);
 
+  useEffect(() => {
+    if (currentRole !== 'doctor') {
+      setCurrentStaffId(null);
+      return;
+    }
+    const me = findCurrentDoctorStaff(staff, currentUserProfile, auth.currentUser);
+    setCurrentStaffId(me?.id || null);
+  }, [currentRole, currentUserProfile, staff]);
+
   // Doctors only see their own appointments
-  const isDoctor = currentRole === 'doctor';
-  const visibleAppointments = !roleLoaded
-    ? []
-    : isDoctor
-      ? (currentStaffId ? appointments.filter(a => a.doctorId === currentStaffId) : [])
-      : appointments;
+  const visibleAppointments = filterDoctorRecords(appointments, roleLoaded, currentRole, currentStaffId);
 
   const todayStr = today();
   const filtered = visibleAppointments.filter(a => {
