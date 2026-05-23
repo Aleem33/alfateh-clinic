@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, doc, updateDoc, getDoc, query, where, g
 import { db, auth, getNextBillNo } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
-import { Plus, Search, X, Stethoscope, FlaskConical, Printer, Eye, ArrowRight, Send, Loader2, History, ChevronDown, ChevronUp, RotateCcw, Clock, Pill, BookOpen, MessageCircle, CheckSquare, Square, TrendingUp } from 'lucide-react';
+import { Plus, Search, X, Stethoscope, FlaskConical, Printer, Eye, ArrowRight, Send, Loader2, History, ChevronDown, ChevronUp, RotateCcw, Clock, Pill, BookOpen, MessageCircle, CheckSquare, Square, TrendingUp, FileText } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
 import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { DOSAGE_OPTIONS, DURATION_OPTIONS, FREQUENCY_OPTIONS, INSTRUCTION_OPTIONS, getDosageUrdu, getDurationUrdu, getFrequencyUrdu, getInstructionUrdu, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
@@ -25,11 +25,22 @@ function getPatientHistory(consultations: any[], patientId: string) {
     });
 }
 
+function getPatientLabHistory(labOrders: any[], patientId: string) {
+  return labOrders
+    .filter((o: any) => o.patientId === patientId)
+    .sort((a: any, b: any) => {
+      const aTime = a.createdAt || a.date || '';
+      const bTime = b.createdAt || b.date || '';
+      return bTime > aTime ? 1 : bTime < aTime ? -1 : 0;
+    });
+}
+
 export function OPD() {
   const { alert } = useAppDialog();
   const navigate = useNavigate();
   const [consultations, setConsultations] = useState<any[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [patientLabOrders, setPatientLabOrders] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
   const [labTests, setLabTests] = useState<any[]>([]);
@@ -63,6 +74,7 @@ export function OPD() {
   const [pharmacySentIds, setPharmacySentIds] = useState<Set<string>>(new Set());
   const [modalTab, setModalTab] = useState<'prescription' | 'history'>('prescription');
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
+  const [patientLabHistory, setPatientLabHistory] = useState<any[]>([]);
   const [historyError, setHistoryError] = useState('');
   const [expandedVisit, setExpandedVisit] = useState<string | null>(null);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -86,6 +98,11 @@ export function OPD() {
     const u8 = onSnapshot(collection(db, 'appointments'), snap =>
       setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) =>
         `${a.date || ''}${a.time || ''}` > `${b.date || ''}${b.time || ''}` ? 1 : -1
+      ))
+    );
+    const u9 = onSnapshot(collection(db, 'labOrders'), snap =>
+      setPatientLabOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) =>
+        (b.createdAt || b.date || '') > (a.createdAt || a.date || '') ? 1 : -1
       ))
     );
     // Determine current user role and doctor ID
@@ -140,13 +157,14 @@ export function OPD() {
       setPharmacySentIds(new Set(snap.docs.map(d => d.data().consultationId).filter(Boolean)));
     });
 
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); };
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); };
   }, []);
 
   useEffect(() => {
     if (!showModal || !form.patientId) return;
     setPatientHistory(getPatientHistory(consultations, form.patientId));
-  }, [consultations, form.patientId, showModal]);
+    setPatientLabHistory(getPatientLabHistory(patientLabOrders, form.patientId));
+  }, [consultations, patientLabOrders, form.patientId, showModal]);
 
   useEffect(() => {
     if (currentRole !== 'doctor') {
@@ -315,6 +333,7 @@ export function OPD() {
     setLabSearch('');
     setModalTab('prescription');
     setPatientHistory(appt.patientId ? getPatientHistory(consultations, appt.patientId) : []);
+    setPatientLabHistory(appt.patientId ? getPatientLabHistory(patientLabOrders, appt.patientId) : []);
     setExpandedVisit(null);
     setHistoryError('');
     setShowModal(true);
@@ -327,6 +346,7 @@ export function OPD() {
     setHistoryError('');
     // Filter directly from already-loaded consultations state — no extra Firestore call needed
     setPatientHistory(getPatientHistory(consultations, p.id));
+    setPatientLabHistory(getPatientLabHistory(patientLabOrders, p.id));
   };
 
   const addPrescription = async (med: any) => {
@@ -529,7 +549,7 @@ export function OPD() {
         <button onClick={() => {
           setForm({ patientId: '', patientName: '', patientMRN: '', patientAge: '', patientGender: '', doctorId: '', doctorName: '', department: 'General Medicine', date: today(), complaints: '', diagnosis: '', notes: '', followUpDate: '', fee: '500', paidAmount: '0', paymentMethod: 'Cash', bp: '', temperature: '', weight: '', pulse: '', spo2: '', appointmentId: '' });
           setPrescriptions([]); setLabOrders([]); setError(''); setPatientSearch(''); setMedSearch(''); setLabSearch('');
-          setModalTab('prescription'); setPatientHistory([]); setExpandedVisit(null); setHistoryError('');
+          setModalTab('prescription'); setPatientHistory([]); setPatientLabHistory([]); setExpandedVisit(null); setHistoryError('');
           setShowModal(true);
         }}
           className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
@@ -680,9 +700,9 @@ export function OPD() {
                     >
                       <History className="w-3 h-3" />
                       History
-                      {patientHistory.length > 0 && (
+                      {(patientHistory.length + patientLabHistory.length) > 0 && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${modalTab === 'history' ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-600'}`}>
-                          {patientHistory.length}
+                          {patientHistory.length + patientLabHistory.length}
                         </span>
                       )}
                     </button>
@@ -700,7 +720,7 @@ export function OPD() {
                 {form.patientId ? (
                   <div className="flex items-center gap-2 border border-green-200 bg-green-50 rounded-lg px-3 py-2">
                     <span className="text-sm font-medium text-green-800 flex-1">{form.patientName} <span className="text-xs font-normal text-green-600">({form.patientMRN}) · {form.patientAge}yrs {form.patientGender}</span></span>
-                    <button onClick={() => { setForm(p => ({ ...p, patientId: '', patientName: '', patientMRN: '' })); setPatientHistory([]); }} className="text-green-600"><X className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => { setForm(p => ({ ...p, patientId: '', patientName: '', patientMRN: '' })); setPatientHistory([]); setPatientLabHistory([]); }} className="text-green-600"><X className="w-3.5 h-3.5" /></button>
                   </div>
                 ) : (
                   <div className="relative">
@@ -726,14 +746,16 @@ export function OPD() {
                       <div className="text-red-400 text-sm font-medium mb-1">Could not load history</div>
                       <div className="text-gray-400 text-xs">{historyError}</div>
                     </div>
-                  ) : patientHistory.length === 0 ? (
+                  ) : patientHistory.length === 0 && patientLabHistory.length === 0 ? (
                     <div className="text-center py-12">
                       <Clock className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-                      <p className="text-gray-400 text-sm">No previous visits found for this patient</p>
+                      <p className="text-gray-400 text-sm">No previous visits or lab reports found for this patient</p>
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <p className="text-xs text-gray-500 font-medium">{patientHistory.length} previous visit{patientHistory.length !== 1 ? 's' : ''}</p>
+                      <p className="text-xs text-gray-500 font-medium">
+                        {patientHistory.length} previous visit{patientHistory.length !== 1 ? 's' : ''} · {patientLabHistory.length} lab report{patientLabHistory.length !== 1 ? 's' : ''}
+                      </p>
 
                       {/* Vitals Trend Chart */}
                       {patientHistory.some((v: any) => v.bp || v.temperature) && (() => {
@@ -876,6 +898,56 @@ export function OPD() {
                           )}
                         </div>
                       ))}
+
+                      {patientLabHistory.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 uppercase tracking-wide pt-1">
+                            <FlaskConical className="w-3.5 h-3.5" /> Lab Reports
+                          </div>
+                          {patientLabHistory.map((order: any) => (
+                            <div key={order.id} className="border border-purple-100 rounded-xl p-4 bg-purple-50/30">
+                              <div className="flex items-start justify-between gap-3 mb-2">
+                                <div>
+                                  <div className="text-sm font-semibold text-gray-800">{formatDate(order.date)}</div>
+                                  <div className="text-xs text-gray-500">{order.doctorName || 'Unknown Doctor'}</div>
+                                </div>
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                  order.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                  order.status === 'in-progress' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
+                                }`}>{order.status || 'pending'}</span>
+                              </div>
+
+                              <div className="flex flex-wrap gap-1.5 mb-2">
+                                {order.tests?.map((t: any, i: number) => (
+                                  <span key={i} className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">{t.testName}</span>
+                                ))}
+                              </div>
+
+                              {order.reportPdf?.url && (
+                                <button
+                                  onClick={() => window.open(order.reportPdf.url, '_blank')}
+                                  className="mb-2 inline-flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 border border-red-100 bg-red-50 px-2 py-1 rounded-lg font-medium"
+                                >
+                                  <FileText className="w-3 h-3" /> Open PDF Report
+                                </button>
+                              )}
+
+                              {order.results?.length > 0 && (
+                                <div className="mt-2 border-t border-purple-100 pt-2 space-y-1">
+                                  {order.results.map((r: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                                      <span className="text-gray-600">{r.testName}</span>
+                                      <span className={`font-medium text-right ${r.status === 'abnormal' ? 'text-red-600' : r.status === 'borderline' ? 'text-yellow-600' : 'text-green-600'}`}>
+                                        {r.result || '-'} {r.unit || ''} {r.normalRange ? <span className="text-gray-400">({r.normalRange})</span> : null}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
