@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where, setDoc } from 'firebase/firestore';
 import { db, getNextMRN } from '../../firebase';
 import { formatDate, formatCurrency, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Search, Plus, Edit2, Trash2, User, Phone, ChevronDown, X, FileText, BedDouble, FlaskConical, Receipt, History } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
+import { waitForOnlineWrite } from '../../lib/offlineWrite';
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'Unknown'];
 const GENDERS = ['Male', 'Female', 'Other'];
@@ -81,11 +82,12 @@ export function Patients() {
     setSaving(true); setError('');
     try {
       if (editId) {
-        await updateDoc(doc(db, 'patients', editId), { ...form, age: Number(form.age), updatedAt: nowISO() });
+        await waitForOnlineWrite(updateDoc(doc(db, 'patients', editId), { ...form, age: Number(form.age), updatedAt: nowISO() }));
         await logAudit('update', 'patient', editId, form.name);
       } else {
         const mrn = await getNextMRN();
-        const ref = await addDoc(collection(db, 'patients'), { ...form, age: Number(form.age), mrn, createdAt: nowISO() });
+        const ref = doc(collection(db, 'patients'));
+        await waitForOnlineWrite(setDoc(ref, { ...form, age: Number(form.age), mrn, createdAt: nowISO() }));
         await logAudit('create', 'patient', ref.id, `${form.name} (${mrn})`);
       }
       setShowModal(false);

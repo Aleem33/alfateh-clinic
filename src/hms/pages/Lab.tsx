@@ -5,6 +5,7 @@ import { db, storage } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, CheckCircle, Clock, BookOpen, Printer, FileText, Upload } from 'lucide-react';
 import { queueLabReportUpload } from '../../lib/offlineSync';
+import { waitForOnlineWrite } from '../../lib/offlineWrite';
 
 const CATEGORIES = ['Hematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Imaging', 'Pathology', 'Other'];
 
@@ -139,13 +140,13 @@ export function Lab() {
           };
         }
       }
-      await updateDoc(doc(db, 'labOrders', showResultModal.id), {
+      await waitForOnlineWrite(updateDoc(doc(db, 'labOrders', showResultModal.id), {
         results,
         reportPdf: reportPdfData,
         status: 'completed',
         completedAt: showResultModal.completedAt || nowISO(),
         updatedAt: nowISO(),
-      });
+      }));
       setReportPdf(null);
       setShowResultModal(null);
     } catch (e: any) { setResultError(e.message || 'Could not save lab report.'); }

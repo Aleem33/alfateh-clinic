@@ -1,6 +1,7 @@
-import { collection, doc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { collection, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where, type Unsubscribe } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
 
 export type SyncSnapshot = {
@@ -21,25 +22,49 @@ type PendingLabReport = {
   storagePath: string;
   createdAt: string;
   blob: Blob;
+  uploadedUrl?: string;
+  uploadedAt?: string;
+  lastError?: string;
 };
 
 const DB_NAME = 'alfateh-offline-sync';
 const DB_VERSION = 1;
 const LAB_STORE = 'pendingLabReports';
+const PENDING_WRITE_COLLECTIONS = [
+  'patients',
+  'appointments',
+  'consultations',
+  'pharmacyOrders',
+  'labOrders',
+  'bills',
+  'medicines',
+  'sales',
+  'saleReturns',
+  'stockMovements',
+  'customers',
+];
 const listeners = new Set<(snapshot: SyncSnapshot) => void>();
+const pendingWriteCollections = new Set<string>();
 const device = getOfflineDevice();
 let online = typeof navigator === 'undefined' ? true : navigator.onLine;
 let syncing = false;
+let labPendingCount = 0;
 let pendingCount = 0;
 let issueCount = 0;
 let lastError = '';
 let started = false;
+let pendingUnsubs: Unsubscribe[] = [];
 
 function currentSnapshot(): SyncSnapshot {
   return { online, syncing, pendingCount, issueCount, lastError, devicePrefix: device.prefix };
 }
 
+function recomputePendingCount() {
+  pendingCount = labPendingCount + pendingWriteCollections.size;
+}
+
 function notify() {
+  recomputePendingCount();
   const snapshot = currentSnapshot();
   listeners.forEach(listener => listener(snapshot));
 }
@@ -76,9 +101,9 @@ async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStor
 async function refreshPendingCount() {
   try {
     const records = await withStore<PendingLabReport[]>('readonly', store => store.getAll());
-    pendingCount = records.length;
+    labPendingCount = records.length;
   } catch {
-    pendingCount = 0;
+    labPendingCount = 0;
   }
   notify();
 }
@@ -108,31 +133,49 @@ async function deleteQueuedLabReport(id: string) {
   await withStore('readwrite', store => store.delete(id));
 }
 
+async function saveQueuedLabReport(record: PendingLabReport) {
+  await withStore('readwrite', store => store.put(record));
+}
+
 async function processLabReportQueue() {
   const records = await withStore<PendingLabReport[]>('readonly', store => store.getAll());
-  pendingCount = records.length;
+  labPendingCount = records.length;
   notify();
 
+  const errors: string[] = [];
   for (const record of records) {
-    const storageRef = ref(storage, record.storagePath);
-    await uploadBytes(storageRef, record.blob, { contentType: record.fileType || 'application/pdf' });
-    const url = await getDownloadURL(storageRef);
-    await updateDoc(doc(db, 'labOrders', record.orderId), {
-      reportPdf: {
-        name: record.fileName,
-        size: record.fileSize,
-        type: record.fileType || 'application/pdf',
-        storagePath: record.storagePath,
-        url,
-        uploadedAt: new Date().toISOString(),
-        pendingUpload: false,
-      },
-      updatedAt: new Date().toISOString(),
-    });
-    await deleteQueuedLabReport(record.id);
+    try {
+      let url = record.uploadedUrl || '';
+      let uploadedAt = record.uploadedAt || '';
+      if (!url) {
+        const storageRef = ref(storage, record.storagePath);
+        await uploadBytes(storageRef, record.blob, { contentType: record.fileType || 'application/pdf' });
+        url = await getDownloadURL(storageRef);
+        uploadedAt = new Date().toISOString();
+        await saveQueuedLabReport({ ...record, uploadedUrl: url, uploadedAt, lastError: '' });
+      }
+      await updateDoc(doc(db, 'labOrders', record.orderId), {
+        reportPdf: {
+          name: record.fileName,
+          size: record.fileSize,
+          type: record.fileType || 'application/pdf',
+          storagePath: record.storagePath,
+          url,
+          uploadedAt,
+          pendingUpload: false,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      await deleteQueuedLabReport(record.id);
+    } catch (error: any) {
+      const message = error?.message || `Could not sync ${record.fileName}.`;
+      errors.push(message);
+      await saveQueuedLabReport({ ...record, lastError: message });
+    }
   }
 
   await refreshPendingCount();
+  if (errors.length > 0) throw new Error(errors[0]);
 }
 
 async function checkStockConflicts() {
@@ -157,6 +200,11 @@ async function checkStockConflicts() {
 
 export async function runOfflineSyncNow() {
   if (!online || syncing) return;
+  if (!auth.currentUser) {
+    lastError = '';
+    notify();
+    return;
+  }
   syncing = true;
   lastError = '';
   notify();
@@ -172,6 +220,33 @@ export async function runOfflineSyncNow() {
   }
 }
 
+function stopPendingWriteWatchers() {
+  pendingUnsubs.forEach(unsub => unsub());
+  pendingUnsubs = [];
+  pendingWriteCollections.clear();
+  notify();
+}
+
+function startPendingWriteWatchers() {
+  if (pendingUnsubs.length > 0 || !auth.currentUser) return;
+  pendingUnsubs = PENDING_WRITE_COLLECTIONS.map(collectionName =>
+    onSnapshot(
+      collection(db, collectionName),
+      { includeMetadataChanges: true },
+      snap => {
+        const hasPendingWrites = snap.docs.some(document => document.metadata.hasPendingWrites);
+        if (hasPendingWrites) pendingWriteCollections.add(collectionName);
+        else pendingWriteCollections.delete(collectionName);
+        notify();
+      },
+      () => {
+        pendingWriteCollections.delete(collectionName);
+        notify();
+      },
+    )
+  );
+}
+
 export function startOfflineSyncService() {
   if (started || typeof window === 'undefined') return;
   started = true;
@@ -184,8 +259,17 @@ export function startOfflineSyncService() {
 
   window.addEventListener('online', updateOnline);
   window.addEventListener('offline', updateOnline);
+  onAuthStateChanged(auth, user => {
+    lastError = '';
+    if (user) {
+      startPendingWriteWatchers();
+      if (online) void runOfflineSyncNow();
+    } else {
+      stopPendingWriteWatchers();
+    }
+    notify();
+  });
   void refreshPendingCount();
-  if (online) void runOfflineSyncNow();
 }
 
 export function subscribeSyncStatus(listener: (snapshot: SyncSnapshot) => void) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, getDoc, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { db, auth, getNextMRN } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
@@ -14,6 +14,7 @@ import {
   isSameDay, isSameMonth, addMonths, subMonths, parseISO,
 } from 'date-fns';
 import { cn } from '../lib/utils';
+import { waitForOnlineWrite } from '../../lib/offlineWrite';
 
 const DEPARTMENTS = ['General Medicine','Surgery','Gynecology','Pediatrics','ENT','Orthopedics','Dermatology','Cardiology','Neurology','Ophthalmology','Dentistry','Radiology','Anesthesia'];
 const TYPES = ['OPD','Follow-up','Emergency','Procedure'];
@@ -183,7 +184,8 @@ export function Appointments() {
       // Create new patient if needed
       if (patientMode === 'new') {
         const mrn = await getNextMRN();
-        const ref = await addDoc(collection(db, 'patients'), { ...newPt, age: Number(newPt.age) || 0, mrn, createdAt: nowISO() });
+        const ref = doc(collection(db, 'patients'));
+        await waitForOnlineWrite(setDoc(ref, { ...newPt, age: Number(newPt.age) || 0, mrn, createdAt: nowISO() }));
         await logAudit('create', 'patient', ref.id, `${newPt.name} (${mrn}) — via appointment`);
         patientId = ref.id; patientName = newPt.name; patientMRN = mrn;
         patientAge = newPt.age; patientGender = newPt.gender;
@@ -192,11 +194,12 @@ export function Appointments() {
       const tokenNo = appointments.filter(a => a.date === apptForm.date).length + 1;
 
       // Save appointment with vitals
-      const apptRef = await addDoc(collection(db, 'appointments'), {
+      const apptRef = doc(collection(db, 'appointments'));
+      await waitForOnlineWrite(setDoc(apptRef, {
         ...apptForm, fee: Number(apptForm.fee), tokenNo,
         patientId, patientName, patientMRN, patientAge, patientGender,
         vitals, status: 'scheduled', createdAt: nowISO(),
-      });
+      }));
       await logAudit('create', 'appointment', apptRef.id, `${patientName} — ${apptForm.date} ${apptForm.time}`);
 
       setShowModal(false);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, getDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, getDoc, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { db, auth, getNextBillNo } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
@@ -12,6 +12,7 @@ import { filterDoctorRecords, findCurrentDoctorStaff, normalizeRole } from '../l
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppDialog } from '../../components/AppDialog';
+import { waitForOnlineWrite } from '../../lib/offlineWrite';
 
 const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology', 'Anesthesia'];
 const FOLLOW_UP_DAYS = Array.from({ length: 14 }, (_, i) => i + 1);
@@ -501,22 +502,23 @@ export function OPD() {
 
       // Save consultation
       const data = { ...formRest, followUpDays: followUpDays || '', followUpDate, fee, prescriptions: prescriptionPayload, labOrders, vitals, appointmentId: appointmentId || '', createdAt: nowISO() };
-      const ref = await addDoc(collection(db, 'consultations'), data);
+      const ref = doc(collection(db, 'consultations'));
+      await waitForOnlineWrite(setDoc(ref, data));
       await logAudit('create', 'consultation', ref.id, `${form.patientName} — ${form.diagnosis || form.complaints.slice(0, 40)}`);
 
       if (appointmentId) {
-        await updateDoc(doc(db, 'appointments', appointmentId), {
+        await waitForOnlineWrite(updateDoc(doc(db, 'appointments', appointmentId), {
           status: 'completed',
           consultationId: ref.id,
           updatedAt: nowISO(),
-        });
+        }));
         await logAudit('update', 'appointment', appointmentId, `completed from OPD: ${ref.id}`);
       }
 
       // Auto-generate bill from OPD consultation
       if (fee > 0) {
         const billNo = await getNextBillNo();
-        await addDoc(collection(db, 'bills'), {
+        await waitForOnlineWrite(addDoc(collection(db, 'bills'), {
           billNo,
           patientId: form.patientId, patientName: form.patientName, patientMRN: form.patientMRN,
           date: form.date,
@@ -526,18 +528,19 @@ export function OPD() {
           consultationId: ref.id, appointmentId: appointmentId || '',
           cashierId: auth.currentUser?.uid || '',
           createdAt: nowISO(),
-        });
+        }));
         await logAudit('create', 'bill', billNo, `${billNo} — ${form.patientName} — Rs.${fee} (OPD)`);
       }
 
       // Create lab order documents if any
       if (labOrders.length > 0) {
-        const labRef = await addDoc(collection(db, 'labOrders'), {
+        const labRef = doc(collection(db, 'labOrders'));
+        await waitForOnlineWrite(setDoc(labRef, {
           patientId: form.patientId, patientName: form.patientName,
           patientMRN: form.patientMRN,
           doctorName: form.doctorName, tests: labOrders, status: 'pending',
           date: form.date, createdAt: nowISO(),
-        });
+        }));
         await logAudit('create', 'labOrder', labRef.id, `${form.patientName} — ${labOrders.length} test(s)`);
       }
 

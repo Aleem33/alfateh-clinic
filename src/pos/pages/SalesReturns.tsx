@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, increment, writeBatch } from 'firebase/firestore';
 import { printOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosSaleReturnNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { getReturnNo, getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
+import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -227,11 +228,14 @@ export function SalesReturns() {
         processedBy: auth.currentUser?.uid,
       };
 
-      const docRef = await addDoc(collection(db, 'saleReturns'), returnDoc);
+      const batch = writeBatch(db);
+      const docRef = doc(collection(db, 'saleReturns'));
+      batch.set(docRef, returnDoc);
 
       for (const item of itemsToReturn) {
         const unitsToRestore = item.returnQty * (item.sellType === 'box' ? item.unitsPerBox : 1);
-        await addDoc(collection(db, 'stockMovements'), {
+        const movementRef = doc(collection(db, 'stockMovements'));
+        batch.set(movementRef, {
           type: 'sale-return',
           returnId: docRef.id,
           returnNo,
@@ -243,10 +247,11 @@ export function SalesReturns() {
           createdAt: new Date().toISOString(),
           processedBy: auth.currentUser?.uid || '',
         });
-        await updateDoc(doc(db, 'medicines', item.medicineId), {
+        batch.update(doc(db, 'medicines', item.medicineId), {
           stock: increment(unitsToRestore),
         });
       }
+      await waitForOnlineWrite(batch.commit());
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setSelectedSale(null);

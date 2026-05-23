@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, increment, writeBatch } from 'firebase/firestore';
 import { printOrShare, printPageOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosReceiptNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { getSaleReceiptNo } from '../lib/receiptNumbers';
+import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import {
   Search, Plus, Minus, Trash2, Printer, ShoppingCart, Tag,
   User, UserCheck, UserX, ChevronDown, Percent, DollarSign,
@@ -238,10 +239,13 @@ export function Billing() {
         saleData.customerName  = selectedCustomer.name;
         saleData.customerPhone = selectedCustomer.phone || '';
       }
-      const docRef = await addDoc(collection(db, 'sales'), saleData);
+      const batch = writeBatch(db);
+      const docRef = doc(collection(db, 'sales'));
+      batch.set(docRef, saleData);
       for (const item of cart) {
         const unitsToDeduct = item.quantity * (item.sellType === 'box' ? item.unitsPerBox : 1);
-        await addDoc(collection(db, 'stockMovements'), {
+        const movementRef = doc(collection(db, 'stockMovements'));
+        batch.set(movementRef, {
           type: 'sale',
           saleId: docRef.id,
           receiptNo,
@@ -252,11 +256,12 @@ export function Billing() {
           createdAt: new Date().toISOString(),
           cashierId: auth.currentUser?.uid || '',
         });
-        await updateDoc(doc(db, 'medicines', item.medicineId), { stock: increment(-unitsToDeduct) });
+        batch.update(doc(db, 'medicines', item.medicineId), { stock: increment(-unitsToDeduct) });
       }
       if (selectedCustomer && pendingAmount > 0) {
-        await updateDoc(doc(db, 'customers', selectedCustomer.id), { creditBalance: increment(pendingAmount) });
+        batch.update(doc(db, 'customers', selectedCustomer.id), { creditBalance: increment(pendingAmount) });
       }
+      await waitForOnlineWrite(batch.commit());
       setLastReceipt({ ...saleData, id: docRef.id });
       setCart([]); setOrderDiscount(0); setAmountPaid('');
       setSelectedCustomer(null); setCustomerSearch('');
