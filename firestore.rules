@@ -221,6 +221,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /stockMovements/{doc} {
+      allow read: if isAuth();
+      allow create: if isAdmin() || isPharmacist() || isCashier();
+      allow update, delete: if isAdmin();
+    }
+
+    match /syncIssues/{doc} {
+      allow read: if isAdmin();
+      allow create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+
     match /customers/{doc} {
       allow read: if isAuth();
       allow create, update: if isAdmin() || isCashier();

@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
+import { getNextLocalNumber } from './lib/offlineIdentity';
 
 // ── App instances ─────────────────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
@@ -58,6 +59,10 @@ export const registerSecondaryUser = createUser;
 
 // ── Auto-incrementing counters (MRN, Bill numbers) ────────────────────────────
 export async function getNextMRN(): Promise<string> {
+  return `MRN-${getNextLocalNumber('mrn', 5)}`;
+}
+
+export async function getNextServerMRN(): Promise<string> {
   const ref = doc(db, 'counters', 'mrn');
   const snap = await getDoc(ref);
   if (!snap.exists()) {
@@ -70,6 +75,10 @@ export async function getNextMRN(): Promise<string> {
 }
 
 export async function getNextBillNo(): Promise<string> {
+  return `BILL-${getNextLocalNumber('bill', 5)}`;
+}
+
+export async function getNextServerBillNo(): Promise<string> {
   const ref = doc(db, 'counters', 'bill');
   const snap = await getDoc(ref);
   if (!snap.exists()) {
@@ -95,16 +104,15 @@ async function getNextCounterNumber(counterId: string): Promise<string> {
 }
 
 export async function getNextPosReceiptNo(): Promise<string> {
-  const next = await getNextCounterNumber('posReceipt');
-  return `SALE-${next}`;
+  return `SALE-${getNextLocalNumber('posReceipt')}`;
 }
 
 export async function getNextPosSaleReturnNo(): Promise<string> {
-  return getNextCounterNumber('posSaleReturn');
+  return `SR-${getNextLocalNumber('posSaleReturn')}`;
 }
 
 export async function getNextPosPurchaseReturnNo(): Promise<string> {
-  return getNextCounterNumber('posPurchaseReturn');
+  return `PR-${getNextLocalNumber('posPurchaseReturn')}`;
 }
 
 // ── Firestore error handler ───────────────────────────────────────────────────

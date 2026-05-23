@@ -4,6 +4,7 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, CheckCircle, Clock, BookOpen, Printer, FileText, Upload } from 'lucide-react';
+import { queueLabReportUpload } from '../../lib/offlineSync';
 
 const CATEGORIES = ['Hematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Imaging', 'Pathology', 'Other'];
 
@@ -110,17 +111,33 @@ export function Lab() {
       let reportPdfData = showResultModal.reportPdf || null;
       if (reportPdf) {
         const path = `labReports/${showResultModal.id}/${Date.now()}-${safeFileName(reportPdf.name)}`;
-        const storageRef = ref(storage, path);
-        await uploadBytes(storageRef, reportPdf, { contentType: 'application/pdf' });
-        const url = await getDownloadURL(storageRef);
-        reportPdfData = {
-          name: reportPdf.name,
-          size: reportPdf.size,
-          type: reportPdf.type || 'application/pdf',
-          storagePath: path,
-          url,
-          uploadedAt: nowISO(),
-        };
+        try {
+          if (!navigator.onLine) throw new Error('Offline: PDF upload queued.');
+          const storageRef = ref(storage, path);
+          await uploadBytes(storageRef, reportPdf, { contentType: 'application/pdf' });
+          const url = await getDownloadURL(storageRef);
+          reportPdfData = {
+            name: reportPdf.name,
+            size: reportPdf.size,
+            type: reportPdf.type || 'application/pdf',
+            storagePath: path,
+            url,
+            uploadedAt: nowISO(),
+            pendingUpload: false,
+          };
+        } catch (uploadError: any) {
+          await queueLabReportUpload({ orderId: showResultModal.id, file: reportPdf, storagePath: path });
+          reportPdfData = {
+            name: reportPdf.name,
+            size: reportPdf.size,
+            type: reportPdf.type || 'application/pdf',
+            storagePath: path,
+            url: '',
+            pendingUpload: true,
+            queuedAt: nowISO(),
+            uploadError: uploadError?.message || '',
+          };
+        }
       }
       await updateDoc(doc(db, 'labOrders', showResultModal.id), {
         results,
@@ -248,7 +265,11 @@ export function Lab() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    {o.reportPdf?.url ? (
+                    {o.reportPdf?.pendingUpload ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-amber-700 border border-amber-100 bg-amber-50 px-2 py-1 rounded-lg font-medium">
+                        <Clock className="w-3 h-3" /> PDF upload pending
+                      </span>
+                    ) : o.reportPdf?.url ? (
                       <button
                         onClick={() => window.open(o.reportPdf.url, '_blank')}
                         className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 border border-red-100 bg-red-50 px-2 py-1 rounded-lg font-medium"

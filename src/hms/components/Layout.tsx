@@ -7,6 +7,7 @@ import {
   Settings as SettingsIcon, LogOut, Truck,
   TrendingDown, ClipboardList, ChevronLeft, ChevronRight,
   Shield, CalendarCheck, Hotel, ArrowLeftRight, Monitor, BookOpen,
+  RefreshCw,
 } from 'lucide-react';
 import { logout } from '../../firebase';
 import { cn } from '../lib/utils';
@@ -44,6 +45,7 @@ const NAV = [
       { to: '/expenses', icon: TrendingDown,  label: 'Expenses',   roles: ['admin'] },
       { to: '/reports',  icon: BarChart3,     label: 'Reports',    roles: ['admin'] },
       { to: '/audit',    icon: Shield,        label: 'Audit Logs', roles: ['admin'] },
+      { to: '/sync-issues', icon: RefreshCw,  label: 'Sync Issues', roles: ['admin'] },
       { to: '/settings', icon: SettingsIcon,  label: 'Settings',   roles: ['admin'] },
     ],
   },

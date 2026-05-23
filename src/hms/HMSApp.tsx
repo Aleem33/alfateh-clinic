@@ -22,6 +22,7 @@ import { AuditLogs } from './pages/AuditLogs';
 import { Schedule } from './pages/Schedule';
 import { BedManagement } from './pages/BedManagement';
 import { useAutoNotifications } from './lib/notifications';
+import { SyncIssuesPage } from '../components/SyncIssuesPage';
 
 interface Props {
   userRole: string | null;
@@ -68,6 +69,7 @@ export function HMSApp({ userRole, userEmail, onSwitchApp, onLoginSuccess, onBac
             {isAdmin && <Route path="expenses" element={<Expenses />} />}
             {isAdmin && <Route path="reports"  element={<Reports />} />}
             {isAdmin && <Route path="audit"    element={<AuditLogs />} />}
+            {isAdmin && <Route path="sync-issues" element={<SyncIssuesPage />} />}
             {isAdmin && <Route path="settings" element={<Settings />} />}
             {!clinical.includes(r) && <Route index element={<Navigate to={defaultPath} replace />} />}
             <Route path="*" element={<Navigate to="/" replace />} />

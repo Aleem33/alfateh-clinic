@@ -241,6 +241,17 @@ export function Billing() {
       const docRef = await addDoc(collection(db, 'sales'), saleData);
       for (const item of cart) {
         const unitsToDeduct = item.quantity * (item.sellType === 'box' ? item.unitsPerBox : 1);
+        await addDoc(collection(db, 'stockMovements'), {
+          type: 'sale',
+          saleId: docRef.id,
+          receiptNo,
+          medicineId: item.medicineId,
+          medicineName: item.name,
+          quantity: -unitsToDeduct,
+          deviceReceiptNo: receiptNo,
+          createdAt: new Date().toISOString(),
+          cashierId: auth.currentUser?.uid || '',
+        });
         await updateDoc(doc(db, 'medicines', item.medicineId), { stock: increment(-unitsToDeduct) });
       }
       if (selectedCustomer && pendingAmount > 0) {

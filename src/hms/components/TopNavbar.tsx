@@ -6,6 +6,7 @@ import { Bell, Search, Users, Pill, Briefcase, X, CheckCheck } from 'lucide-reac
 import { useGlobalSearch } from '../lib/search';
 import { cn } from '../lib/utils';
 import { formatDate } from '../lib/utils';
+import { SyncStatusBadge } from '../../components/SyncStatusBadge';
 
 const TYPE_ICONS: Record<string, any> = {
   patient: Users, staff: Briefcase, medicine: Pill,
@@ -146,6 +147,8 @@ export function TopNavbar({ userEmail, userRole }: { userEmail: string; userRole
       </div>
 
       <div className="flex items-center gap-2 ml-auto">
+        <SyncStatusBadge />
+
         {/* Notifications */}
         <div ref={notifRef} className="relative">
           <button onClick={() => setNotifOpen(o => !o)}

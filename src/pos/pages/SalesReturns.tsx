@@ -231,6 +231,18 @@ export function SalesReturns() {
 
       for (const item of itemsToReturn) {
         const unitsToRestore = item.returnQty * (item.sellType === 'box' ? item.unitsPerBox : 1);
+        await addDoc(collection(db, 'stockMovements'), {
+          type: 'sale-return',
+          returnId: docRef.id,
+          returnNo,
+          originalSaleId: selectedSale.id,
+          originalReceiptNo: getSaleReceiptNo(selectedSale),
+          medicineId: item.medicineId,
+          medicineName: item.name,
+          quantity: unitsToRestore,
+          createdAt: new Date().toISOString(),
+          processedBy: auth.currentUser?.uid || '',
+        });
         await updateDoc(doc(db, 'medicines', item.medicineId), {
           stock: increment(unitsToRestore),
         });

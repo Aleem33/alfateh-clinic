@@ -5,9 +5,11 @@ import {
   LayoutDashboard, ShoppingCart, Pill, Users, Truck,
   BarChart3, Settings, LogOut, UserCog, History, Receipt,
   PackagePlus, RotateCcw, Menu, X, ClipboardList, ArrowLeftRight,
+  RefreshCw,
 } from 'lucide-react';
 import { logout } from '../../firebase';
 import { cn } from '../lib/utils';
+import { SyncStatusBadge } from '../../components/SyncStatusBadge';
 
 const allNavItems = [
   { to: '/',                 icon: LayoutDashboard, label: 'Dashboard',        roles: ['admin', 'pharmacist'] },
@@ -22,6 +24,7 @@ const allNavItems = [
   { to: '/suppliers',        icon: Truck,           label: 'Suppliers',        roles: ['admin', 'pharmacist'] },
   { to: '/expenses',         icon: Receipt,         label: 'Expenses',         roles: ['admin'] },
   { to: '/reports',          icon: BarChart3,       label: 'Reports',          roles: ['admin'] },
+  { to: '/sync-issues',      icon: RefreshCw,       label: 'Sync Issues',      roles: ['admin'] },
   { to: '/users',            icon: UserCog,         label: 'Users',            roles: ['admin'] },
   { to: '/settings',         icon: Settings,        label: 'Settings',         roles: ['admin'] },
 ];
@@ -155,9 +158,13 @@ export function Layout({ role, onSwitchApp, onLogout }: Props) {
           </button>
           <img src={logoUrl} alt="" className="w-7 h-7 object-contain rounded-full border border-white/50 bg-white" />
           <span className="font-semibold text-base">Al-Fateh Pharmacy POS</span>
+          <div className="ml-auto"><SyncStatusBadge compact /></div>
         </header>
 
         <main className="flex-1 overflow-auto p-4 md:p-6 print:p-0 print:overflow-visible">
+          <div className="hidden md:flex justify-end mb-3 print:hidden">
+            <SyncStatusBadge />
+          </div>
           <Outlet />
         </main>
       </div>

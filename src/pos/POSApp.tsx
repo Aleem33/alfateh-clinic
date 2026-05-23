@@ -16,6 +16,7 @@ import { Purchases } from './pages/Purchases';
 import { SalesReturns } from './pages/SalesReturns';
 import { PurchaseReturns } from './pages/PurchaseReturns';
 import { PatientHistory } from './pages/PatientHistory';
+import { SyncIssuesPage } from '../components/SyncIssuesPage';
 
 interface Props {
   userRole: string | null;
@@ -49,6 +50,7 @@ export function POSApp({ userRole, onSwitchApp, onLoginSuccess, onBack, onLogout
             {isAdmin                         && <Route path="reports"          element={<Reports />} />}
             {isAdmin                         && <Route path="users"            element={<Users />} />}
             {isAdmin                         && <Route path="settings"         element={<Settings />} />}
+            {isAdmin                         && <Route path="sync-issues"      element={<SyncIssuesPage />} />}
             {(isAdmin || r === 'pharmacist' || r === 'cashier') && <Route path="patient-history" element={<PatientHistory />} />}
 
             {r === 'cashier'    && <Route index element={<Navigate to="/billing" replace />} />}

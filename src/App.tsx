@@ -9,6 +9,7 @@ import { POSApp } from './pos/POSApp';
 import { GlobalAppNotifications } from './components/GlobalAppNotifications';
 import { AppDialogProvider } from './components/AppDialog';
 import { DesktopTitleBar } from './components/DesktopTitleBar';
+import { startOfflineSyncService } from './lib/offlineSync';
 
 type AppMode = 'hms' | 'pos' | null;
 
@@ -24,6 +25,10 @@ export default function App() {
   const [sessionAuthed, setSessionAuthed] = useState(false);
 
   useEffect(() => {
+    startOfflineSyncService();
+  }, []);
+
+  useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setAuthError('');
       if (u) {
@@ -37,10 +42,16 @@ export default function App() {
             setUserEmail('');
           } else {
             setUserRole(snap.data().role || 'cashier');
+            localStorage.setItem('alfateh.cachedUserRole', snap.data().role || 'cashier');
           }
         } catch {
-          setAuthError('Failed to load your account. Please try again.');
-          await logout();
+          if (!navigator.onLine) {
+            setAuthError('Using cached login. Some cloud-only actions will sync when internet returns.');
+            setUserRole(localStorage.getItem('alfateh.cachedUserRole') || 'cashier');
+          } else {
+            setAuthError('Failed to load your account. Please try again.');
+            await logout();
+          }
         }
       } else {
         setUserRole(null);
@@ -60,6 +71,10 @@ export default function App() {
   const handleSelectApp = async (mode: AppMode) => {
     setSessionAuthed(false);
     setAppMode(mode);
+    if (!navigator.onLine && auth.currentUser) {
+      setSessionAuthed(true);
+      return;
+    }
     // Sign out any persisted Firebase session silently (don't let
     // onAuthStateChanged reset appMode — we set it right after)
     if (auth.currentUser) {

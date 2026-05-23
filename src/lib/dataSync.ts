@@ -25,6 +25,8 @@ export const GLOBAL_DATA_COLLECTIONS = [
   'purchaseReturns',
   'sales',
   'saleReturns',
+  'stockMovements',
+  'syncIssues',
   'posSales',
   'customers',
   'customerPayments',
