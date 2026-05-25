@@ -4,7 +4,7 @@ import { db } from '../../firebase';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
 import { format, subDays, subMonths, startOfMonth, endOfMonth, differenceInDays, parseISO } from 'date-fns';
-import { Download, TrendingUp, AlertCircle, DollarSign, Activity } from 'lucide-react';
+import { Download, TrendingUp, AlertCircle, DollarSign, Activity, FileText, Search, CalendarDays } from 'lucide-react';
 
 function exportCSV(filename: string, rows: any[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
@@ -31,7 +31,8 @@ function StatCard({ label, value, sub, color, icon: Icon }: any) {
   );
 }
 
-type Tab = 'overview' | 'pl' | 'outstanding' | 'expiry';
+type Tab = 'overview' | 'advanced' | 'pl' | 'outstanding' | 'expiry';
+type AdvancedReportType = 'billing' | 'pos' | 'consultations' | 'patients' | 'lab' | 'expenses' | 'inventory';
 
 export function Reports() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -45,6 +46,10 @@ export function Reports() {
   const [posSales, setPosSales] = useState<any[]>([]);
   const [period, setPeriod] = useState<'7d' | '30d' | '3m'>('30d');
   const [outstandingSearch, setOutstandingSearch] = useState('');
+  const [advancedType, setAdvancedType] = useState<AdvancedReportType>('billing');
+  const [advancedFrom, setAdvancedFrom] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
+  const [advancedTo, setAdvancedTo] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [advancedSearch, setAdvancedSearch] = useState('');
 
   useEffect(() => {
     const u = [
@@ -126,10 +131,92 @@ export function Reports() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'overview',     label: 'Overview' },
+    { id: 'advanced',     label: 'Advanced Generator' },
     { id: 'pl',           label: 'P&L' },
     { id: 'outstanding',  label: `Outstanding (${outstanding.length})` },
     { id: 'expiry',       label: `Expiring (${expiryItems.length})` },
   ];
+
+  const reportConfigs: Record<AdvancedReportType, { label: string; headers: string[]; rows: any[][]; dateIndex?: number; moneyIndexes?: number[] }> = {
+    billing: {
+      label: 'Clinic Billing',
+      headers: ['Bill No', 'Patient', 'MRN', 'Date', 'Total', 'Paid', 'Balance', 'Status'],
+      rows: bills.map(b => [b.billNo || b.id, b.patientName, b.patientMRN, b.date?.split('T')[0], b.total || 0, b.paid || 0, b.balance || 0, b.paymentStatus || '']),
+      dateIndex: 3,
+      moneyIndexes: [4, 5, 6],
+    },
+    pos: {
+      label: 'Pharmacy Sales',
+      headers: ['Receipt No', 'Customer', 'Type', 'Date', 'Items', 'Subtotal', 'Discount', 'Total', 'Paid', 'Pending'],
+      rows: posSales.map(s => [s.receiptNo || s.saleId || s.id, s.customerName || 'Walk-in', s.customerType || 'customer', s.date?.split('T')[0], s.items?.length || 0, s.subtotal || 0, s.discount || 0, s.total || 0, s.amountPaid || 0, s.pendingAmount || 0]),
+      dateIndex: 3,
+      moneyIndexes: [5, 6, 7, 8, 9],
+    },
+    consultations: {
+      label: 'OPD Consultations',
+      headers: ['Patient', 'MRN', 'Doctor', 'Department', 'Date', 'Diagnosis', 'Fee', 'Medicines', 'Lab Tests'],
+      rows: consultations.map(c => [c.patientName, c.patientMRN, c.doctorName, c.department, c.date || c.createdAt?.split('T')[0], c.diagnosis || '', c.fee || 0, c.prescriptions?.length || 0, c.labOrders?.length || 0]),
+      dateIndex: 4,
+      moneyIndexes: [6],
+    },
+    patients: {
+      label: 'Patient Registry',
+      headers: ['MRN', 'Name', 'Age', 'Gender', 'Phone', 'Blood Group', 'Registered'],
+      rows: patients.map(p => [p.mrn, p.name, p.age, p.gender, p.phone, p.bloodGroup, p.createdAt?.split('T')[0]]),
+      dateIndex: 6,
+    },
+    lab: {
+      label: 'Laboratory Orders',
+      headers: ['Patient', 'MRN', 'Doctor', 'Date', 'Tests', 'Status', 'Result Date', 'PDF'],
+      rows: labOrders.map(l => [l.patientName, l.patientMRN, l.doctorName, l.date || l.createdAt?.split('T')[0], (l.tests || []).map((t: any) => t.testName || t.name).join(', '), l.status, l.resultDate || l.completedAt?.split('T')[0] || '', l.reportPdf?.url ? 'Uploaded' : l.reportPdf?.pendingUpload ? 'Pending upload' : '']),
+      dateIndex: 3,
+    },
+    expenses: {
+      label: 'Expenses',
+      headers: ['Date', 'Category', 'Description', 'Amount', 'Created By'],
+      rows: expenses.map(e => [e.date?.split('T')[0], e.category, e.description || e.title || '', Number(e.amount) || 0, e.createdBy || '']),
+      dateIndex: 0,
+      moneyIndexes: [3],
+    },
+    inventory: {
+      label: 'Medicine Inventory',
+      headers: ['Medicine', 'Category/Form', 'Batch', 'Expiry', 'Stock', 'Cost Price', 'Retail Price', 'Stock Value', 'Status'],
+      rows: medicines.map(m => {
+        const daysLeft = m.expiryDate ? differenceInDays(parseISO(m.expiryDate), new Date()) : null;
+        const stock = Number(m.stock) || 0;
+        const cost = Number(m.costPrice) || 0;
+        return [
+          m.name,
+          m.category || m.form || '',
+          m.batchNo || '',
+          m.expiryDate || '',
+          stock,
+          cost,
+          Number(m.retailPrice || m.price) || 0,
+          stock * (cost / Math.max(Number(m.unitsPerBox) || 1, 1)),
+          daysLeft === null ? 'No expiry' : daysLeft <= 0 ? 'Expired' : daysLeft <= 30 ? 'Expiring soon' : stock <= Math.max(Number(m.unitsPerBox) || 1, 1) * 2 ? 'Low stock' : 'OK',
+        ];
+      }),
+      dateIndex: 3,
+      moneyIndexes: [5, 6, 7],
+    },
+  };
+
+  const activeReport = reportConfigs[advancedType];
+  const advancedRows = activeReport.rows.filter(row => {
+    const rowDate = activeReport.dateIndex !== undefined ? String(row[activeReport.dateIndex] || '').slice(0, 10) : '';
+    const inRange = !rowDate || ((!advancedFrom || rowDate >= advancedFrom) && (!advancedTo || rowDate <= advancedTo));
+    const haystack = row.map(v => String(v ?? '').toLowerCase()).join(' ');
+    return inRange && (!advancedSearch || haystack.includes(advancedSearch.toLowerCase()));
+  });
+  const advancedTotals = (activeReport.moneyIndexes || []).map(index => ({
+    label: activeReport.headers[index],
+    value: advancedRows.reduce((sum, row) => sum + (Number(row[index]) || 0), 0),
+  }));
+
+  const exportAdvancedReport = () => {
+    exportCSV(`${advancedType}-report-${format(new Date(), 'yyyy-MM-dd')}.csv`, advancedRows, activeReport.headers);
+  };
 
   return (
     <div className="space-y-5">
@@ -257,6 +344,105 @@ export function Reports() {
       </>)}
 
       {/* ── P&L ── */}
+      {/* Advanced Generator */}
+      {tab === 'advanced' && (<>
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <FileText className="w-5 h-5 text-blue-600" />
+                <h2 className="font-semibold text-gray-900">Advanced Report Generator</h2>
+              </div>
+              <p className="text-sm text-gray-500">Generate filtered reports across clinic, lab, pharmacy, expenses, and inventory.</p>
+            </div>
+            <button onClick={exportAdvancedReport}
+              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+              <Download className="w-4 h-4" /> Export CSV
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Report Type</label>
+              <select value={advancedType} onChange={e => setAdvancedType(e.target.value as AdvancedReportType)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                {(Object.keys(reportConfigs) as AdvancedReportType[]).map(key => (
+                  <option key={key} value={key}>{reportConfigs[key].label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">From</label>
+              <div className="relative">
+                <CalendarDays className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="date" value={advancedFrom} onChange={e => setAdvancedFrom(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
+              <div className="relative">
+                <CalendarDays className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="date" value={advancedTo} onChange={e => setAdvancedTo(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input value={advancedSearch} onChange={e => setAdvancedSearch(e.target.value)}
+                  placeholder="Any text..."
+                  className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label="Rows" value={advancedRows.length} sub={activeReport.label} icon={FileText} />
+          {advancedTotals.slice(0, 3).map(total => (
+            <StatCard key={total.label} label={total.label} value={formatCurrency(total.value)} color="text-blue-700" icon={DollarSign} />
+          ))}
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
+            <h2 className="font-semibold text-gray-900">{activeReport.label} Preview</h2>
+            <span className="text-xs text-gray-500">{advancedRows.length} matching rows</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  {activeReport.headers.map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {advancedRows.length === 0 ? (
+                  <tr><td colSpan={activeReport.headers.length} className="text-center py-10 text-gray-400 text-sm">No matching records</td></tr>
+                ) : advancedRows.slice(0, 100).map((row, i) => (
+                  <tr key={`${advancedType}-${i}`} className="hover:bg-gray-50/50">
+                    {row.map((cell, j) => (
+                      <td key={j} className="px-4 py-3 text-gray-700 whitespace-nowrap">
+                        {activeReport.moneyIndexes?.includes(j) ? formatCurrency(Number(cell) || 0) : String(cell ?? '') || '-'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {advancedRows.length > 100 && (
+            <div className="px-5 py-3 bg-gray-50 text-xs text-gray-500 border-t border-gray-100">
+              Showing first 100 rows. Export CSV includes all {advancedRows.length} matching rows.
+            </div>
+          )}
+        </div>
+      </>)}
+
       {tab === 'pl' && (<>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Total Revenue"  value={formatCurrency(totalRevenue)}  color="text-blue-700"  icon={TrendingUp} />
