@@ -1,4 +1,4 @@
-export type PrescriptionPrintMode = 'full' | 'preprinted';
+export type PrescriptionPrintMode = 'preprinted';
 
 export type PrescriptionPrintSettings = {
   mode: PrescriptionPrintMode;
@@ -10,7 +10,7 @@ export type PrescriptionPrintSettings = {
 const STORAGE_KEY = 'alfateh-prescription-print-settings';
 
 export const DEFAULT_PRESCRIPTION_PRINT_SETTINGS: PrescriptionPrintSettings = {
-  mode: 'full',
+  mode: 'preprinted',
   offsetX: 0,
   offsetY: 0,
   fontScale: 100,
@@ -22,7 +22,7 @@ export function getPrescriptionPrintSettings(): PrescriptionPrintSettings {
     if (!saved) return DEFAULT_PRESCRIPTION_PRINT_SETTINGS;
     const parsed = JSON.parse(saved);
     return {
-      mode: parsed.mode === 'preprinted' ? 'preprinted' : 'full',
+      mode: 'preprinted',
       offsetX: Number(parsed.offsetX) || 0,
       offsetY: Number(parsed.offsetY) || 0,
       fontScale: Number(parsed.fontScale) || 100,
@@ -34,7 +34,7 @@ export function getPrescriptionPrintSettings(): PrescriptionPrintSettings {
 
 export function savePrescriptionPrintSettings(settings: PrescriptionPrintSettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    mode: settings.mode,
+    mode: 'preprinted',
     offsetX: Number(settings.offsetX) || 0,
     offsetY: Number(settings.offsetY) || 0,
     fontScale: Number(settings.fontScale) || 100,

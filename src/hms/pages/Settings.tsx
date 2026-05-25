@@ -329,20 +329,9 @@ export function Settings() {
           <h2 className="font-semibold text-gray-900">Prescription Printing</h2>
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          Use pre-printed pad overlay when printing on existing Al-Fateh pads. Print one test on plain paper first, then adjust offsets if needed.
+          Prescriptions print on existing Al-Fateh pads. Print one test on plain paper first, then adjust offsets if needed.
         </p>
         <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Print Mode</label>
-            <select
-              value={printSettings.mode}
-              onChange={e => setPrintSettings(s => ({ ...s, mode: e.target.value as PrescriptionPrintSettings['mode'] }))}
-              className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="full">Full letterhead print</option>
-              <option value="preprinted">Pre-printed pad overlay</option>
-            </select>
-          </div>
           <F
             label="Horizontal Offset (mm)"
             type="number"

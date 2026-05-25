@@ -1,6 +1,6 @@
 /**
  * Al-Fateh Clinic — Print Utilities
- * Prescription layout supports full letterhead and pre-printed pad overlays.
+ * Prescription layout prints on pre-printed pad overlays.
  */
 import { getPrescriptionPrintSettings } from './prescriptionPrintSettings';
 import { formatMedicineNameWithForm } from './prescriptionMedicine';
@@ -144,10 +144,8 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 }
 
 export function printPrescription(data: PrescriptionPrintData) {
-  if (getPrescriptionPrintSettings().mode === 'preprinted') {
-    printHTML(buildPreprintedPrescriptionHTML(data));
-    return;
-  }
+  printHTML(buildPreprintedPrescriptionHTML(data));
+  return;
 
   const medRows = data.prescriptions.map((p, i) => `
     <div class="med-item">
