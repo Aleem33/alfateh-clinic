@@ -1,5 +1,5 @@
 import { collection, doc, getDocs, writeBatch } from 'firebase/firestore';
-import { db } from '../firebase';
+import { auth, db } from '../firebase';
 
 export const GLOBAL_DATA_COLLECTIONS = [
   'settings',
@@ -103,14 +103,20 @@ export async function restoreAllAppData(backup: BackupFile, onProgress?: Progres
 
 export async function deleteAllAppData(onProgress?: ProgressFn) {
   let totalDocs = 0;
-  for (const collectionName of GLOBAL_DATA_COLLECTIONS) {
-    onProgress?.(`Deleting ${collectionName}...`);
-    const snap = await getDocs(collection(db, collectionName));
-    const docs = snap.docs;
-    if (!docs.length) continue;
+  const currentUserId = auth.currentUser?.uid || '';
 
-    await commitInChunks(docs, (batch, document) => batch.delete(document.ref));
-    totalDocs += docs.length;
+  for (const collectionName of GLOBAL_DATA_COLLECTIONS) {
+    try {
+      onProgress?.(`Deleting ${collectionName}...`);
+      const snap = await getDocs(collection(db, collectionName));
+      const docs = snap.docs.filter(document => !(collectionName === 'users' && document.id === currentUserId));
+      if (!docs.length) continue;
+
+      await commitInChunks(docs, (batch, document) => batch.delete(document.ref));
+      totalDocs += docs.length;
+    } catch (error: any) {
+      throw new Error(`Failed deleting ${collectionName}: ${error?.message || error}`);
+    }
   }
 
   return totalDocs;
