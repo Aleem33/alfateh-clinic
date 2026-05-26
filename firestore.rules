@@ -21,11 +21,18 @@ service cloud.firestore {
     function isAccountant()   { return isAuth() && userRole() == 'accountant'; }
     function isNurse()        { return isAuth() && userRole() == 'nurse'; }
     function isClinical()     { return isDoctor() || isNurse(); }
+    function isBootstrapAdmin(uid) {
+      return isAuth()
+        && request.auth.uid == uid
+        && request.auth.token.email == 'admin@alfateh-clinic.internal'
+        && request.resource.data.role == 'admin';
+    }
 
     // ── Users ──────────────────────────────────────────────────────────────────
     match /users/{uid} {
       allow read: if isAuth() && (request.auth.uid == uid || isAdmin());
-      allow write: if isAdmin();
+      allow create: if isAdmin() || isBootstrapAdmin(uid);
+      allow update, delete: if isAdmin();
     }
 
     // ── Settings ───────────────────────────────────────────────────────────────
