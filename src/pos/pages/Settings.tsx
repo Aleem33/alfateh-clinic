@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
 import { downloadOrShare } from '../lib/nativeUtils';
-import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database } from 'lucide-react';
+import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database, Lock, Eye, EyeOff } from 'lucide-react';
 import { deleteAllAppData, exportAllAppData, GLOBAL_DATA_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
+import { auth } from '../../firebase';
 
 export function Settings() {
+  const [currentPass, setCurrentPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [confirmPass, setConfirmPass] = useState('');
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState('');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -20,6 +30,43 @@ export function Settings() {
   const [importError, setImportError] = useState('');
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   const [pendingImportData, setPendingImportData] = useState<any>(null);
+
+  const handleChangePassword = async () => {
+    setPasswordMsg('');
+    if (!currentPass || !newPass || !confirmPass) {
+      setPasswordMsg('All password fields are required.');
+      return;
+    }
+    if (newPass.length < 6) {
+      setPasswordMsg('New password must be at least 6 characters.');
+      return;
+    }
+    if (newPass !== confirmPass) {
+      setPasswordMsg('New passwords do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const user = auth.currentUser;
+      if (!user?.email) throw new Error('You are not logged in.');
+      await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPass));
+      await updatePassword(user, newPass);
+      setCurrentPass('');
+      setNewPass('');
+      setConfirmPass('');
+      setPasswordMsg('Password changed successfully.');
+      setTimeout(() => setPasswordMsg(''), 4000);
+    } catch (error: any) {
+      if (error?.code === 'auth/wrong-password' || error?.code === 'auth/invalid-credential') {
+        setPasswordMsg('Current password is incorrect.');
+      } else {
+        setPasswordMsg('Error: ' + (error?.message || 'Could not change password.'));
+      }
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   // ── Export ──────────────────────────────────────────────
   const handleExport = async () => {
@@ -105,6 +152,71 @@ export function Settings() {
   return (
     <div className="space-y-6 max-w-4xl">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+
+      {/* Change Password */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-6 border-b border-gray-100 bg-blue-50 flex items-center gap-3">
+          <Lock className="w-6 h-6 text-blue-600" />
+          <div>
+            <h2 className="text-lg font-bold text-blue-900">Change Login Password</h2>
+            <p className="text-sm text-blue-700 mt-0.5">Update the password for the account currently signed in.</p>
+          </div>
+        </div>
+        <div className="p-6 space-y-4 max-w-xl">
+          {passwordMsg && (
+            <p className={`text-sm font-medium p-3 rounded-lg ${passwordMsg === 'Password changed successfully.' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+              {passwordMsg}
+            </p>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+            <div className="relative">
+              <input
+                type={showCurrentPass ? 'text' : 'password'}
+                value={currentPass}
+                onChange={e => setCurrentPass(e.target.value)}
+                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter current password"
+              />
+              <button type="button" onClick={() => setShowCurrentPass(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+            <div className="relative">
+              <input
+                type={showNewPass ? 'text' : 'password'}
+                value={newPass}
+                onChange={e => setNewPass(e.target.value)}
+                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Minimum 6 characters"
+              />
+              <button type="button" onClick={() => setShowNewPass(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+            <input
+              type="password"
+              value={confirmPass}
+              onChange={e => setConfirmPass(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Repeat new password"
+            />
+          </div>
+          <button
+            onClick={handleChangePassword}
+            disabled={isChangingPassword}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isChangingPassword ? 'Updating...' : 'Update Password'}
+          </button>
+        </div>
+      </div>
 
       {/* ── Export Section ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
