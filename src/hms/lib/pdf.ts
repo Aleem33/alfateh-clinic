@@ -84,6 +84,12 @@ type PrescriptionPrintData = {
 function buildPreprintedPrescriptionHTML(data: PrescriptionPrintData): string {
   const settings = getPrescriptionPrintSettings();
   const scale = Math.max(70, Math.min(130, settings.fontScale || 100)) / 100;
+  const printTimeLabel = (label: string) => ({
+    Morning: 'Morn',
+    Afternoon: 'Noon',
+    Evening: 'Eve',
+    Night: 'Night',
+  }[label] || label);
   const rxRows = data.prescriptions.map((p, i) => `
     <tr>
       <td class="rx-num">${i + 1}</td>
@@ -124,19 +130,20 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .patient-name { position:absolute; left:21mm; top:56mm; width:76mm; font-size:${12 * scale}px; font-weight:700; white-space:nowrap; overflow:hidden; }
 .patient-age { position:absolute; left:105mm; top:56mm; width:25mm; font-size:${12 * scale}px; font-weight:700; white-space:nowrap; overflow:hidden; }
 .patient-date { position:absolute; left:132mm; top:56mm; width:27mm; font-size:${12 * scale}px; font-weight:700; white-space:nowrap; overflow:hidden; }
-.rx-content { position:absolute; left:24mm; top:84mm; width:132mm; min-height:170mm; }
+.rx-content { position:absolute; left:16mm; top:84mm; width:176mm; min-height:170mm; }
 .pad-note { font-size:${11.5 * scale}px; line-height:1.35; margin-bottom:4mm; color:#17205f; }
 .rx-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:${11.5 * scale}px; color:#17205f; }
-.rx-table th, .rx-table td { border:1px solid #1f2937; padding:2.2mm 1.5mm; vertical-align:middle; }
-.rx-table th { text-align:center; font-weight:800; line-height:1.15; }
+.rx-table th, .rx-table td { border:1px solid #1f2937; padding:2.5mm 1.3mm; vertical-align:middle; }
+.rx-table th { text-align:center; font-size:${9.5 * scale}px; font-weight:800; line-height:1.08; white-space:normal; overflow:hidden; }
 .rx-num { width:8mm; text-align:center; font-size:${14 * scale}px; font-weight:700; }
-.rx-drug { width:42mm; }
+.rx-drug { width:45mm; }
 .rx-drug-en { font-size:${12.5 * scale}px; font-weight:800; line-height:1.25; }
 .rx-drug-ur, .rx-time-ur, .rx-inst-ur { font-family:'Noto Nastaliq Urdu', serif; color:#1a7a1a; direction:rtl; line-height:1.45; }
+.rx-time-ur { display:block; font-size:${10.5 * scale}px; line-height:1.2; white-space:nowrap; }
 .rx-drug-ur { font-size:${11.5 * scale}px; font-weight:700; text-align:right; }
-.rx-dose { width:14mm; text-align:center; font-size:${15 * scale}px; font-weight:800; }
-.rx-days { width:13mm; text-align:center; font-size:${14 * scale}px; font-weight:800; }
-.rx-inst { width:28mm; font-size:${10.5 * scale}px; line-height:1.25; }
+.rx-dose { width:18mm; text-align:center; font-size:${16 * scale}px; font-weight:800; }
+.rx-days { width:15mm; text-align:center; font-size:${14 * scale}px; font-weight:800; }
+.rx-inst { width:36mm; font-size:${10.5 * scale}px; line-height:1.25; }
 .rx-inst-ur { margin-top:1mm; font-size:${10.5 * scale}px; font-weight:700; text-align:right; }
 .side-val { position:absolute; left:184mm; width:19mm; font-size:${10.5 * scale}px; font-weight:700; color:#17205f; white-space:nowrap; overflow:hidden; }
 .bp { top:151mm; } .temp { top:164mm; } .spo2 { top:177mm; } .pulse { top:190mm; }
@@ -160,7 +167,7 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
           <tr>
             <th class="rx-num">#</th>
             <th class="rx-drug">Drug<br/><span class="rx-time-ur">دوا</span></th>
-            ${DOSE_GRID_TIME_OPTIONS.map(time => `<th>${esc(time.en)}<br/><span class="rx-time-ur">${esc(time.ur)}</span></th>`).join('')}
+            ${DOSE_GRID_TIME_OPTIONS.map(time => `<th>${esc(printTimeLabel(time.en))}<span class="rx-time-ur">${esc(time.ur)}</span></th>`).join('')}
             <th>Days<br/><span class="rx-time-ur">دن</span></th>
             <th>Instructions<br/><span class="rx-time-ur">ہدایت</span></th>
           </tr>
