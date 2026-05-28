@@ -34,6 +34,12 @@ export const DOSE_TIME_OPTIONS: { key: DoseSlotKey; en: string; ur: string }[] =
   { key: 'night', en: 'Night', ur: 'رات' },
 ];
 
+export const DOSE_GRID_TIME_OPTIONS = DOSE_TIME_OPTIONS.filter(option => option.key !== 'daily') as {
+  key: Exclude<DoseSlotKey, 'daily'>;
+  en: string;
+  ur: string;
+}[];
+
 export const DOSE_AMOUNT_OPTIONS: PrescriptionOption[] = [
   { en: '', ur: '' },
   { en: '1 tablet', ur: 'ایک گولی' },
@@ -225,19 +231,11 @@ function summarizeSchedule(schedule?: DoseSchedule) {
 }
 
 export function createDefaultDoseSchedule(form?: string): DoseSchedule {
-  const lowerForm = (form || '').toLowerCase();
-  const amount = lowerForm.includes('capsule')
-    ? '1 capsule'
-    : lowerForm.includes('syrup')
-      ? '1 spoon'
-      : lowerForm.includes('drop')
-        ? '2 drops'
-        : lowerForm.includes('injection')
-          ? '1 injection'
-          : '1 tablet';
   return {
-    morning: { amount, amountUrdu: getDosageUrdu(amount) },
-    evening: { amount, amountUrdu: getDosageUrdu(amount) },
+    morning: { amount: '1', amountUrdu: '1' },
+    afternoon: { amount: '0', amountUrdu: '0' },
+    evening: { amount: '1', amountUrdu: '1' },
+    night: { amount: '0', amountUrdu: '0' },
   };
 }
 
@@ -302,7 +300,23 @@ export function getPrescriptionUrduLine(rx: PrescriptionScheduleFields & { nameU
 
 export function getPrescriptionDoseCount(rx: PrescriptionScheduleFields): number {
   const entries = activeScheduleEntries(rx.doseSchedule);
-  return entries.length > 0 ? entries.length : 0;
+  return entries.filter(entry => Number(entry.slot?.amount) > 0 || (!Number.isNaN(parseFloat(entry.slot?.amount || '')) && parseFloat(entry.slot?.amount || '') > 0)).length;
+}
+
+export function getDoseGridValue(rx: PrescriptionScheduleFields, key: Exclude<DoseSlotKey, 'daily'>): string {
+  const normalized = normalizePrescriptionForSave(rx);
+  const direct = normalized.doseSchedule?.[key]?.amount;
+  if (direct !== undefined && direct !== null && direct !== '') return direct;
+
+  const daily = normalized.doseSchedule?.daily?.amount;
+  if (daily && key === 'morning') return daily;
+  return '';
+}
+
+export function getPrescriptionDays(rx: PrescriptionScheduleFields): string {
+  const duration = rx.duration || '';
+  const match = duration.match(/\d+/);
+  return match?.[0] || duration;
 }
 
 export function withPrescriptionUrdu<T extends PrescriptionScheduleFields>(rx: T): T {

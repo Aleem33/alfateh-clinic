@@ -7,8 +7,7 @@ import { Plus, Search, X, Stethoscope, FlaskConical, Printer, Eye, ArrowRight, S
 import { printPrescription } from '../lib/pdf';
 import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescriptionMedicineNames } from '../lib/translate';
 import {
-  DOSE_AMOUNT_OPTIONS,
-  DOSE_TIME_OPTIONS,
+  DOSE_GRID_TIME_OPTIONS,
   DURATION_OPTIONS,
   INSTRUCTION_OPTIONS,
   URDU_PRESET_OPTIONS,
@@ -16,6 +15,7 @@ import {
   createDefaultDoseSchedule,
   getDurationUrdu,
   getInstructionUrdu,
+  getDoseGridValue,
   getPrescriptionEnglishLine,
   getPrescriptionUrduLine,
   normalizePrescriptionForSave,
@@ -1125,47 +1125,48 @@ export function OPD() {
                             </button>
                           </div>
 
-                          <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2">
-                            {DOSE_TIME_OPTIONS.map(time => (
-                              <label key={time.key} className="block">
-                                <span className="text-[11px] font-semibold text-gray-500">{time.en}</span>
-                                <select
-                                  value={normalized.doseSchedule?.[time.key]?.amount || ''}
-                                  onChange={e => updatePrescriptionDose(i, time.key, e.target.value)}
-                                  className="mt-1 border border-gray-200 rounded px-2 py-1.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                >
-                                  {DOSE_AMOUNT_OPTIONS.map(option => <option key={time.key + '-' + (option.en || 'none')} value={option.en}>{option.en || 'None'}</option>)}
-                                </select>
-                                <input
-                                  value={normalized.doseSchedule?.[time.key]?.amount || ''}
-                                  onChange={e => updatePrescriptionDose(i, time.key, e.target.value)}
-                                  placeholder="Custom dose"
-                                  className="mt-1 border border-gray-100 rounded px-2 py-1 w-full text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-300"
-                                />
-                                {normalized.doseSchedule?.[time.key]?.amountUrdu && (
-                                  <div className="mt-0.5 text-green-700 text-[11px] text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>
-                                    {normalized.doseSchedule[time.key]?.amountUrdu} {time.ur}
-                                  </div>
-                                )}
-                              </label>
-                            ))}
+                          <div className="mt-3 overflow-x-auto">
+                            <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
+                              <thead className="bg-gray-50 text-gray-600">
+                                <tr>
+                                  <th className="px-2 py-2 text-left font-semibold min-w-[150px]">Drug</th>
+                                  {DOSE_GRID_TIME_OPTIONS.map(time => (
+                                    <th key={time.key} className="px-2 py-2 text-center font-semibold min-w-[76px]">
+                                      <div>{time.en}</div>
+                                      <div dir="rtl" className="text-green-700 font-medium" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{time.ur}</div>
+                                    </th>
+                                  ))}
+                                  <th className="px-2 py-2 text-center font-semibold min-w-[76px]">Days</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td className="border-t border-gray-200 px-2 py-2 font-medium text-gray-800">{formatMedicineNameWithForm(p.name, p.form || p.category || p.type)}</td>
+                                  {DOSE_GRID_TIME_OPTIONS.map(time => (
+                                    <td key={time.key} className="border-t border-l border-gray-200 px-2 py-2">
+                                      <input
+                                        value={getDoseGridValue(normalized, time.key)}
+                                        onChange={e => updatePrescriptionDose(i, time.key, e.target.value)}
+                                        placeholder="0"
+                                        className="w-full text-center border border-gray-200 rounded px-2 py-1.5 text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                      />
+                                    </td>
+                                  ))}
+                                  <td className="border-t border-l border-gray-200 px-2 py-2">
+                                    <select
+                                      value={normalized.duration || ''}
+                                      onChange={e => updatePrescription(i, 'duration', e.target.value)}
+                                      className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                    >
+                                      {DURATION_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
+                                    </select>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
                           </div>
 
-                          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <label className="block">
-                              <span className="text-[11px] font-semibold text-gray-500">Duration</span>
-                              <select
-                                value={normalized.duration || ''}
-                                onChange={e => updatePrescription(i, 'duration', e.target.value)}
-                                className="mt-1 border border-gray-200 rounded px-2 py-1.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                              >
-                                {DURATION_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
-                              </select>
-                              {normalized.durationUrdu && (
-                                <div className="mt-0.5 text-green-700 text-[11px] text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{normalized.durationUrdu}</div>
-                              )}
-                            </label>
-
+                          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
                             <label className="block">
                               <span className="text-[11px] font-semibold text-gray-500">Timing / Instruction</span>
                               <select
@@ -1213,7 +1214,6 @@ export function OPD() {
                     })}
                   </div>
                 )}
-
               </div>
 
               {/* Lab Orders */}
