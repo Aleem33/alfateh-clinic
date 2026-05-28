@@ -6,7 +6,23 @@ import { logAudit } from '../lib/audit';
 import { Plus, Search, X, Stethoscope, FlaskConical, Printer, Eye, ArrowRight, Send, Loader2, History, ChevronDown, ChevronUp, RotateCcw, Clock, Pill, BookOpen, MessageCircle, CheckSquare, Square, TrendingUp, FileText } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
 import { getGeminiKey, transliterateMedicineNamesToUrdu, transliteratePrescriptionMedicineNames } from '../lib/translate';
-import { DOSAGE_OPTIONS, DURATION_OPTIONS, FREQUENCY_OPTIONS, INSTRUCTION_OPTIONS, getDosageUrdu, getDurationUrdu, getFrequencyUrdu, getInstructionUrdu, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
+import {
+  DOSE_AMOUNT_OPTIONS,
+  DOSE_TIME_OPTIONS,
+  DURATION_OPTIONS,
+  INSTRUCTION_OPTIONS,
+  URDU_PRESET_OPTIONS,
+  applyUrduPreset,
+  createDefaultDoseSchedule,
+  getDurationUrdu,
+  getInstructionUrdu,
+  getPrescriptionEnglishLine,
+  getPrescriptionUrduLine,
+  normalizePrescriptionForSave,
+  updateDoseScheduleSlot,
+  withPrescriptionListUrdu,
+  type DoseSlotKey,
+} from '../lib/prescriptionOptions';
 import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
 import { filterDoctorRecords, findCurrentDoctorStaff, normalizeRole } from '../lib/doctorAccess';
 import { useNavigate } from 'react-router-dom';
@@ -210,10 +226,13 @@ export function OPD() {
     name: p.name || '',
     form: p.form || p.category || p.type || '',
     nameUrdu: p.nameUrdu || '',
+    doseSchedule: p.doseSchedule || {},
+    scheduleText: p.scheduleText || '',
+    scheduleTextUrdu: p.scheduleTextUrdu || '',
     dosage: p.dosage || '',
-    dosageUrdu: p.dosageUrdu || getDosageUrdu(p.dosage || ''),
+    dosageUrdu: p.dosageUrdu || '',
     frequency: p.frequency || '',
-    frequencyUrdu: p.frequencyUrdu || getFrequencyUrdu(p.frequency || ''),
+    frequencyUrdu: p.frequencyUrdu || '',
     duration: p.duration || '',
     durationUrdu: p.durationUrdu || getDurationUrdu(p.duration || ''),
     instructions: p.instructions || '',
@@ -284,7 +303,7 @@ export function OPD() {
     const patient = patients.find((p: any) => p.id === c.patientId);
     const phone = patient?.phone?.replace(/\D/g, '');
     const meds = (c.prescriptions || []).map((p: any, i: number) =>
-      `${i + 1}. ${p.name}${p.nameUrdu ? ` (${p.nameUrdu})` : ''} - ${p.dosage} ${p.frequency} × ${p.duration}`
+      `${i + 1}. ${p.name}${p.nameUrdu ? ` (${p.nameUrdu})` : ''} - ${getPrescriptionEnglishLine(p)}`
     ).join('\n');
     const msg = `*Al-Fateh Clinic - Prescription*\nPatient: ${c.patientName}\nDate: ${formatDate(c.date)}\n\n*Diagnosis:* ${c.diagnosis || '—'}\n\n*Medicines:*\n${meds}\n\n_Dhandi Road Kot Sabzal | 0304-7459201_`;
     const url = phone
@@ -362,20 +381,17 @@ export function OPD() {
 
   const addPrescription = async (med: any) => {
     if (prescriptions.find(p => p.medicineId === med.id)) return;
-    const newRx = {
+    const newRx = normalizePrescriptionForSave({
       medicineId: med.id,
       name: med.name,
       form: med.form || med.category || '',
       nameUrdu: med.nameUrdu || '',
-      dosage: '1 tablet',
-      dosageUrdu: getDosageUrdu('1 tablet'),
-      frequency: 'Twice daily',
-      frequencyUrdu: getFrequencyUrdu('Twice daily'),
+      doseSchedule: createDefaultDoseSchedule(med.form || med.category || ''),
       duration: '7 days',
       durationUrdu: getDurationUrdu('7 days'),
       instructions: '',
       instructionsUrdu: getInstructionUrdu(''),
-    };
+    });
     setPrescriptions(p => [...p, newRx]);
     setMedSearch('');
 
@@ -437,12 +453,19 @@ export function OPD() {
     setPrescriptions(p => p.map((item, i) => {
       if (i !== idx) return item;
       const next = { ...item, [key]: val };
-      if (key === 'dosage') next.dosageUrdu = getDosageUrdu(val);
-      if (key === 'frequency') next.frequencyUrdu = getFrequencyUrdu(val);
       if (key === 'duration') next.durationUrdu = getDurationUrdu(val);
       if (key === 'instructions') next.instructionsUrdu = getInstructionUrdu(val);
-      return next;
+      return normalizePrescriptionForSave(next);
     }));
+  };
+
+  const updatePrescriptionDose = (idx: number, slot: DoseSlotKey, amount: string) => {
+    setPrescriptions(p => p.map((item, i) => i === idx ? updateDoseScheduleSlot(item, slot, amount) : item));
+  };
+
+  const applyPrescriptionPreset = (idx: number, presetLabel: string) => {
+    if (!presetLabel) return;
+    setPrescriptions(p => p.map((item, i) => i === idx ? applyUrduPreset(item, presetLabel) : item));
   };
 
   const printConsultation = async (consult: any) => {
@@ -870,9 +893,9 @@ export function OPD() {
                                           {rx.nameUrdu && (
                                             <div className="text-xs text-green-700 font-medium" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{rx.nameUrdu}</div>
                                           )}
-                                          <div className="text-xs text-blue-600 mt-0.5">{rx.dosage} · {rx.frequency} · {rx.duration}</div>
-                                          {rx.frequencyUrdu && (
-                                            <div className="text-xs text-green-600" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{rx.frequencyUrdu} · {rx.durationUrdu}</div>
+                                          <div className="text-xs text-blue-600 mt-0.5">{getPrescriptionEnglishLine(rx)}</div>
+                                          {getPrescriptionUrduLine(rx) && (
+                                            <div className="text-xs text-green-600" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{getPrescriptionUrduLine(rx)}</div>
                                           )}
                                         </div>
                                       </div>
@@ -1078,104 +1101,119 @@ export function OPD() {
                   )}
                 </div>
                 {prescriptions.length > 0 && (
-                  <div className="border border-gray-100 rounded-lg overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          {['Medicine', 'Dosage', 'Frequency', 'Duration', 'Instructions', ''].map(h => (
-                            <th key={h} className="px-2 py-2 text-left font-medium text-gray-500 whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {prescriptions.map((p, i) => (
-                          <tr key={i} className="align-top">
-                            {/* Medicine name EN + UR */}
-                            <td className="px-3 py-2 min-w-[130px]">
-                              <div className="font-medium text-gray-800">{formatMedicineNameWithForm(p.name, p.form || p.category || p.type)}</div>
+                  <div className="space-y-3">
+                    {prescriptions.map((p, i) => {
+                      const normalized = normalizePrescriptionForSave(p);
+                      const englishLine = getPrescriptionEnglishLine(normalized);
+                      const urduLine = getPrescriptionUrduLine(normalized);
+                      return (
+                        <div key={i} className="border border-gray-100 rounded-lg p-3 bg-white">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium text-gray-800 text-sm">{formatMedicineNameWithForm(p.name, p.form || p.category || p.type)}</div>
                               <input
                                 value={p.nameUrdu || ''}
                                 onChange={e => updatePrescription(i, 'nameUrdu', e.target.value)}
-                                placeholder="اردو نام"
+                                placeholder="Urdu name"
                                 dir="rtl"
-                                className="mt-1 border border-green-200 bg-green-50 rounded px-2 py-0.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                                className="mt-1 border border-green-200 bg-green-50 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
                                 style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}
                               />
-                            </td>
-                            {/* Dosage EN + UR */}
-                            <td className="px-2 py-2 min-w-[90px]">
+                            </div>
+                            <button onClick={() => setPrescriptions(p => p.filter((_, ii) => ii !== i))} className="text-red-400 hover:text-red-600 p-1">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2">
+                            {DOSE_TIME_OPTIONS.map(time => (
+                              <label key={time.key} className="block">
+                                <span className="text-[11px] font-semibold text-gray-500">{time.en}</span>
+                                <select
+                                  value={normalized.doseSchedule?.[time.key]?.amount || ''}
+                                  onChange={e => updatePrescriptionDose(i, time.key, e.target.value)}
+                                  className="mt-1 border border-gray-200 rounded px-2 py-1.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                >
+                                  {DOSE_AMOUNT_OPTIONS.map(option => <option key={time.key + '-' + (option.en || 'none')} value={option.en}>{option.en || 'None'}</option>)}
+                                </select>
+                                <input
+                                  value={normalized.doseSchedule?.[time.key]?.amount || ''}
+                                  onChange={e => updatePrescriptionDose(i, time.key, e.target.value)}
+                                  placeholder="Custom dose"
+                                  className="mt-1 border border-gray-100 rounded px-2 py-1 w-full text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-300"
+                                />
+                                {normalized.doseSchedule?.[time.key]?.amountUrdu && (
+                                  <div className="mt-0.5 text-green-700 text-[11px] text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>
+                                    {normalized.doseSchedule[time.key]?.amountUrdu} {time.ur}
+                                  </div>
+                                )}
+                              </label>
+                            ))}
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <label className="block">
+                              <span className="text-[11px] font-semibold text-gray-500">Duration</span>
                               <select
-                                value={p.dosage}
-                                onChange={e => updatePrescription(i, 'dosage', e.target.value)}
-                                className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                              >
-                                {DOSAGE_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
-                              </select>
-                              {p.dosageUrdu && (
-                                <div className="mt-1 text-green-700 text-xs text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{p.dosageUrdu}</div>
-                              )}
-                            </td>
-                            {/* Frequency EN + UR */}
-                            <td className="px-2 py-2 min-w-[110px]">
-                              <select
-                                value={p.frequency}
-                                onChange={async e => {
-                                  const val = e.target.value;
-                                  updatePrescription(i, 'frequency', val);
-                                }}
-                                className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                              >
-                                {FREQUENCY_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
-                              </select>
-                              {p.frequencyUrdu && (
-                                <div className="mt-1 text-green-700 text-xs text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{p.frequencyUrdu}</div>
-                              )}
-                            </td>
-                            {/* Duration EN + UR */}
-                            <td className="px-2 py-2 min-w-[90px]">
-                              <select
-                                value={p.duration}
-                                onChange={async e => {
-                                  const val = e.target.value;
-                                  updatePrescription(i, 'duration', val);
-                                }}
-                                className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                value={normalized.duration || ''}
+                                onChange={e => updatePrescription(i, 'duration', e.target.value)}
+                                className="mt-1 border border-gray-200 rounded px-2 py-1.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               >
                                 {DURATION_OPTIONS.map(option => <option key={option.en} value={option.en}>{option.en}</option>)}
                               </select>
-                              {p.durationUrdu && (
-                                <div className="mt-1 text-green-700 text-xs text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{p.durationUrdu}</div>
+                              {normalized.durationUrdu && (
+                                <div className="mt-0.5 text-green-700 text-[11px] text-right" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{normalized.durationUrdu}</div>
                               )}
-                            </td>
-                            {/* Instructions EN + UR */}
-                            <td className="px-2 py-2 min-w-[120px]">
+                            </label>
+
+                            <label className="block">
+                              <span className="text-[11px] font-semibold text-gray-500">Timing / Instruction</span>
                               <select
-                                value={p.instructions || ''}
+                                value={normalized.instructions || ''}
                                 onChange={e => updatePrescription(i, 'instructions', e.target.value)}
-                                className="border border-gray-200 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                className="mt-1 border border-gray-200 rounded px-2 py-1.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                               >
                                 {INSTRUCTION_OPTIONS.map(option => <option key={option.en || 'none'} value={option.en}>{option.en || 'No instruction'}</option>)}
                               </select>
                               <input
-                                value={p.instructionsUrdu || ''}
+                                value={normalized.instructionsUrdu || ''}
                                 onChange={e => updatePrescription(i, 'instructionsUrdu', e.target.value)}
-                                placeholder="کھانے کے بعد"
+                                placeholder="Urdu instruction"
                                 dir="rtl"
-                                className="mt-1 border border-green-200 bg-green-50 rounded px-2 py-0.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                                className="mt-1 border border-green-200 bg-green-50 rounded px-2 py-1 w-full text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
                                 style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}
                               />
-                            </td>
-                            <td className="px-2 py-2">
-                              <button onClick={() => setPrescriptions(p => p.filter((_, ii) => ii !== i))} className="text-red-400 hover:text-red-600">
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </label>
+
+                            <label className="block">
+                              <span className="text-[11px] font-semibold text-gray-500">Quick Urdu Preset</span>
+                              <select
+                                value=""
+                                onChange={e => applyPrescriptionPreset(i, e.target.value)}
+                                className="mt-1 border border-gray-200 rounded px-2 py-1.5 w-full text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              >
+                                <option value="">Choose preset...</option>
+                                {URDU_PRESET_OPTIONS.map(option => <option key={option.label} value={option.label}>{option.label}</option>)}
+                              </select>
+                            </label>
+                          </div>
+
+                          {(englishLine || urduLine) && (
+                            <div className="mt-3 rounded bg-blue-50 border border-blue-100 px-3 py-2">
+                              {englishLine && <div className="text-xs font-medium text-blue-800">{englishLine}</div>}
+                              {urduLine && (
+                                <div className="text-xs text-green-700 font-medium mt-1" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>
+                                  {urduLine}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
+
               </div>
 
               {/* Lab Orders */}
@@ -1400,7 +1438,7 @@ export function OPD() {
                   {viewConsult.prescriptions.map((p: any, i: number) => (
                     <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0 text-sm">
                       <span className="font-medium text-gray-800">{formatMedicineNameWithForm(p.name, p.form || p.category || p.type)}</span>
-                      <span className="text-gray-500 text-xs">{p.dosage} · {p.frequency} · {p.duration}</span>
+                      <span className="text-gray-500 text-xs">{getPrescriptionEnglishLine(p)}</span>
                     </div>
                   ))}
                 </div>

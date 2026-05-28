@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Search, User, Pill, ClipboardList, ChevronDown, ChevronUp, Calendar, Stethoscope } from 'lucide-react';
 
-interface RxItem { name: string; dosage: string; frequency: string; duration: string; }
+interface RxItem { name: string; dosage: string; frequency: string; duration: string; scheduleText?: string; }
 interface Order {
   id: string; consultationId: string; patientId: string;
   patientName: string; patientMRN: string; patientAge: string; patientGender: string;
@@ -179,7 +179,7 @@ export function PatientHistory() {
                               <div className="min-w-0">
                                 <span className="text-sm font-medium text-gray-800">{rx.name}</span>
                                 <p className="text-xs text-gray-400 mt-0.5">
-                                  {[rx.dosage, rx.frequency, rx.duration].filter(Boolean).join(' · ')}
+                                  {[rx.scheduleText || [rx.dosage, rx.frequency].filter(Boolean).join(' '), rx.duration].filter(Boolean).join(' · ')}
                                 </p>
                               </div>
                             </div>

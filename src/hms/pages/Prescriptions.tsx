@@ -5,7 +5,7 @@ import { formatDate, nowISO } from '../lib/utils';
 import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';
 import { printPrescription } from '../lib/pdf';
 import { transliteratePrescriptionMedicineNames } from '../lib/translate';
-import { withPrescriptionListUrdu } from '../lib/prescriptionOptions';
+import { getPrescriptionEnglishLine, getPrescriptionUrduLine, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
 import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
 import { useAppDialog } from '../../components/AppDialog';
 
@@ -248,9 +248,9 @@ export function Prescriptions() {
                             <td className="px-3 py-2.5 text-gray-600">{p.frequency}</td>
                             <td className="px-3 py-2.5 text-gray-600">{p.duration}</td>
                             <td className="px-3 py-2.5 text-gray-500 text-xs">
-                              <div>{p.instructions || '—'}</div>
-                              {p.instructionsUrdu && (
-                                <div dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }} className="text-green-600 mt-0.5">{p.instructionsUrdu}</div>
+                              <div>{getPrescriptionEnglishLine(p) || p.instructions || '-'}</div>
+                              {getPrescriptionUrduLine(p) && (
+                                <div dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }} className="text-green-600 mt-0.5">{getPrescriptionUrduLine(p)}</div>
                               )}
                             </td>
                           </tr>

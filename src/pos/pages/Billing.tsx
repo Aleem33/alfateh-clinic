@@ -207,7 +207,7 @@ export function Billing() {
         itemDiscount: 0,
         total: price,
         unitsPerBox: med.unitsPerBox || 1,
-        rxNote: `${rx.dosage || ''} ${rx.frequency || ''} ${rx.duration || ''}`.trim(),
+        rxNote: `${rx.scheduleText || [rx.dosage, rx.frequency].filter(Boolean).join(' ')} ${rx.duration || ''}`.trim(),
       });
     }
     setCart(prev => [...prev, ...newItems]);

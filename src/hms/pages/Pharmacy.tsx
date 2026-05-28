@@ -4,6 +4,7 @@ import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
+import { getPrescriptionDoseCount } from '../lib/prescriptionOptions';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '10', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Drops', 'Cream/Ointment', 'Powder', 'Inhaler', 'IV Fluid', 'Other'];
@@ -41,8 +42,9 @@ function parseDuration(dur: string): number {
   const n = parseInt(key); return isNaN(n) ? 7 : n;
 }
 
-function calcQty(freq: string, dur: string): number {
-  const q = parseFrequency(freq) * parseDuration(dur);
+function calcQty(freq: string, dur: string, prescription?: any): number {
+  const doseCount = prescription ? getPrescriptionDoseCount(prescription) : 0;
+  const q = (doseCount || parseFrequency(freq)) * parseDuration(dur);
   return q > 0 ? q : 1;
 }
 
@@ -85,7 +87,7 @@ export function Pharmacy() {
 
   const loadOrder = (order: any) => {
     const items = (order.prescriptions || []).map((p: any) => {
-      const qty     = calcQty(p.frequency, p.duration);
+      const qty     = calcQty(p.frequency, p.duration, p);
       const pName = (p.name || '').toLowerCase().trim();
       const matched = pName ? (medicines.find(m => {
         const mName = (m.name || '').toLowerCase().trim();
@@ -368,7 +370,7 @@ export function Pharmacy() {
                       <span className="text-gray-400">·</span>
                       <span className="text-gray-600">{p.duration}</span>
                       <span className="text-gray-400">→</span>
-                      <span className="font-bold text-blue-700">{calcQty(p.frequency, p.duration)} units</span>
+                      <span className="font-bold text-blue-700">{calcQty(p.frequency, p.duration, p)} units</span>
                     </div>
                   ))}
                 </div>
