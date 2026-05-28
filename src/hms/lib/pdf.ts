@@ -84,6 +84,8 @@ type PrescriptionPrintData = {
 function buildPreprintedPrescriptionHTML(data: PrescriptionPrintData): string {
   const settings = getPrescriptionPrintSettings();
   const scale = Math.max(70, Math.min(130, settings.fontScale || 100)) / 100;
+  const fieldStyle = (left: number, top: number, fontSize: number, offsetX: number, offsetY: number) =>
+    `left:${left + offsetX}mm; top:${top + offsetY}mm; font-size:${fontSize * scale}px;`;
   const rxRows = data.prescriptions.map((p, i) => `
     <tr>
       <td class="rx-num">${i + 1}</td>
@@ -121,9 +123,9 @@ function buildPreprintedPrescriptionHTML(data: PrescriptionPrintData): string {
 body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .page { width:210mm; height:297mm; position:relative; overflow:hidden; background:transparent; }
 .overlay { position:absolute; inset:0; transform: translate(${settings.offsetX}mm, ${settings.offsetY}mm); transform-origin: top left; }
-.patient-name { position:absolute; left:21mm; top:56mm; width:76mm; font-size:${12 * scale}px; font-weight:700; white-space:nowrap; overflow:hidden; }
-.patient-age { position:absolute; left:105mm; top:56mm; width:25mm; font-size:${12 * scale}px; font-weight:700; white-space:nowrap; overflow:hidden; }
-.patient-date { position:absolute; left:132mm; top:56mm; width:27mm; font-size:${12 * scale}px; font-weight:700; white-space:nowrap; overflow:hidden; }
+.patient-name { position:absolute; width:76mm; font-weight:700; white-space:nowrap; overflow:hidden; }
+.patient-age { position:absolute; width:25mm; font-weight:700; white-space:nowrap; overflow:hidden; }
+.patient-date { position:absolute; width:27mm; font-weight:700; white-space:nowrap; overflow:hidden; }
 .rx-content { position:absolute; left:24mm; top:84mm; width:132mm; min-height:170mm; }
 .pad-note { font-size:${11.5 * scale}px; line-height:1.35; margin-bottom:4mm; color:#17205f; }
 .rx-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:${11.5 * scale}px; color:#17205f; }
@@ -139,8 +141,8 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .rx-days { width:12mm; text-align:center; font-size:${14 * scale}px; font-weight:800; }
 .rx-inst { width:22mm; font-size:${10 * scale}px; line-height:1.25; }
 .rx-inst-ur { margin-top:1mm; font-size:${10.5 * scale}px; font-weight:700; text-align:right; }
-.side-val { position:absolute; left:184mm; width:19mm; font-size:${10.5 * scale}px; font-weight:700; color:#17205f; white-space:nowrap; overflow:hidden; }
-.bp { top:151mm; } .temp { top:164mm; } .spo2 { top:177mm; } .pulse { top:190mm; }
+.side-val { position:absolute; left:${184 + settings.vitalsOffsetX}mm; width:19mm; font-size:${settings.vitalsFontSize * scale}px; font-weight:700; color:#17205f; white-space:nowrap; overflow:hidden; }
+.bp { top:${151 + settings.vitalsOffsetY}mm; } .temp { top:${164 + settings.vitalsOffsetY}mm; } .spo2 { top:${177 + settings.vitalsOffsetY}mm; } .pulse { top:${190 + settings.vitalsOffsetY}mm; }
 @media print {
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { margin:0; padding:0; }
@@ -150,9 +152,9 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 <body>
 <div class="page">
   <div class="overlay">
-    <div class="patient-name">${esc(data.patientName)}</div>
-    <div class="patient-age">${esc(data.patientAge || '')}</div>
-    <div class="patient-date">${esc(data.date)}</div>
+    <div class="patient-name" style="${fieldStyle(21, 56, settings.patientNameFontSize, settings.patientNameOffsetX, settings.patientNameOffsetY)}">${esc(data.patientName)}</div>
+    <div class="patient-age" style="${fieldStyle(105, 56, settings.patientAgeFontSize, settings.patientAgeOffsetX, settings.patientAgeOffsetY)}">${esc(data.patientAge || '')}</div>
+    <div class="patient-date" style="${fieldStyle(132, 56, settings.patientDateFontSize, settings.patientDateOffsetX, settings.patientDateOffsetY)}">${esc(data.date)}</div>
     <div class="rx-content">
       ${complaints}
       ${diagnosis}

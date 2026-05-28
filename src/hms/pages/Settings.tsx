@@ -104,6 +104,10 @@ export function Settings() {
     setTimeout(() => setPrintSettingsMsg(''), 3000);
   };
 
+  const updatePrintNumber = (key: keyof PrescriptionPrintSettings, value: string, fallback = 0) => {
+    setPrintSettings(s => ({ ...s, [key]: Number(value) || fallback }));
+  };
+
   // New user
   const [showUserModal, setShowUserModal] = useState(false);
   const [userForm, setUserForm] = useState(emptyUser);
@@ -331,39 +335,62 @@ export function Settings() {
         <p className="text-xs text-gray-500 mb-4">
           Prescriptions print on existing Al-Fateh pads. Print one test on plain paper first, then adjust offsets if needed.
         </p>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <F
-            label="Horizontal Offset (mm)"
+            label="Whole Page X Offset (mm)"
             type="number"
             value={String(printSettings.offsetX)}
-            onChange={(v: string) => setPrintSettings(s => ({ ...s, offsetX: Number(v) || 0 }))}
+            onChange={(v: string) => updatePrintNumber('offsetX', v)}
           />
           <F
-            label="Vertical Offset (mm)"
+            label="Whole Page Y Offset (mm)"
             type="number"
             value={String(printSettings.offsetY)}
-            onChange={(v: string) => setPrintSettings(s => ({ ...s, offsetY: Number(v) || 0 }))}
+            onChange={(v: string) => updatePrintNumber('offsetY', v)}
           />
           <F
-            label="Font Scale (%)"
+            label="Rx Table Font Scale (%)"
             type="number"
             value={String(printSettings.fontScale)}
-            onChange={(v: string) => setPrintSettings(s => ({ ...s, fontScale: Number(v) || 100 }))}
+            onChange={(v: string) => updatePrintNumber('fontScale', v, 100)}
           />
-          <div className="flex items-end">
-            <button
-              type="button"
-              onClick={() => setPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS)}
-              className="w-full border border-gray-200 text-gray-600 rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Reset Defaults
-            </button>
+        </div>
+
+        <div className="mt-5 border border-gray-100 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Patient Details Position</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <F label="Name X Offset (mm)" type="number" value={String(printSettings.patientNameOffsetX)} onChange={(v: string) => updatePrintNumber('patientNameOffsetX', v)} />
+            <F label="Name Y Offset (mm)" type="number" value={String(printSettings.patientNameOffsetY)} onChange={(v: string) => updatePrintNumber('patientNameOffsetY', v)} />
+            <F label="Name Font Size" type="number" value={String(printSettings.patientNameFontSize)} onChange={(v: string) => updatePrintNumber('patientNameFontSize', v, 12)} />
+            <F label="Age X Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetX)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetX', v)} />
+            <F label="Age Y Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetY)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetY', v)} />
+            <F label="Age Font Size" type="number" value={String(printSettings.patientAgeFontSize)} onChange={(v: string) => updatePrintNumber('patientAgeFontSize', v, 12)} />
+            <F label="Date X Offset (mm)" type="number" value={String(printSettings.patientDateOffsetX)} onChange={(v: string) => updatePrintNumber('patientDateOffsetX', v)} />
+            <F label="Date Y Offset (mm)" type="number" value={String(printSettings.patientDateOffsetY)} onChange={(v: string) => updatePrintNumber('patientDateOffsetY', v)} />
+            <F label="Date Font Size" type="number" value={String(printSettings.patientDateFontSize)} onChange={(v: string) => updatePrintNumber('patientDateFontSize', v, 12)} />
           </div>
         </div>
-        <div className="flex items-center gap-3 mt-4">
+
+        <div className="mt-4 border border-gray-100 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Vitals Position</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <F label="Vitals X Offset (mm)" type="number" value={String(printSettings.vitalsOffsetX)} onChange={(v: string) => updatePrintNumber('vitalsOffsetX', v)} />
+            <F label="Vitals Y Offset (mm)" type="number" value={String(printSettings.vitalsOffsetY)} onChange={(v: string) => updatePrintNumber('vitalsOffsetY', v)} />
+            <F label="Vitals Font Size" type="number" value={String(printSettings.vitalsFontSize)} onChange={(v: string) => updatePrintNumber('vitalsFontSize', v, 10.5)} />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 mt-4">
           <button onClick={savePrintSettings}
             className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
             <CheckCircle className="w-4 h-4" /> Save Print Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => setPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS)}
+            className="border border-gray-200 text-gray-600 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Reset Defaults
           </button>
           {printSettingsMsg && <span className="text-sm font-medium text-green-600">{printSettingsMsg}</span>}
         </div>
