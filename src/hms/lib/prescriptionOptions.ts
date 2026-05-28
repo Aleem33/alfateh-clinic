@@ -34,8 +34,8 @@ export const DOSE_TIME_OPTIONS: { key: DoseSlotKey; en: string; ur: string }[] =
   { key: 'night', en: 'Night', ur: 'رات' },
 ];
 
-export const DOSE_GRID_TIME_OPTIONS = DOSE_TIME_OPTIONS.filter(option => option.key !== 'daily') as {
-  key: Exclude<DoseSlotKey, 'daily'>;
+export const DOSE_GRID_TIME_OPTIONS = DOSE_TIME_OPTIONS.filter(option => ['morning', 'afternoon', 'night'].includes(option.key)) as {
+  key: Exclude<DoseSlotKey, 'daily' | 'evening'>;
   en: string;
   ur: string;
 }[];
@@ -234,7 +234,6 @@ export function createDefaultDoseSchedule(form?: string): DoseSchedule {
   return {
     morning: { amount: '1', amountUrdu: '1' },
     afternoon: { amount: '0', amountUrdu: '0' },
-    evening: { amount: '1', amountUrdu: '1' },
     night: { amount: '0', amountUrdu: '0' },
   };
 }
@@ -303,7 +302,7 @@ export function getPrescriptionDoseCount(rx: PrescriptionScheduleFields): number
   return entries.filter(entry => Number(entry.slot?.amount) > 0 || (!Number.isNaN(parseFloat(entry.slot?.amount || '')) && parseFloat(entry.slot?.amount || '') > 0)).length;
 }
 
-export function getDoseGridValue(rx: PrescriptionScheduleFields, key: Exclude<DoseSlotKey, 'daily'>): string {
+export function getDoseGridValue(rx: PrescriptionScheduleFields, key: Exclude<DoseSlotKey, 'daily' | 'evening'>): string {
   const normalized = normalizePrescriptionForSave(rx);
   const direct = normalized.doseSchedule?.[key]?.amount;
   if (direct !== undefined && direct !== null && direct !== '') return direct;
