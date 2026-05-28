@@ -113,7 +113,7 @@ service cloud.firestore {
     // ── Billing ────────────────────────────────────────────────────────────────
     match /bills/{doc} {
       allow read: if isAuth();
-      allow create, update: if isAdmin() || isReceptionist() || isAccountant() || isCashier();
+      allow create, update: if isAdmin() || isReceptionist() || isAccountant() || isCashier() || isClinical();
       allow delete: if isAdmin();
     }
 
