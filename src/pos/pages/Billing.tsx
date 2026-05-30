@@ -17,6 +17,7 @@ export function Billing() {
   const [customers, setCustomers]       = useState<any[]>([]);
   const [search, setSearch]             = useState('');
   const [cart, setCart]                 = useState<any[]>([]);
+  const [qtyInputs, setQtyInputs]       = useState<Record<string, string>>({});
   const [orderDiscount, setOrderDiscount] = useState(0);
   const [customerType, setCustomerType] = useState<'customer' | 'hospital'>('customer');
   const [lastReceipt, setLastReceipt]   = useState<any>(null);
@@ -154,6 +155,11 @@ export function Billing() {
   }
 
   const updateQuantity = (cartItemId: string, delta: number) => {
+    setQtyInputs(prev => {
+      const next = { ...prev };
+      delete next[cartItemId];
+      return next;
+    });
     setCart(prev => prev.map(item => {
       if (item.cartItemId !== cartItemId) return item;
       const med = medicines.find(m => m.id === item.medicineId);
@@ -187,6 +193,23 @@ export function Billing() {
     }));
   };
 
+  const handleQuantityInput = (cartItemId: string, value: string) => {
+    setQtyInputs(prev => ({ ...prev, [cartItemId]: value }));
+    if (value.trim() === '') return;
+    const nextQuantity = Number(value);
+    if (Number.isFinite(nextQuantity) && nextQuantity >= 1) setQuantity(cartItemId, nextQuantity);
+  };
+
+  const commitQuantityInput = (cartItemId: string) => {
+    const value = qtyInputs[cartItemId];
+    if (value !== undefined && value.trim() === '') setQuantity(cartItemId, 1);
+    setQtyInputs(prev => {
+      const next = { ...prev };
+      delete next[cartItemId];
+      return next;
+    });
+  };
+
   const updateItemDiscount = (cartItemId: string, type: 'rs' | 'pct', value: number) => {
     setCart(prev => prev.map(item => {
       if (item.cartItemId !== cartItemId) return item;
@@ -195,8 +218,14 @@ export function Billing() {
     }));
   };
 
-  const removeFromCart = (cartItemId: string) =>
+  const removeFromCart = (cartItemId: string) => {
+    setQtyInputs(prev => {
+      const next = { ...prev };
+      delete next[cartItemId];
+      return next;
+    });
     setCart(prev => prev.filter(item => item.cartItemId !== cartItemId));
+  };
 
   const grossSubtotal        = cart.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const totalItemDiscounts   = cart.reduce((sum, item) => sum + (item.itemDiscount || 0), 0);
@@ -526,8 +555,10 @@ export function Billing() {
                 type="number"
                 min="1"
                 step="1"
-                value={item.quantity}
-                onChange={e => setQuantity(item.cartItemId, Number(e.target.value))}
+                value={qtyInputs[item.cartItemId] ?? String(item.quantity)}
+                onChange={e => handleQuantityInput(item.cartItemId, e.target.value)}
+                onBlur={() => commitQuantityInput(item.cartItemId)}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                 className="w-12 text-center text-sm font-semibold bg-white border-x border-gray-200 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
               <button onClick={() => updateQuantity(item.cartItemId, 1)} className="px-2 py-1.5 hover:bg-gray-200 text-gray-600 rounded-r-md">
