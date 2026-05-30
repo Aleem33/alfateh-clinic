@@ -88,6 +88,15 @@ export function Billing() {
     (c.phone || '').includes(customerSearch)
   ).slice(0, 8);
 
+  const getBoxPrice = (med: any): number => Number(med.retailPrice || med.price || 0);
+  const getUnitPrice = (med: any): number => {
+    const explicitUnitPrice = Number(med.unitPrice || 0);
+    if (explicitUnitPrice > 0) return explicitUnitPrice;
+    const boxPrice = getBoxPrice(med);
+    const unitsPerBox = Number(med.unitsPerBox || 1);
+    return unitsPerBox > 1 && boxPrice > 0 ? boxPrice / unitsPerBox : boxPrice;
+  };
+
   const handleCreateCustomer = async () => {
     if (!newCustName.trim()) return;
     setSavingCustomer(true);
@@ -108,7 +117,7 @@ export function Billing() {
     setCart(prev => {
       const cartItemId = `${med.id}-${sellType}`;
       const existing   = prev.find(item => item.cartItemId === cartItemId);
-      const price      = sellType === 'box' ? (med.retailPrice || med.price) : (med.unitPrice || med.price);
+      const price      = sellType === 'box' ? getBoxPrice(med) : getUnitPrice(med);
       const unitsToAdd = sellType === 'box' ? (med.unitsPerBox || 1) : 1;
       const currentUnitsInCart = prev
         .filter(i => i.medicineId === med.id)
@@ -159,6 +168,25 @@ export function Billing() {
     }));
   };
 
+  const setQuantity = (cartItemId: string, quantity: number) => {
+    setCart(prev => prev.map(item => {
+      if (item.cartItemId !== cartItemId) return item;
+      const med = medicines.find(m => m.id === item.medicineId);
+      if (!med) return item;
+      const newQ = Math.max(1, Math.floor(Number(quantity) || 1));
+      const otherUnits = prev
+        .filter(i => i.medicineId === med.id && i.cartItemId !== cartItemId)
+        .reduce((sum, i) => sum + (i.quantity * (i.sellType === 'box' ? i.unitsPerBox : 1)), 0);
+      if (otherUnits + newQ * (item.sellType === 'box' ? item.unitsPerBox : 1) > med.stock) {
+        setStockError('Not enough stock available for ' + med.name + '!');
+        setTimeout(() => setStockError(''), 3500);
+        return item;
+      }
+      const disc = computeItemDiscountRs(item.discountType, item.discountValue, newQ, item.price);
+      return { ...item, quantity: newQ, itemDiscount: disc, total: Math.max(0, newQ * item.price - disc) };
+    }));
+  };
+
   const updateItemDiscount = (cartItemId: string, type: 'rs' | 'pct', value: number) => {
     setCart(prev => prev.map(item => {
       if (item.cartItemId !== cartItemId) return item;
@@ -193,7 +221,7 @@ export function Billing() {
       if (!med) continue;
       const cartItemId = `${med.id}-unit`;
       if (newItems.find(i => i.cartItemId === cartItemId) || cart.find(i => i.cartItemId === cartItemId)) continue;
-      const price = med.unitPrice || med.price;
+      const price = getUnitPrice(med);
       newItems.push({
         cartItemId,
         medicineId: med.id,
@@ -311,7 +339,7 @@ export function Billing() {
           </button>
         </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto p-4">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {filteredMedicines.map(med => (
             <div key={med.id} className="p-3 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all bg-white flex flex-col">
@@ -331,17 +359,17 @@ export function Billing() {
                   <div className="flex gap-1.5">
                     <button onClick={() => addToCart(med, 'box')}
                       className="flex-1 bg-blue-50 text-blue-700 py-1.5 rounded-md text-[11px] font-bold hover:bg-blue-100 border border-blue-100 text-center leading-snug">
-                      + Box<br /><span className="font-normal text-[10px]">{formatCurrency(med.retailPrice || med.price)}</span>
+                      + Box<br /><span className="font-normal text-[10px]">{formatCurrency(getBoxPrice(med))}</span>
                     </button>
                     <button onClick={() => addToCart(med, 'unit')}
                       className="flex-1 bg-green-50 text-green-700 py-1.5 rounded-md text-[11px] font-bold hover:bg-green-100 border border-green-100 text-center leading-snug">
-                      + Unit<br /><span className="font-normal text-[10px]">{formatCurrency(med.unitPrice || med.price)}</span>
+                      + Unit<br /><span className="font-normal text-[10px]">{formatCurrency(getUnitPrice(med))}</span>
                     </button>
                   </div>
                 ) : (
                   <button onClick={() => addToCart(med, 'box')}
                     className="w-full bg-blue-50 text-blue-700 py-2 rounded-md text-xs font-bold hover:bg-blue-100 border border-blue-100">
-                    Add — {formatCurrency(med.retailPrice || med.price)}
+                    Add - {formatCurrency(getBoxPrice(med))}
                   </button>
                 )}
               </div>
@@ -460,7 +488,7 @@ export function Billing() {
       </div>
 
       {/* Cart items */}
-      <div className="flex-1 overflow-auto p-3 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-2">
         {cart.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-400 py-12">
             <ShoppingCart className="w-12 h-12 mb-2 opacity-20" />
@@ -494,7 +522,14 @@ export function Billing() {
               <button onClick={() => updateQuantity(item.cartItemId, -1)} className="px-2 py-1.5 hover:bg-gray-200 text-gray-600 rounded-l-md">
                 <Minus className="w-3 h-3" />
               </button>
-              <span className="w-8 text-center text-sm font-semibold">{item.quantity}</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={item.quantity}
+                onChange={e => setQuantity(item.cartItemId, Number(e.target.value))}
+                className="w-12 text-center text-sm font-semibold bg-white border-x border-gray-200 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
               <button onClick={() => updateQuantity(item.cartItemId, 1)} className="px-2 py-1.5 hover:bg-gray-200 text-gray-600 rounded-r-md">
                 <Plus className="w-3 h-3" />
               </button>
