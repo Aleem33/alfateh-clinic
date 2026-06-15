@@ -448,8 +448,10 @@ export function Settings() {
           <AlertTriangle className="w-5 h-5 text-red-500" />
           <h2 className="font-semibold text-red-600">Danger Zone</h2>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Permanently delete every Firestore record used by HMS and Pharmacy. This cannot be undone.</p>
-        <p className="text-xs text-gray-400 mb-4">{GLOBAL_DATA_COLLECTIONS.length} collections included. Firebase Authentication accounts are not deleted by the app.</p>
+        <p className="text-sm text-gray-500 mb-4">Permanently delete clinic records used by HMS and Pharmacy. Admin profiles are kept so the app remains accessible.</p>
+        <p className="text-xs text-gray-400 mb-4">
+          {GLOBAL_DATA_COLLECTIONS.length} collections included. Firebase Authentication accounts and passwords are not deleted or reset. Staff profiles are removed and must be recreated by an admin.
+        </p>
         <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
           <Trash2 className="w-4 h-4" /> Clear All Data
         </button>
@@ -477,7 +479,9 @@ export function Settings() {
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
             <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3"><AlertTriangle className="w-5 h-5 text-red-600" /></div>
             <h2 className="font-semibold text-gray-900 text-center mb-1">Delete All Data?</h2>
-            <p className="text-sm text-gray-500 text-center mb-4">Type <strong>DELETE ALL</strong> to confirm.</p>
+            <p className="text-sm text-gray-500 text-center mb-4">
+              Type <strong>DELETE ALL</strong> to confirm. This requires internet and keeps admin login working with the same password.
+            </p>
             <input value={clearText} onChange={e => setClearText(e.target.value)} placeholder="DELETE ALL"
               className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-400 text-center font-mono" />
             <div className="flex gap-3">

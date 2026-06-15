@@ -316,7 +316,7 @@ export function Settings() {
             <div>
               <h3 className="font-bold text-gray-900">Factory Reset (Delete All Data)</h3>
               <p className="text-sm text-gray-500 mt-1">
-                Permanently deletes every Firestore record used by HMS and Pharmacy. Firebase Authentication accounts will not be deleted.
+                Permanently deletes clinic records used by HMS and Pharmacy. Admin profiles are kept, Firebase Authentication accounts and passwords are not reset, and staff profiles must be recreated.
               </p>
             </div>
             <button
@@ -390,7 +390,7 @@ export function Settings() {
               <p className="text-gray-700 font-medium">
                 WARNING: You are about to delete ALL data. Export a backup first!
               </p>
-              <p className="text-red-600 font-bold">This action CANNOT be undone.</p>
+              <p className="text-red-600 font-bold">This action CANNOT be undone. Internet is required and admin login will keep the same password.</p>
               <div className="pt-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Type "DELETE ALL DATA" to confirm:

@@ -2,7 +2,7 @@
   "name": "alfateh-healthcare-suite",
   "productName": "Al-Fateh Clinic",
   "private": true,
-  "version": "3.1.41",
+  "version": "3.1.42",
   "description": "Al-Fateh Clinic Integrated Hospital & Pharmacy Management Suite",
   "author": "Al-Fateh Clinic",
   "main": "main.js",
