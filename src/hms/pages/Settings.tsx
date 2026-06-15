@@ -12,7 +12,7 @@ import {
   savePrescriptionPrintSettings,
   type PrescriptionPrintSettings,
 } from '../lib/prescriptionPrintSettings';
-import { deleteAllAppData, exportAllAppData, GLOBAL_DATA_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
+import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 
 const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier'];
 
@@ -80,7 +80,7 @@ export function Settings() {
   const [pendingImport, setPendingImport] = useState<any>(null);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
 
-  // Clear data
+  // Reset hospital data
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearText, setClearText] = useState('');
   const [clearing, setClearing] = useState(false);
@@ -176,11 +176,11 @@ export function Settings() {
     if (clearText !== 'DELETE ALL') return;
     setShowClearConfirm(false);
     setClearing(true);
-    setClearMsg('Deleting all HMS and Pharmacy data...');
+    setClearMsg('Deleting hospital data...');
     try {
-      const totalDocs = await deleteAllAppData(setClearMsg);
+      const totalDocs = await deleteAppDataScope('hms', setClearMsg);
       setClearText('');
-      setClearMsg(`Done: deleted ${totalDocs} records across HMS and Pharmacy.`);
+      setClearMsg(`Done: deleted ${totalDocs} hospital records. User accounts were kept.`);
       setTimeout(() => setClearMsg(''), 5000);
     } catch (e: any) { setClearMsg('Error: ' + e.message); }
     finally { setClearing(false); }
@@ -448,12 +448,12 @@ export function Settings() {
           <AlertTriangle className="w-5 h-5 text-red-500" />
           <h2 className="font-semibold text-red-600">Danger Zone</h2>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Permanently delete clinic records used by HMS and Pharmacy. Admin profiles are kept so the app remains accessible.</p>
+        <p className="text-sm text-gray-500 mb-4">Permanently delete hospital-side records only. Pharmacy inventory, POS sales, purchases, and customers are kept.</p>
         <p className="text-xs text-gray-400 mb-4">
-          {GLOBAL_DATA_COLLECTIONS.length} collections included. Firebase Authentication accounts and passwords are not deleted or reset. Staff profiles are removed and must be recreated by an admin.
+          {RESET_COLLECTIONS.hms.length} hospital collections included. User profiles, Firebase Authentication accounts, and passwords are not deleted or reset.
         </p>
         <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
-          <Trash2 className="w-4 h-4" /> Clear All Data
+          <Trash2 className="w-4 h-4" /> Reset Hospital Data
         </button>
         {clearMsg && <p className={`text-sm font-medium mt-3 ${clearMsg.startsWith('Done') ? 'text-green-600' : clearMsg.startsWith('Error') ? 'text-red-500' : 'text-blue-600'}`}>{clearMsg}</p>}
       </div>
@@ -478,9 +478,9 @@ export function Settings() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
             <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3"><AlertTriangle className="w-5 h-5 text-red-600" /></div>
-            <h2 className="font-semibold text-gray-900 text-center mb-1">Delete All Data?</h2>
+            <h2 className="font-semibold text-gray-900 text-center mb-1">Reset Hospital Data?</h2>
             <p className="text-sm text-gray-500 text-center mb-4">
-              Type <strong>DELETE ALL</strong> to confirm. This requires internet and keeps admin login working with the same password.
+              Type <strong>DELETE ALL</strong> to confirm. This requires internet and keeps all user logins working with the same passwords.
             </p>
             <input value={clearText} onChange={e => setClearText(e.target.value)} placeholder="DELETE ALL"
               className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-400 text-center font-mono" />
@@ -488,7 +488,7 @@ export function Settings() {
               <button onClick={() => { setShowClearConfirm(false); setClearText(''); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
               <button onClick={handleClear} disabled={clearText !== 'DELETE ALL' || clearing}
                 className="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm hover:bg-red-700 disabled:opacity-40">
-                {clearing ? 'Deleting...' : 'Delete Everything'}
+                {clearing ? 'Deleting...' : 'Reset Hospital'}
               </button>
             </div>
           </div>

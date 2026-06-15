@@ -89,6 +89,7 @@ export function Expenses() {
       const data = {
         ...form,
         amount: parseFloat(form.amount),
+        scope: 'hms',
         addedBy: auth.currentUser?.email || 'unknown',
         updatedAt: nowISO(),
       };

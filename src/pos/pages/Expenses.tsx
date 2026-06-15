@@ -50,6 +50,7 @@ export function Expenses() {
       const data = {
         description: formData.description, amount: parseFloat(formData.amount || '0'),
         category: formData.category, date: formData.date,
+        scope: 'pharmacy',
         addedBy: auth.currentUser?.uid || 'unknown',
       };
       if (editingId) {

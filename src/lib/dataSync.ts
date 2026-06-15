@@ -44,7 +44,51 @@ export type BackupFile = {
 };
 
 type ProgressFn = (message: string) => void;
+export type ResetScope = 'hms' | 'pharmacy';
 const BOOTSTRAP_ADMIN_EMAIL = 'admin@alfateh-clinic.internal';
+const HMS_COUNTER_IDS = new Set(['mrn', 'bill']);
+const PHARMACY_COUNTER_IDS = new Set(['posReceipt', 'posSaleReturn', 'posPurchaseReturn', 'sale', 'saleReturn', 'purchaseReturn']);
+
+export const RESET_COLLECTIONS: Record<ResetScope, string[]> = {
+  hms: [
+    'settings',
+    'counters',
+    'schedules',
+    'patients',
+    'appointments',
+    'consultations',
+    'prescriptionTemplates',
+    'admissions',
+    'wards',
+    'rooms',
+    'beds',
+    'bedTreatments',
+    'labOrders',
+    'labTests',
+    'bills',
+    'staff',
+    'expenses',
+    'pharmacyOrders',
+    'auditLogs',
+    'notifications',
+  ],
+  pharmacy: [
+    'counters',
+    'medicines',
+    'suppliers',
+    'purchases',
+    'purchaseReturns',
+    'sales',
+    'saleReturns',
+    'stockMovements',
+    'syncIssues',
+    'posSales',
+    'customers',
+    'customerPayments',
+    'expenses',
+    'pharmacyOrders',
+  ],
+};
 
 function getRestoreCollections(collections: Record<string, any[]>) {
   const known = GLOBAL_DATA_COLLECTIONS.filter(name => collections[name]);
@@ -61,6 +105,18 @@ async function commitInChunks<T>(
     docs.slice(i, i + 400).forEach(item => writeChunk(batch, item));
     await batch.commit();
   }
+}
+
+function isExpenseInScope(data: any, scope: ResetScope) {
+  const value = data?.scope || data?.app || data?.module || data?.source || data?.createdFrom;
+  if (!value) return false;
+  const normalized = String(value).toLowerCase();
+  if (scope === 'hms') return ['hms', 'hospital', 'clinic'].includes(normalized);
+  return ['pos', 'pharmacy'].includes(normalized);
+}
+
+function isCounterInScope(id: string, scope: ResetScope) {
+  return scope === 'hms' ? HMS_COUNTER_IDS.has(id) : PHARMACY_COUNTER_IDS.has(id);
 }
 
 export async function exportAllAppData(onProgress?: ProgressFn): Promise<BackupFile> {
@@ -102,7 +158,7 @@ export async function restoreAllAppData(backup: BackupFile, onProgress?: Progres
   return totalDocs;
 }
 
-export async function deleteAllAppData(onProgress?: ProgressFn) {
+export async function deleteAppDataScope(scope: ResetScope, onProgress?: ProgressFn) {
   let totalDocs = 0;
   const currentUser = auth.currentUser;
 
@@ -135,14 +191,15 @@ export async function deleteAllAppData(onProgress?: ProgressFn) {
     }, { merge: true });
   }
 
-  for (const collectionName of GLOBAL_DATA_COLLECTIONS) {
+  for (const collectionName of RESET_COLLECTIONS[scope]) {
     try {
       onProgress?.(`Deleting ${collectionName}...`);
       const snap = await getDocs(collection(db, collectionName));
       const docs = snap.docs.filter(document => {
-        if (collectionName !== 'users') return true;
-        const data = document.data();
-        return data?.role !== 'admin';
+        if (collectionName === 'users') return false;
+        if (collectionName === 'counters') return isCounterInScope(document.id, scope);
+        if (collectionName === 'expenses') return isExpenseInScope(document.data(), scope);
+        return true;
       });
       if (!docs.length) continue;
 

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { downloadOrShare } from '../lib/nativeUtils';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database, Lock, Eye, EyeOff } from 'lucide-react';
-import { deleteAllAppData, exportAllAppData, GLOBAL_DATA_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
+import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 import { auth } from '../../firebase';
 
 export function Settings() {
@@ -138,11 +138,11 @@ export function Settings() {
     setShowConfirmModal(false);
     setIsDeleting(true);
     try {
-      const totalDocs = await deleteAllAppData(setDeleteProgress);
-      setDeleteProgress(`Done: deleted ${totalDocs} records across HMS and Pharmacy.`);
+      const totalDocs = await deleteAppDataScope('pharmacy', setDeleteProgress);
+      setDeleteProgress(`Done: deleted ${totalDocs} pharmacy records. User accounts were kept.`);
       setConfirmText('');
-    } catch (error) {
-      setDeleteProgress('Error deleting data. Check console.');
+    } catch (error: any) {
+      setDeleteProgress('Error: ' + (error?.message || 'Could not reset pharmacy data.'));
     } finally {
       setIsDeleting(false);
       setTimeout(() => setDeleteProgress(''), 3000);
@@ -314,9 +314,9 @@ export function Settings() {
           </p>
           <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
             <div>
-              <h3 className="font-bold text-gray-900">Factory Reset (Delete All Data)</h3>
+              <h3 className="font-bold text-gray-900">Reset Pharmacy Data</h3>
               <p className="text-sm text-gray-500 mt-1">
-                Permanently deletes clinic records used by HMS and Pharmacy. Admin profiles are kept, Firebase Authentication accounts and passwords are not reset, and staff profiles must be recreated.
+                Permanently deletes pharmacy/POS records only. Hospital patients, appointments, OPD, lab, bills, staff, and user accounts are kept. {RESET_COLLECTIONS.pharmacy.length} pharmacy collections are included.
               </p>
             </div>
             <button
@@ -325,7 +325,7 @@ export function Settings() {
               className="px-4 py-2 bg-red-600 text-white rounded-md font-medium hover:bg-red-700 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
             >
               <Trash2 className="w-4 h-4" />
-              {isDeleting ? 'Deleting...' : 'Reset All Data'}
+              {isDeleting ? 'Deleting...' : 'Reset Pharmacy Data'}
             </button>
           </div>
           {deleteProgress && (
@@ -380,7 +380,7 @@ export function Settings() {
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-red-600 flex items-center gap-2">
                 <AlertTriangle className="w-6 h-6" />
-                Confirm Factory Reset
+                Confirm Pharmacy Reset
               </h3>
               <button onClick={() => setShowConfirmModal(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-6 h-6" />
@@ -388,9 +388,9 @@ export function Settings() {
             </div>
             <div className="space-y-4">
               <p className="text-gray-700 font-medium">
-                WARNING: You are about to delete ALL data. Export a backup first!
+                WARNING: You are about to delete pharmacy/POS data. Export a backup first!
               </p>
-              <p className="text-red-600 font-bold">This action CANNOT be undone. Internet is required and admin login will keep the same password.</p>
+              <p className="text-red-600 font-bold">This action CANNOT be undone. Internet is required and all user logins keep the same passwords.</p>
               <div className="pt-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Type "DELETE ALL DATA" to confirm:
@@ -415,7 +415,7 @@ export function Settings() {
                   disabled={confirmText !== 'DELETE ALL DATA'}
                   className="px-4 py-2 bg-red-600 text-white rounded-md font-medium hover:bg-red-700 disabled:opacity-50"
                 >
-                  Permanently Delete
+                  Reset Pharmacy
                 </button>
               </div>
             </div>
