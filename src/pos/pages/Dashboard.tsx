@@ -20,20 +20,23 @@ export function Dashboard() {
     const unsubMedicines = onSnapshot(collection(db, 'medicines'), (snapshot) => {
       let lowStockCount = 0;
       let expiringCount = 0;
+      let inStockCount = 0;
       let stockValue = 0;
       const today = new Date();
       const nextMonth = addDays(today, 30);
 
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        if (data.stock <= (data.unitsPerBox || 1) * 2) lowStockCount++;
+        const stock = Number(data.stock || 0);
+        if (stock > 0) inStockCount++;
+        if (stock <= (data.unitsPerBox || 1) * 2) lowStockCount++;
         if (data.expiryDate && isBefore(new Date(data.expiryDate), nextMonth)) expiringCount++;
         const unitsPerBox = data.unitsPerBox || 1;
-        const boxes = (data.stock || 0) / unitsPerBox;
+        const boxes = stock / unitsPerBox;
         stockValue += (data.costPrice || 0) * boxes;
       });
 
-      setStats(prev => ({ ...prev, lowStock: lowStockCount, expiringSoon: expiringCount, totalMedicines: snapshot.size, totalStockValue: stockValue }));
+      setStats(prev => ({ ...prev, lowStock: lowStockCount, expiringSoon: expiringCount, totalMedicines: inStockCount, totalStockValue: stockValue }));
     }, (error) => handleFirestoreError(error, OperationType.GET, 'medicines'));
 
     const unsubSales = onSnapshot(collection(db, 'sales'), (snapshot) => {
