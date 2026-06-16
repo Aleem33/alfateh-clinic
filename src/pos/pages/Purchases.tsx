@@ -18,7 +18,7 @@ export function Purchases() {
   const [medDropdownOpen, setMedDropdownOpen] = useState(false);
   const [formData, setFormData] = useState({
     supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0',
-    costPrice: '', retailPrice: '', unitPrice: '',
+    unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '',
     batchNo: '', expiryDate: '', notes: '',
   });
 
@@ -52,21 +52,22 @@ export function Purchases() {
     setMedDropdownOpen(false);
     setFormData(prev => ({
       ...prev,
+      unitsPerBox: String(med.unitsPerBox || 1),
       costPrice: (med.costPrice || 0).toString(),
       retailPrice: (med.retailPrice || med.price || 0).toString(),
-      unitPrice: (med.unitPrice || med.price || 0).toString(),
+      unitPrice: (med.unitPrice || (med.unitsPerBox > 0 ? (Number(med.retailPrice || med.price || 0) / med.unitsPerBox) : med.price) || 0).toString(),
       batchNo: med.batchNo || '',
       expiryDate: med.expiryDate || '',
     }));
   };
 
-  const handleRetailChange = (retail: string) => {
+  const updateRetailAndUnits = (retail: string, unitsPerBoxValue: string) => {
     const rPrice = parseFloat(retail);
-    const units = selectedMedicine?.unitsPerBox || 1;
+    const units = parseInt(unitsPerBoxValue || '1');
     if (!isNaN(rPrice) && units > 0) {
-      setFormData(prev => ({ ...prev, retailPrice: retail, unitPrice: (rPrice / units).toFixed(2) }));
+      setFormData(prev => ({ ...prev, retailPrice: retail, unitsPerBox: unitsPerBoxValue, unitPrice: (rPrice / units).toFixed(2) }));
     } else {
-      setFormData(prev => ({ ...prev, retailPrice: retail }));
+      setFormData(prev => ({ ...prev, retailPrice: retail, unitsPerBox: unitsPerBoxValue }));
     }
   };
 
@@ -74,20 +75,23 @@ export function Purchases() {
     e.preventDefault();
     if (!selectedMedicine) return;
     try {
-      const unitsPerBox  = selectedMedicine.unitsPerBox || 1;
+      const unitsPerBox  = Math.max(1, parseInt(formData.unitsPerBox || '1') || 1);
       const boxesBought  = parseInt(formData.boxesPurchased || '0');
       const looseBought  = parseInt(formData.looseUnitsPurchased || '0');
       const totalUnits   = (boxesBought * unitsPerBox) + looseBought;
+      if (totalUnits <= 0) return;
       const supplier     = suppliers.find(s => s.id === formData.supplierId);
-      const totalCost    = parseFloat(formData.costPrice || '0') * boxesBought;
+      const costPrice    = parseFloat(formData.costPrice || '0');
+      const costPricePerUnit = costPrice / unitsPerBox;
+      const totalCost    = totalUnits * costPricePerUnit;
 
       await addDoc(collection(db, 'purchases'), {
         medicineId: selectedMedicine.id, medicineName: selectedMedicine.name,
         supplierId: formData.supplierId || null, supplierName: supplier?.name || 'N/A',
         boxesPurchased: boxesBought, looseUnitsPurchased: looseBought,
         totalUnitsAdded: totalUnits, unitsPerBox,
-        costPrice: parseFloat(formData.costPrice || '0'),
-        costPricePerUnit: unitsPerBox > 1 ? parseFloat(formData.costPrice || '0') / unitsPerBox : parseFloat(formData.costPrice || '0'),
+        costPrice,
+        costPricePerUnit,
         retailPrice: parseFloat(formData.retailPrice || '0'),
         unitPrice: parseFloat(formData.unitPrice || '0'),
         batchNo: formData.batchNo, expiryDate: formData.expiryDate,
@@ -96,14 +100,15 @@ export function Purchases() {
       });
       await updateDoc(doc(db, 'medicines', selectedMedicine.id), {
         stock: increment(totalUnits),
-        costPrice: parseFloat(formData.costPrice || '0'),
+        unitsPerBox,
+        costPrice,
         retailPrice: parseFloat(formData.retailPrice || '0'),
         unitPrice: parseFloat(formData.unitPrice || '0'),
         batchNo: formData.batchNo, expiryDate: formData.expiryDate,
       });
 
       setIsModalOpen(false); setSelectedMedicine(null); setMedSearch('');
-      setFormData({ supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0', costPrice: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: '', notes: '' });
+      setFormData({ supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: '', notes: '' });
       setSuccessMsg(`✓ Added ${totalUnits} units to "${selectedMedicine.name}"`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
@@ -290,13 +295,13 @@ export function Purchases() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Boxes <span className="text-red-500">*</span></label>
-                  <input required type="number" min="0" value={formData.boxesPurchased}
+                  <input type="number" min="0" value={formData.boxesPurchased}
                     onChange={e => setFormData({ ...formData, boxesPurchased: e.target.value })}
                     placeholder="e.g. 10"
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
-                  {selectedMedicine?.unitsPerBox > 1 && <p className="text-xs text-gray-400 mt-1">{selectedMedicine.unitsPerBox} units/box</p>}
+                  {parseInt(formData.unitsPerBox || '1') > 1 && <p className="text-xs text-gray-400 mt-1">{formData.unitsPerBox} units/box</p>}
                 </div>
-                {selectedMedicine?.unitsPerBox > 1 && (
+                {parseInt(formData.unitsPerBox || '1') > 1 && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Loose Units</label>
                     <input type="number" min="0" value={formData.looseUnitsPurchased}
@@ -307,7 +312,13 @@ export function Purchases() {
               </div>
 
               {/* Prices */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Units/Box</label>
+                  <input type="number" min="1" value={formData.unitsPerBox}
+                    onChange={e => updateRetailAndUnits(formData.retailPrice, e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Cost Price/Box</label>
                   <input type="number" step="0.01" min="0" value={formData.costPrice}
@@ -317,12 +328,12 @@ export function Purchases() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Retail Price/Box</label>
                   <input type="number" step="0.01" min="0" value={formData.retailPrice}
-                    onChange={e => handleRetailChange(e.target.value)}
+                    onChange={e => updateRetailAndUnits(e.target.value, formData.unitsPerBox)}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                 </div>
               </div>
 
-              {selectedMedicine?.unitsPerBox > 1 && (
+              {parseInt(formData.unitsPerBox || '1') > 1 && (
                 <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex justify-between items-center">
                   <span className="text-sm text-blue-800 font-medium">Unit Price (auto)</span>
                   <div className="flex items-center gap-1">
@@ -363,8 +374,8 @@ export function Purchases() {
                 <div className="bg-green-50 border border-green-100 rounded-lg p-3">
                   <p className="text-sm font-medium text-green-800">Preview:</p>
                   <p className="text-sm text-green-700 mt-1">
-                    Stock ↑ by <strong>{(parseInt(formData.boxesPurchased || '0') * (selectedMedicine.unitsPerBox || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
-                    {' '}→ New total: <strong>{selectedMedicine.stock + (parseInt(formData.boxesPurchased || '0') * (selectedMedicine.unitsPerBox || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
+                    Stock ↑ by <strong>{(parseInt(formData.boxesPurchased || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
+                    {' '}→ New total: <strong>{selectedMedicine.stock + (parseInt(formData.boxesPurchased || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
                   </p>
                 </div>
               )}

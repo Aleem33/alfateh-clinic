@@ -62,7 +62,12 @@ export function Pharmacy() {
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [editMedId, setEditMedId]   = useState<string | null>(null);
   const [medForm, setMedForm]       = useState(emptyMed);
-  const [purchaseForm, setPurchaseForm] = useState({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', costPerBox: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
+  const [purchaseForm, setPurchaseForm] = useState({
+    medicineId: '', medicineName: '', supplierId: '', supplierName: '',
+    boxes: '', looseUnits: '0', unitsPerBox: '1',
+    costPerBox: '', retailPrice: '', unitPrice: '',
+    batchNo: '', expiryDate: today(), invoiceNo: '', date: today(),
+  });
   const [saving, setSaving]         = useState(false);
   const [medSearch, setMedSearch]   = useState('');
   const [error, setError]           = useState('');
@@ -167,22 +172,91 @@ export function Pharmacy() {
   };
 
   const handleSavePurchase = async () => {
-    if (!purchaseForm.medicineId || !purchaseForm.boxes) { setError('Medicine and boxes are required.'); return; }
+    const previewUnitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
+    const previewUnits = (parseInt(purchaseForm.boxes || '0') * previewUnitsPerBox) + parseInt(purchaseForm.looseUnits || '0');
+    if (!purchaseForm.medicineId || previewUnits <= 0) { setError('Medicine and purchase quantity are required.'); return; }
     setSaving(true); setError('');
     try {
       const med = medicines.find(m => m.id === purchaseForm.medicineId)!;
-      const unitsAdded = parseInt(purchaseForm.boxes) * (med.unitsPerBox || 1);
-      const totalCost  = parseFloat(purchaseForm.costPerBox || '0') * parseInt(purchaseForm.boxes);
-      await addDoc(collection(db, 'purchases'), { ...purchaseForm, boxes: parseInt(purchaseForm.boxes), unitsAdded, totalCost, costPerBox: parseFloat(purchaseForm.costPerBox || '0'), createdAt: nowISO() });
-      await updateDoc(doc(db, 'medicines', purchaseForm.medicineId), { stock: increment(unitsAdded), batchNo: purchaseForm.batchNo || med.batchNo, expiryDate: purchaseForm.expiryDate || med.expiryDate, updatedAt: nowISO() });
+      const boxesPurchased = parseInt(purchaseForm.boxes || '0');
+      const looseUnitsPurchased = parseInt(purchaseForm.looseUnits || '0');
+      const unitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
+      const unitsAdded = boxesPurchased * unitsPerBox + looseUnitsPurchased;
+      const costPerBox = parseFloat(purchaseForm.costPerBox || '0');
+      const costPricePerUnit = costPerBox / unitsPerBox;
+      const totalCost = unitsAdded * costPricePerUnit;
+      const retailPrice = parseFloat(purchaseForm.retailPrice || '0');
+      const unitPrice = parseFloat(purchaseForm.unitPrice || '0');
+      await addDoc(collection(db, 'purchases'), {
+        ...purchaseForm,
+        boxes: boxesPurchased,
+        boxesPurchased,
+        looseUnits: looseUnitsPurchased,
+        looseUnitsPurchased,
+        totalUnitsAdded: unitsAdded,
+        unitsAdded,
+        unitsPerBox,
+        totalCost,
+        costPerBox,
+        costPrice: costPerBox,
+        costPricePerUnit,
+        retailPrice,
+        unitPrice,
+        createdAt: nowISO(),
+      });
+      await updateDoc(doc(db, 'medicines', purchaseForm.medicineId), {
+        stock: increment(unitsAdded),
+        unitsPerBox,
+        costPrice: costPerBox,
+        retailPrice,
+        unitPrice,
+        batchNo: purchaseForm.batchNo || med.batchNo,
+        expiryDate: purchaseForm.expiryDate || med.expiryDate,
+        updatedAt: nowISO(),
+      });
       setShowPurchaseModal(false);
-      setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', costPerBox: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
+      setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', looseUnits: '0', unitsPerBox: '1', costPerBox: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   };
 
   const mf = (k: string, v: string) => setMedForm(p => ({ ...p, [k]: v }));
   const pf = (k: string, v: string) => setPurchaseForm(p => ({ ...p, [k]: v }));
+  const selectPurchaseMedicine = (m: any) => {
+    const unitsPerBox = String(m.unitsPerBox || 1);
+    const retailPrice = String(m.retailPrice || m.price || '');
+    const unitPrice = String(m.unitPrice || (Number(retailPrice || 0) / Math.max(1, Number(unitsPerBox) || 1)) || '');
+    setPurchaseForm(p => ({
+      ...p,
+      medicineId: m.id,
+      medicineName: m.name,
+      unitsPerBox,
+      costPerBox: String(m.costPrice || ''),
+      retailPrice,
+      unitPrice,
+      batchNo: m.batchNo || '',
+      expiryDate: m.expiryDate || today(),
+    }));
+    setMedSearch('');
+  };
+  const updatePurchaseRetailAndUnits = (retail: string, units: string) => {
+    const retailValue = parseFloat(retail);
+    const unitsValue = parseInt(units || '1');
+    setPurchaseForm(p => ({
+      ...p,
+      retailPrice: retail,
+      unitsPerBox: units,
+      unitPrice: !isNaN(retailValue) && unitsValue > 0 ? (retailValue / unitsValue).toFixed(2) : p.unitPrice,
+    }));
+  };
+  const getPurchaseUnits = () => {
+    const unitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
+    return (parseInt(purchaseForm.boxes || '0') * unitsPerBox) + parseInt(purchaseForm.looseUnits || '0');
+  };
+  const getPurchaseTotalCost = () => {
+    const unitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
+    return getPurchaseUnits() * (parseFloat(purchaseForm.costPerBox || '0') / unitsPerBox);
+  };
 
   return (
     <div className="space-y-5">
@@ -576,7 +650,7 @@ export function Pharmacy() {
                     {medSearch && (
                       <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 mt-1 max-h-40 overflow-y-auto">
                         {medicines.filter(m => m.name?.toLowerCase().includes(medSearch.toLowerCase())).slice(0, 6).map(m => (
-                          <button key={m.id} onClick={() => { setPurchaseForm(p => ({ ...p, medicineId: m.id, medicineName: m.name })); setMedSearch(''); }} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0">{m.name}</button>
+                          <button key={m.id} onClick={() => selectPurchaseMedicine(m)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0">{m.name}</button>
                         ))}
                       </div>
                     )}
@@ -587,14 +661,28 @@ export function Pharmacy() {
                 {[
                   { label: 'Purchase Date', key: 'date', type: 'date' },
                   { label: 'Boxes Purchased *', key: 'boxes', type: 'number' },
+                  { label: 'Loose Units', key: 'looseUnits', type: 'number' },
+                  { label: 'Units Per Box *', key: 'unitsPerBox', type: 'number' },
                   { label: 'Cost Per Box (Rs.)', key: 'costPerBox', type: 'number' },
+                  { label: 'Retail Per Box (Rs.)', key: 'retailPrice', type: 'number' },
                   { label: 'Batch No.', key: 'batchNo', type: 'text' },
                   { label: 'Expiry Date', key: 'expiryDate', type: 'date' },
                   { label: 'Invoice No.', key: 'invoiceNo', type: 'text' },
                 ].map(({ label, key, type }) => (
                   <div key={key}>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-                    <input type={type} value={(purchaseForm as any)[key]} onChange={e => pf(key, e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <input
+                      type={type}
+                      min={key === 'unitsPerBox' ? 1 : 0}
+                      step={type === 'number' ? '0.01' : undefined}
+                      value={(purchaseForm as any)[key]}
+                      onChange={e => key === 'retailPrice'
+                        ? updatePurchaseRetailAndUnits(e.target.value, purchaseForm.unitsPerBox)
+                        : key === 'unitsPerBox'
+                          ? updatePurchaseRetailAndUnits(purchaseForm.retailPrice, e.target.value)
+                          : pf(key, e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
                   </div>
                 ))}
                 <div>
@@ -605,10 +693,30 @@ export function Pharmacy() {
                   </select>
                 </div>
               </div>
-              {purchaseForm.boxes && purchaseForm.costPerBox && (
+              {parseInt(purchaseForm.unitsPerBox || '1') > 1 && (
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex justify-between items-center">
+                  <span className="text-sm text-blue-800 font-medium">Unit Price (auto)</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500 text-sm">Rs.</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={purchaseForm.unitPrice}
+                      onChange={e => pf('unitPrice', e.target.value)}
+                      className="w-24 p-1.5 text-right border border-blue-200 rounded focus:outline-none focus:border-blue-500 bg-white"
+                    />
+                  </div>
+                </div>
+              )}
+              {purchaseForm.costPerBox && (
                 <div className="bg-blue-50 rounded-lg p-3 text-sm">
                   <span className="text-blue-600">Total Cost: </span>
-                  <span className="font-bold text-blue-800">Rs. {(parseInt(purchaseForm.boxes) * parseFloat(purchaseForm.costPerBox)).toLocaleString()}</span>
+                  <span className="font-bold text-blue-800">
+                    Rs. {getPurchaseTotalCost().toLocaleString()}
+                  </span>
+                  <div className="text-xs text-blue-700 mt-1">
+                    Adds {getPurchaseUnits()} units using {purchaseForm.unitsPerBox || 1} units/box.
+                  </div>
                 </div>
               )}
             </div>
