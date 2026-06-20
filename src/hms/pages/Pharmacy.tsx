@@ -6,8 +6,13 @@ import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } f
 import { useAppDialog } from '../../components/AppDialog';
 import { getPrescriptionDoseCount } from '../lib/prescriptionOptions';
 
-const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '10', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
+const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Drops', 'Cream/Ointment', 'Powder', 'Inhaler', 'IV Fluid', 'Other'];
+
+const toNumber = (value: string, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 
 // ── RX quantity calculation — exact lookup table matching OPD dropdown values ──
 const FREQ_MAP: Record<string, number> = {
@@ -153,17 +158,36 @@ export function Pharmacy() {
   const openEdit = (m: any) => {
     const unitsPerBox = m.unitsPerBox || 1;
     setEditMedId(m.id);
-    setMedForm({ name: m.name, nameUrdu: m.nameUrdu || '', category: m.category || 'Tablet', manufacturer: m.manufacturer || '', batchNo: m.batchNo || '', expiryDate: m.expiryDate || '', costPrice: String(m.costPrice || ''), retailPrice: String(m.retailPrice || m.price || ''), unitPrice: String(m.unitPrice || ''), unitsPerBox: String(unitsPerBox), stockBoxes: String(Math.floor((m.stock || 0) / unitsPerBox)), stockLoose: String((m.stock || 0) % unitsPerBox), reorderLevel: String(m.reorderLevel || '10'), supplierId: m.supplierId || '', supplierName: m.supplierName || '' });
+    setMedForm({ name: m.name, nameUrdu: m.nameUrdu || '', category: m.category || m.form || 'Tablet', manufacturer: m.manufacturer || '', batchNo: m.batchNo || '', expiryDate: m.expiryDate || '', costPrice: String(m.costPrice || ''), retailPrice: String(m.retailPrice || m.price || ''), unitPrice: String(m.unitPrice || ''), unitsPerBox: String(unitsPerBox), stockBoxes: String(Math.floor((m.stock || 0) / unitsPerBox)), stockLoose: String((m.stock || 0) % unitsPerBox), reorderLevel: String(m.reorderLevel || '10'), supplierId: m.supplierId || '', supplierName: m.supplierName || '' });
     setError(''); setShowMedModal(true);
   };
 
   const handleSaveMed = async () => {
-    if (!medForm.name || !medForm.retailPrice) { setError('Name and retail price are required.'); return; }
+    const name = medForm.name.trim();
+    const category = medForm.category || 'Tablet';
+    if (!name || !category) { setError('Name and category are required.'); return; }
     setSaving(true); setError('');
     try {
-      const unitsPerBox = parseInt(medForm.unitsPerBox || '1');
-      const stock = parseInt(medForm.stockBoxes || '0') * unitsPerBox + parseInt(medForm.stockLoose || '0');
-      const data = { name: medForm.name, nameUrdu: medForm.nameUrdu || '', category: medForm.category, manufacturer: medForm.manufacturer, batchNo: medForm.batchNo, expiryDate: medForm.expiryDate, costPrice: parseFloat(medForm.costPrice || '0'), retailPrice: parseFloat(medForm.retailPrice), unitPrice: parseFloat(medForm.unitPrice || '0'), unitsPerBox, stock, reorderLevel: parseInt(medForm.reorderLevel || '10'), supplierId: medForm.supplierId, supplierName: medForm.supplierName, updatedAt: nowISO() };
+      const unitsPerBox = Math.max(1, Math.floor(toNumber(medForm.unitsPerBox, 1)));
+      const stock = Math.floor(toNumber(medForm.stockBoxes)) * unitsPerBox + Math.floor(toNumber(medForm.stockLoose));
+      const data = {
+        name,
+        nameUrdu: medForm.nameUrdu || '',
+        category,
+        form: category,
+        manufacturer: medForm.manufacturer || '',
+        batchNo: medForm.batchNo || '',
+        expiryDate: medForm.expiryDate || '',
+        costPrice: toNumber(medForm.costPrice),
+        retailPrice: toNumber(medForm.retailPrice),
+        unitPrice: toNumber(medForm.unitPrice),
+        unitsPerBox,
+        stock,
+        reorderLevel: Math.floor(toNumber(medForm.reorderLevel, 10)) || 10,
+        supplierId: medForm.supplierId || '',
+        supplierName: medForm.supplierName || '',
+        updatedAt: nowISO(),
+      };
       if (editMedId) await updateDoc(doc(db, 'medicines', editMedId), data);
       else await addDoc(collection(db, 'medicines'), { ...data, createdAt: nowISO() });
       setShowMedModal(false); setEditMedId(null); setMedForm(emptyMed);
@@ -573,7 +597,7 @@ export function Pharmacy() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
                   <select value={medForm.category} onChange={e => mf('category', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     {CATEGORIES.map(c => <option key={c}>{c}</option>)}
                   </select>
@@ -607,7 +631,7 @@ export function Pharmacy() {
                   <input type="number" value={medForm.costPrice} onChange={e => mf('costPrice', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Retail Price (per box) *</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Retail Price (per box)</label>
                   <input type="number" value={medForm.retailPrice} onChange={e => mf('retailPrice', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>

@@ -7,6 +7,13 @@ import { Plus, Edit2, Trash2, Search, AlertCircle, Upload, Download, X } from 'l
 import { format, isBefore, addDays } from 'date-fns';
 import Papa from 'papaparse';
 
+const CATEGORIES = ['Tablet','Capsule','Syrup','Injection','Drops','Cream/Ointment','Powder','Inhaler','IV Fluid','Other'];
+
+const toNumber = (value: string, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 export function Medicines() {
   const [medicines, setMedicines]       = useState<any[]>([]);
   const [search, setSearch]             = useState('');
@@ -19,7 +26,7 @@ export function Medicines() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
-    name: '', form: 'Tablet', unitsPerBox: '10',
+    name: '', form: 'Tablet', unitsPerBox: '1',
     costPrice: '', retailPrice: '', unitPrice: '',
     stockBoxes: '0', stockLoose: '0',
     expiryDate: '', batchNo: '',
@@ -50,14 +57,15 @@ export function Medicines() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const totalStock = (parseInt(formData.stockBoxes || '0') * parseInt(formData.unitsPerBox || '1')) + parseInt(formData.stockLoose || '0');
+      const unitsPerBox = Math.max(1, Math.floor(toNumber(formData.unitsPerBox, 1)));
+      const totalStock = (Math.floor(toNumber(formData.stockBoxes)) * unitsPerBox) + Math.floor(toNumber(formData.stockLoose));
       const data = {
-        name: formData.name, form: formData.form,
-        unitsPerBox: parseInt(formData.unitsPerBox || '1'),
-        costPrice:   parseFloat(formData.costPrice   || '0'),
-        retailPrice: parseFloat(formData.retailPrice || '0'),
-        unitPrice:   parseFloat(formData.unitPrice   || '0'),
-        stock: totalStock, expiryDate: formData.expiryDate, batchNo: formData.batchNo,
+        name: formData.name.trim(), form: formData.form, category: formData.form,
+        unitsPerBox,
+        costPrice:   toNumber(formData.costPrice),
+        retailPrice: toNumber(formData.retailPrice),
+        unitPrice:   toNumber(formData.unitPrice),
+        stock: totalStock, expiryDate: formData.expiryDate || '', batchNo: formData.batchNo || '',
       };
       if (editingId) {
         await updateDoc(doc(db, 'medicines', editingId), data);
@@ -73,7 +81,7 @@ export function Medicines() {
   const handleEdit = (med: any) => {
     const unitsPerBox = med.unitsPerBox || 1;
     setFormData({
-      name: med.name, form: med.form || 'Tablet',
+      name: med.name, form: med.form || med.category || 'Tablet',
       unitsPerBox: unitsPerBox.toString(),
       costPrice:   (med.costPrice   || 0).toString(),
       retailPrice: (med.retailPrice || med.price || 0).toString(),
@@ -195,7 +203,7 @@ export function Medicines() {
           <button
             onClick={() => {
               setEditingId(null);
-              setFormData({ name: '', form: 'Tablet', unitsPerBox: '10', costPrice: '', retailPrice: '', unitPrice: '', stockBoxes: '0', stockLoose: '0', expiryDate: '', batchNo: '' });
+              setFormData({ name: '', form: 'Tablet', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', stockBoxes: '0', stockLoose: '0', expiryDate: '', batchNo: '' });
               setIsModalOpen(true);
             }}
             className="bg-blue-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-blue-700 text-sm font-medium">
@@ -333,10 +341,10 @@ export function Medicines() {
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Form</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
                   <select value={formData.form} onChange={e => setFormData({ ...formData, form: e.target.value })}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                    {['Tablet','Capsule','Syrup','Injection','Drops','Cream/Ointment','Other'].map(f => (
+                    {CATEGORIES.map(f => (
                       <option key={f} value={f}>{f}</option>
                     ))}
                   </select>
@@ -346,20 +354,20 @@ export function Medicines() {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Units/Box</label>
-                  <input required type="number" min="1" value={formData.unitsPerBox}
+                  <input type="number" min="1" value={formData.unitsPerBox}
                     onChange={e => handleRetailPriceChange(formData.retailPrice, e.target.value)}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                   <p className="text-xs text-gray-400 mt-1">1 for syrup/inj</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Cost/Box</label>
-                  <input required type="number" step="0.01" min="0" value={formData.costPrice}
+                  <input type="number" step="0.01" min="0" value={formData.costPrice}
                     onChange={e => setFormData({ ...formData, costPrice: e.target.value })}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Retail/Box</label>
-                  <input required type="number" step="0.01" min="0" value={formData.retailPrice}
+                  <input type="number" step="0.01" min="0" value={formData.retailPrice}
                     onChange={e => handleRetailPriceChange(e.target.value, formData.unitsPerBox)}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                 </div>
@@ -380,14 +388,14 @@ export function Medicines() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Stock (Boxes)</label>
-                  <input required type="number" min="0" value={formData.stockBoxes}
+                  <input type="number" min="0" value={formData.stockBoxes}
                     onChange={e => setFormData({ ...formData, stockBoxes: e.target.value })}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                 </div>
                 {parseInt(formData.unitsPerBox) > 1 && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Stock (Loose)</label>
-                    <input required type="number" min="0" max={parseInt(formData.unitsPerBox) - 1}
+                    <input type="number" min="0" max={parseInt(formData.unitsPerBox) - 1}
                       value={formData.stockLoose}
                       onChange={e => setFormData({ ...formData, stockLoose: e.target.value })}
                       className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
@@ -398,13 +406,13 @@ export function Medicines() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Batch No</label>
-                  <input required type="text" value={formData.batchNo}
+                  <input type="text" value={formData.batchNo}
                     onChange={e => setFormData({ ...formData, batchNo: e.target.value })}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
-                  <input required type="date" value={formData.expiryDate}
+                  <input type="date" value={formData.expiryDate}
                     onChange={e => setFormData({ ...formData, expiryDate: e.target.value })}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                 </div>
