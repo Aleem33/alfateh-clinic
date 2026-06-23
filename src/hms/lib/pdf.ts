@@ -256,7 +256,7 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .fill { position:absolute; z-index:1; color:#17205f; font-weight:700; white-space:nowrap; overflow:hidden; }
 .patient-name { left:15mm; top:33.2mm; width:62mm; font-size:${14 * scale}px; }
 .patient-age { left:81mm; top:33.2mm; width:25mm; font-size:${14 * scale}px; text-align:center; }
-.patient-date { left:118mm; top:33.2mm; width:26mm; font-size:${14 * scale}px; text-align:center; }
+.patient-date { left:119mm; top:33.2mm; width:26mm; font-size:${14 * scale}px; text-align:center; }
 .rx-content { position:absolute; z-index:1; left:8mm; top:66mm; width:137mm; min-height:150mm; }
 .pad-note { font-size:${10.5 * scale}px; line-height:1.3; margin-bottom:3mm; color:#17205f; background:rgba(255,255,255,.72); padding:1.2mm 1.5mm; border-left:2px solid #1a7a1a; }
 .rx-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:${10.8 * scale}px; color:#17205f; background:rgba(255,255,255,.86); }
