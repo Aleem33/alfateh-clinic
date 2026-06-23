@@ -44,7 +44,7 @@ export type BackupFile = {
 };
 
 type ProgressFn = (message: string) => void;
-export type ResetScope = 'hms' | 'pharmacy';
+export type ResetScope = 'hms' | 'pharmacy' | 'lab';
 const BOOTSTRAP_ADMIN_EMAIL = 'admin@alfateh-clinic.internal';
 const HMS_COUNTER_IDS = new Set(['mrn', 'bill']);
 const PHARMACY_COUNTER_IDS = new Set(['posReceipt', 'posSaleReturn', 'posPurchaseReturn', 'sale', 'saleReturn', 'purchaseReturn']);
@@ -63,14 +63,15 @@ export const RESET_COLLECTIONS: Record<ResetScope, string[]> = {
     'rooms',
     'beds',
     'bedTreatments',
-    'labOrders',
-    'labTests',
     'bills',
     'staff',
     'expenses',
-    'pharmacyOrders',
     'auditLogs',
     'notifications',
+  ],
+  lab: [
+    'labOrders',
+    'labTests',
   ],
   pharmacy: [
     'counters',
@@ -108,6 +109,7 @@ async function commitInChunks<T>(
 }
 
 function isExpenseInScope(data: any, scope: ResetScope) {
+  if (scope === 'lab') return false;
   const value = data?.scope || data?.app || data?.module || data?.source || data?.createdFrom;
   if (!value) return false;
   const normalized = String(value).toLowerCase();
@@ -116,6 +118,7 @@ function isExpenseInScope(data: any, scope: ResetScope) {
 }
 
 function isCounterInScope(id: string, scope: ResetScope) {
+  if (scope === 'lab') return false;
   return scope === 'hms' ? HMS_COUNTER_IDS.has(id) : PHARMACY_COUNTER_IDS.has(id);
 }
 

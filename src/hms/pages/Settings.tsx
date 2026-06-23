@@ -3,7 +3,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db, auth, registerUser } from '../../firebase';
 import { nowISO } from '../lib/utils';
-import { Building2, Download, Upload, Trash2, AlertTriangle, UserPlus, X, Lock, Eye, EyeOff, Bot, CheckCircle, RefreshCw, Printer } from 'lucide-react';
+import { Building2, Download, Upload, Trash2, AlertTriangle, UserPlus, X, Lock, Eye, EyeOff, Bot, CheckCircle, RefreshCw, Printer, FlaskConical } from 'lucide-react';
 import { AppUpdater } from '../../components/AppUpdater';
 import { getGeminiKey, setGeminiKey } from '../lib/translate';
 import {
@@ -85,6 +85,10 @@ export function Settings() {
   const [clearText, setClearText] = useState('');
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState('');
+  const [showLabClearConfirm, setShowLabClearConfirm] = useState(false);
+  const [labClearText, setLabClearText] = useState('');
+  const [labClearing, setLabClearing] = useState(false);
+  const [labClearMsg, setLabClearMsg] = useState('');
 
   const [geminiKey, setGeminiKeyState] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -184,6 +188,20 @@ export function Settings() {
       setTimeout(() => setClearMsg(''), 5000);
     } catch (e: any) { setClearMsg('Error: ' + e.message); }
     finally { setClearing(false); }
+  };
+
+  const handleClearLab = async () => {
+    if (labClearText !== 'DELETE LAB') return;
+    setShowLabClearConfirm(false);
+    setLabClearing(true);
+    setLabClearMsg('Deleting lab data...');
+    try {
+      const totalDocs = await deleteAppDataScope('lab', setLabClearMsg);
+      setLabClearText('');
+      setLabClearMsg(`Done: deleted ${totalDocs} lab records. User accounts were kept.`);
+      setTimeout(() => setLabClearMsg(''), 5000);
+    } catch (e: any) { setLabClearMsg('Error: ' + e.message); }
+    finally { setLabClearing(false); }
   };
 
   const handleCreateUser = async () => {
@@ -333,52 +351,77 @@ export function Settings() {
           <h2 className="font-semibold text-gray-900">Prescription Printing</h2>
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          Prescriptions print on existing Al-Fateh pads. Print one test on plain paper first, then adjust offsets if needed.
+          Choose whether to fill existing printed pads or print the complete Al-Fateh pad design.
         </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          {[
+            { mode: 'preprinted' as const, title: 'Overlay on pre-printed pad', desc: 'Print only patient, vitals, and Rx boxes.' },
+            { mode: 'fullPad' as const, title: 'Print full pad', desc: 'Print the complete pad artwork plus prescription.' },
+          ].map(option => (
+            <button
+              key={option.mode}
+              type="button"
+              onClick={() => setPrintSettings(s => ({ ...s, mode: option.mode }))}
+              className={`text-left border rounded-xl p-4 transition-colors ${printSettings.mode === option.mode ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}
+            >
+              <span className="block text-sm font-semibold text-gray-900">{option.title}</span>
+              <span className="block text-xs text-gray-500 mt-1">{option.desc}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {printSettings.mode === 'preprinted' && (
+            <>
+              <F
+                label="Whole Page X Offset (mm)"
+                type="number"
+                value={String(printSettings.offsetX)}
+                onChange={(v: string) => updatePrintNumber('offsetX', v)}
+              />
+              <F
+                label="Whole Page Y Offset (mm)"
+                type="number"
+                value={String(printSettings.offsetY)}
+                onChange={(v: string) => updatePrintNumber('offsetY', v)}
+              />
+            </>
+          )}
           <F
-            label="Whole Page X Offset (mm)"
-            type="number"
-            value={String(printSettings.offsetX)}
-            onChange={(v: string) => updatePrintNumber('offsetX', v)}
-          />
-          <F
-            label="Whole Page Y Offset (mm)"
-            type="number"
-            value={String(printSettings.offsetY)}
-            onChange={(v: string) => updatePrintNumber('offsetY', v)}
-          />
-          <F
-            label="Rx Table Font Scale (%)"
+            label={printSettings.mode === 'preprinted' ? 'Rx Table Font Scale (%)' : 'Full Pad Rx Scale (%)'}
             type="number"
             value={String(printSettings.fontScale)}
             onChange={(v: string) => updatePrintNumber('fontScale', v, 100)}
           />
         </div>
 
-        <div className="mt-5 border border-gray-100 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-3">Patient Details Position</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <F label="Name X Offset (mm)" type="number" value={String(printSettings.patientNameOffsetX)} onChange={(v: string) => updatePrintNumber('patientNameOffsetX', v)} />
-            <F label="Name Y Offset (mm)" type="number" value={String(printSettings.patientNameOffsetY)} onChange={(v: string) => updatePrintNumber('patientNameOffsetY', v)} />
-            <F label="Name Font Size" type="number" value={String(printSettings.patientNameFontSize)} onChange={(v: string) => updatePrintNumber('patientNameFontSize', v, 12)} />
-            <F label="Age X Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetX)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetX', v)} />
-            <F label="Age Y Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetY)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetY', v)} />
-            <F label="Age Font Size" type="number" value={String(printSettings.patientAgeFontSize)} onChange={(v: string) => updatePrintNumber('patientAgeFontSize', v, 12)} />
-            <F label="Date X Offset (mm)" type="number" value={String(printSettings.patientDateOffsetX)} onChange={(v: string) => updatePrintNumber('patientDateOffsetX', v)} />
-            <F label="Date Y Offset (mm)" type="number" value={String(printSettings.patientDateOffsetY)} onChange={(v: string) => updatePrintNumber('patientDateOffsetY', v)} />
-            <F label="Date Font Size" type="number" value={String(printSettings.patientDateFontSize)} onChange={(v: string) => updatePrintNumber('patientDateFontSize', v, 12)} />
-          </div>
-        </div>
+        {printSettings.mode === 'preprinted' && (
+          <>
+            <div className="mt-5 border border-gray-100 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">Patient Details Position</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <F label="Name X Offset (mm)" type="number" value={String(printSettings.patientNameOffsetX)} onChange={(v: string) => updatePrintNumber('patientNameOffsetX', v)} />
+                <F label="Name Y Offset (mm)" type="number" value={String(printSettings.patientNameOffsetY)} onChange={(v: string) => updatePrintNumber('patientNameOffsetY', v)} />
+                <F label="Name Font Size" type="number" value={String(printSettings.patientNameFontSize)} onChange={(v: string) => updatePrintNumber('patientNameFontSize', v, 12)} />
+                <F label="Age X Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetX)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetX', v)} />
+                <F label="Age Y Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetY)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetY', v)} />
+                <F label="Age Font Size" type="number" value={String(printSettings.patientAgeFontSize)} onChange={(v: string) => updatePrintNumber('patientAgeFontSize', v, 12)} />
+                <F label="Date X Offset (mm)" type="number" value={String(printSettings.patientDateOffsetX)} onChange={(v: string) => updatePrintNumber('patientDateOffsetX', v)} />
+                <F label="Date Y Offset (mm)" type="number" value={String(printSettings.patientDateOffsetY)} onChange={(v: string) => updatePrintNumber('patientDateOffsetY', v)} />
+                <F label="Date Font Size" type="number" value={String(printSettings.patientDateFontSize)} onChange={(v: string) => updatePrintNumber('patientDateFontSize', v, 12)} />
+              </div>
+            </div>
 
-        <div className="mt-4 border border-gray-100 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-3">Vitals Position</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <F label="Vitals X Offset (mm)" type="number" value={String(printSettings.vitalsOffsetX)} onChange={(v: string) => updatePrintNumber('vitalsOffsetX', v)} />
-            <F label="Vitals Y Offset (mm)" type="number" value={String(printSettings.vitalsOffsetY)} onChange={(v: string) => updatePrintNumber('vitalsOffsetY', v)} />
-            <F label="Vitals Font Size" type="number" value={String(printSettings.vitalsFontSize)} onChange={(v: string) => updatePrintNumber('vitalsFontSize', v, 10.5)} />
-          </div>
-        </div>
+            <div className="mt-4 border border-gray-100 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">Vitals Position</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <F label="Vitals X Offset (mm)" type="number" value={String(printSettings.vitalsOffsetX)} onChange={(v: string) => updatePrintNumber('vitalsOffsetX', v)} />
+                <F label="Vitals Y Offset (mm)" type="number" value={String(printSettings.vitalsOffsetY)} onChange={(v: string) => updatePrintNumber('vitalsOffsetY', v)} />
+                <F label="Vitals Font Size" type="number" value={String(printSettings.vitalsFontSize)} onChange={(v: string) => updatePrintNumber('vitalsFontSize', v, 10.5)} />
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 mt-4">
           <button onClick={savePrintSettings}
@@ -448,14 +491,28 @@ export function Settings() {
           <AlertTriangle className="w-5 h-5 text-red-500" />
           <h2 className="font-semibold text-red-600">Danger Zone</h2>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Permanently delete hospital-side records only. Pharmacy inventory, POS sales, purchases, and customers are kept.</p>
-        <p className="text-xs text-gray-400 mb-4">
-          {RESET_COLLECTIONS.hms.length} hospital collections included. User profiles, Firebase Authentication accounts, and passwords are not deleted or reset.
-        </p>
-        <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
-          <Trash2 className="w-4 h-4" /> Reset Hospital Data
-        </button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border border-red-100 rounded-xl p-4">
+            <p className="text-sm text-gray-500 mb-3">Permanently delete hospital-side records only. Pharmacy and lab records are kept.</p>
+            <p className="text-xs text-gray-400 mb-4">
+              {RESET_COLLECTIONS.hms.length} hospital collections included. User profiles, Firebase Authentication accounts, and passwords are not deleted or reset.
+            </p>
+            <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
+              <Trash2 className="w-4 h-4" /> Reset Hospital Data
+            </button>
+          </div>
+          <div className="border border-red-100 rounded-xl p-4">
+            <p className="text-sm text-gray-500 mb-3">Permanently delete lab orders and lab test setup only. Hospital and pharmacy records are kept.</p>
+            <p className="text-xs text-gray-400 mb-4">
+              {RESET_COLLECTIONS.lab.length} lab collections included. User profiles, Firebase Authentication accounts, and passwords are not deleted or reset.
+            </p>
+            <button onClick={() => setShowLabClearConfirm(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
+              <FlaskConical className="w-4 h-4" /> Reset Lab Data
+            </button>
+          </div>
+        </div>
         {clearMsg && <p className={`text-sm font-medium mt-3 ${clearMsg.startsWith('Done') ? 'text-green-600' : clearMsg.startsWith('Error') ? 'text-red-500' : 'text-blue-600'}`}>{clearMsg}</p>}
+        {labClearMsg && <p className={`text-sm font-medium mt-3 ${labClearMsg.startsWith('Done') ? 'text-green-600' : labClearMsg.startsWith('Error') ? 'text-red-500' : 'text-blue-600'}`}>{labClearMsg}</p>}
       </div>
 
       {/* Import Confirm Modal */}
@@ -489,6 +546,28 @@ export function Settings() {
               <button onClick={handleClear} disabled={clearText !== 'DELETE ALL' || clearing}
                 className="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm hover:bg-red-700 disabled:opacity-40">
                 {clearing ? 'Deleting...' : 'Reset Hospital'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lab Clear Confirm Modal */}
+      {showLabClearConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
+            <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3"><FlaskConical className="w-5 h-5 text-red-600" /></div>
+            <h2 className="font-semibold text-gray-900 text-center mb-1">Reset Lab Data?</h2>
+            <p className="text-sm text-gray-500 text-center mb-4">
+              Type <strong>DELETE LAB</strong> to confirm. This deletes lab orders and lab tests only.
+            </p>
+            <input value={labClearText} onChange={e => setLabClearText(e.target.value)} placeholder="DELETE LAB"
+              className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-400 text-center font-mono" />
+            <div className="flex gap-3">
+              <button onClick={() => { setShowLabClearConfirm(false); setLabClearText(''); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
+              <button onClick={handleClearLab} disabled={labClearText !== 'DELETE LAB' || labClearing}
+                className="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm hover:bg-red-700 disabled:opacity-40">
+                {labClearing ? 'Deleting...' : 'Reset Lab'}
               </button>
             </div>
           </div>

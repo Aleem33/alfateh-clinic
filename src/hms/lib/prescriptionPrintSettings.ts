@@ -1,4 +1,4 @@
-export type PrescriptionPrintMode = 'preprinted';
+export type PrescriptionPrintMode = 'preprinted' | 'fullPad';
 
 export type PrescriptionPrintSettings = {
   mode: PrescriptionPrintMode;
@@ -50,8 +50,9 @@ export function getPrescriptionPrintSettings(): PrescriptionPrintSettings {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return DEFAULT_PRESCRIPTION_PRINT_SETTINGS;
     const parsed = JSON.parse(saved);
+    const mode: PrescriptionPrintMode = parsed.mode === 'fullPad' ? 'fullPad' : 'preprinted';
     return {
-      mode: 'preprinted',
+      mode,
       offsetX: num(parsed.offsetX, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.offsetX),
       offsetY: num(parsed.offsetY, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.offsetY),
       fontScale: num(parsed.fontScale, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.fontScale),
@@ -75,7 +76,7 @@ export function getPrescriptionPrintSettings(): PrescriptionPrintSettings {
 
 export function savePrescriptionPrintSettings(settings: PrescriptionPrintSettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    mode: 'preprinted',
+    mode: settings.mode === 'fullPad' ? 'fullPad' : 'preprinted',
     offsetX: num(settings.offsetX, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.offsetX),
     offsetY: num(settings.offsetY, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.offsetY),
     fontScale: num(settings.fontScale, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.fontScale),

@@ -8,8 +8,6 @@ import {
   DOSE_GRID_TIME_OPTIONS,
   getDoseGridValue,
   getPrescriptionDays,
-  getPrescriptionEnglishLine,
-  getPrescriptionUrduLine,
   type DoseSchedule,
 } from './prescriptionOptions';
 
@@ -184,395 +182,116 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 </html>`;
 }
 
-export function printPrescription(data: PrescriptionPrintData) {
-  printHTML(buildPreprintedPrescriptionHTML(data));
-  return;
+function buildFullPadPrescriptionHTML(data: PrescriptionPrintData): string {
+  const settings = getPrescriptionPrintSettings();
+  const scale = Math.max(70, Math.min(130, settings.fontScale || 100)) / 100;
+  const rxRows = data.prescriptions.map((p, i) => `
+    <tr>
+      <td class="rx-num">${i + 1}</td>
+      <td class="rx-drug">
+        <div class="rx-drug-en">${esc(formatMedicineNameWithForm(p.name, p.form || p.category || p.type))}</div>
+        ${p.nameUrdu ? `<div class="rx-drug-ur">${esc(p.nameUrdu)}</div>` : ''}
+      </td>
+      ${DOSE_GRID_TIME_OPTIONS.map(time => `<td class="rx-dose">${esc(getDoseGridValue(p, time.key))}</td>`).join('')}
+      <td class="rx-days">${esc(getPrescriptionDays(p))}</td>
+      <td class="rx-inst">
+        <div>${esc(p.instructions || '')}</div>
+        ${p.instructionsUrdu ? `<div class="rx-inst-ur">${esc(p.instructionsUrdu)}</div>` : ''}
+      </td>
+    </tr>
+  `).join('');
 
-  const medRows = data.prescriptions.map((p, i) => `
-    <div class="med-item">
-      <div class="med-num">${String(i + 1)}.</div>
-      <div class="med-body">
-        <div class="med-line med-en-line">
-          ${esc(formatMedicineNameWithForm(p.name, p.form || p.category || p.type))} ${esc(getPrescriptionEnglishLine(p))}
-        </div>
-        ${getPrescriptionUrduLine(p) ? `
-        <div class="med-line med-ur-line">
-          ${esc(getPrescriptionUrduLine(p))}
-        </div>` : ''}
-      </div>
-    </div>`).join('');
-
-  const labSection = data.labOrders?.length ? `
-    <div class="lab-box">
-      <div class="lab-title">Lab Orders / لیبارٹری</div>
-      <div class="lab-pills">
-        ${data.labOrders.map(l => `<span class="lab-pill">${l.testName}</span>`).join('')}
-      </div>
-    </div>` : '';
-
-  const followup = data.followUpDate
-    ? `<div class="followup">Follow-up / دوبارہ ملاقات: <strong>${data.followUpDate}</strong></div>`
+  const complaints = data.complaints ? `<div class="pad-note"><strong>Complaints:</strong> ${esc(data.complaints)}</div>` : '';
+  const diagnosis = data.diagnosis ? `<div class="pad-note"><strong>Diagnosis:</strong> ${esc(data.diagnosis)}</div>` : '';
+  const labOrders = data.labOrders?.length
+    ? `<div class="pad-note"><strong>Lab:</strong> ${data.labOrders.map(l => esc(l.testName)).join(', ')}</div>`
     : '';
+  const followup = data.followUpDate ? `<div class="pad-note"><strong>Follow-up:</strong> ${esc(data.followUpDate)}</div>` : '';
+  const notes = data.notes ? `<div class="pad-note"><strong>Notes:</strong> ${esc(data.notes)}</div>` : '';
 
-  const notes = data.notes
-    ? `<div class="notes"><strong>Notes:</strong> ${data.notes}</div>`
-    : '';
-
-  const complaints = data.complaints
-    ? `<div class="dx-box"><div class="dx-label">Chief Complaints</div><div class="dx-val">${data.complaints}</div></div>`
-    : '';
-
-  const diagnosis = data.diagnosis
-    ? `<div class="dx-box"><div class="dx-label">Diagnosis</div><div class="dx-val">${data.diagnosis}</div></div>`
-    : '';
-
-  const html = `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8"/>
-<title>Prescription</title>
+<title>Prescription Full Pad</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap" rel="stylesheet">
 <style>
-@page { margin:0; size: A4 portrait; }
+@page { margin:0; size: 191.2mm 268.5mm; }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: Arial, sans-serif; background:#fff; font-size:12px; }
-
-.page {
-  width: 210mm;
-  min-height: 297mm;
-  border: 2.5px solid #1a7a1a;
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
-}
-
-/* ── HEADER ── */
-.header {
-  display: grid;
-  grid-template-columns: 1fr 190px;
-  border-bottom: 2px solid #1a7a1a;
-  min-height: 128px;
-}
-.header-left {
-  padding: 12px 14px 10px 12px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-right: 2px solid #1a7a1a;
-}
-.logo { width: 86px; height: 86px; object-fit: contain; }
-.clinic-name {
-  font-family: 'Arial Black', Impact, Arial, sans-serif;
-  font-size: 36px;
-  font-weight: 900;
-  color: #1a237e;
-  letter-spacing: -2px;
-  line-height: 1;
-  font-style: italic;
-}
-.clinic-addr {
-  font-size: 15px;
-  color: #1a7a1a;
-  font-style: italic;
-  font-weight: 700;
-  margin-top: 6px;
-}
-.header-right {
-  padding: 4px 8px;
-  display: block;
-}
-.dr-block {
-  min-height: 27px;
-  padding: 2px 0 3px;
-  border-bottom: 1px solid #c8e6c9;
-  position: relative;
-}
-.dr-block:last-child { border-bottom: none; min-height: 21px; }
-.dr-ur {
-  font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 13px;
-  color: #1a7a1a;
-  font-weight: 700;
-  direction: rtl;
-  text-align: right;
-  line-height: 1.05;
-  display: block;
-  white-space: nowrap;
-}
-.dr-qual {
-  font-size: 7px;
-  color: #1a237e;
-  font-weight: 600;
-  line-height: 1.12;
-  text-align: right;
-  display: block;
-}
-
-/* ── PATIENT BAR ── */
-.patient-bar {
-  display: flex;
-  align-items: center;
-  padding: 6px 14px;
-  border-bottom: 2px solid #1a7a1a;
-  font-size: 13px;
-  gap: 20px;
-}
-.pb-field { display: flex; align-items: center; gap: 6px; }
-.pb-label { font-weight: 700; font-style: italic; color: #111; white-space: nowrap; }
-.pb-val {
-  border-bottom: 1.5px solid #444;
-  min-width: 160px;
-  height: 18px;
-  font-size: 12px;
-  padding: 0 4px;
-  color: #111;
-}
-.pb-val.sm { min-width: 65px; }
-
-/* ── BODY ── */
-.body {
-  display: grid;
-  grid-template-columns: 1fr 190px;
-  border-bottom: 2px solid #1a7a1a;
-}
-
-/* ── RX AREA ── */
-.rx-area {
-  border-right: 2px solid #1a7a1a;
-  padding: 10px 14px 12px 14px;
-  display: flex;
-  flex-direction: column;
-}
-.rx-top {
-  display: flex;
-  align-items: center;
-  margin-bottom: 14px;
-}
-.rx-sym {
-  font-size: 32px;
-  font-weight: 900;
-  color: #1a237e;
-  font-style: italic;
-  font-family: 'Times New Roman', serif;
-  line-height: 1;
-  margin-right: 50px;
-}
-.rx-sym sub { font-size: 20px; }
-.hawash {
-  font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 18px;
-  color: #1a7a1a;
-  direction: rtl;
-}
-.dx-box { margin-bottom: 8px; padding-left: 8px; border-left: 3px solid #1a237e; }
-.dx-label { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #9ca3af; letter-spacing:.04em; margin-bottom: 2px; }
-.dx-val { font-size: 12.5px; font-weight: 600; color: #1a237e; }
-.rx-meds { flex: 1; }
-.med-item { display: flex; gap: 6px; margin-bottom: 10px; page-break-inside: avoid; }
-.med-num { color: #1a237e; font-weight: 700; font-size: 13px; min-width: 20px; padding-top: 1px; }
-.med-body { flex: 1; }
-.med-line { line-height: 1.35; }
-.med-en-line {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1a237e;
-}
-.med-ur-line {
-  font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 12.5px;
-  color: #1a7a1a;
-  font-weight: 700;
-  direction: rtl;
-  text-align: right;
-  margin-top: 2px;
-}
-.med-ur {
-  font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 13px;
-  color: #1a7a1a;
-  font-weight: 700;
-  direction: rtl;
-  margin-top: 2px;
-}
-.med-detail { font-size: 10.5px; color: #6b7280; margin-top: 2px; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
-.med-detail-ur {
-  font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 11px;
-  color: #1a7a1a;
-  direction: rtl;
-  text-align: right;
-  margin-top: 2px;
-}
-.med-dosage-ur {
-  font-size: 11px;
-  font-weight: 400;
-  color: #4b5563;
-}
-.inst-ur {
-  font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 10px;
-  color: #1a7a1a;
-}
-.lab-box { margin-top: 10px; padding: 5px 8px; border-left: 3px solid #7c3aed; background: #f5f3ff; border-radius: 0 4px 4px 0; }
-.lab-title { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #7c3aed; margin-bottom: 4px; }
-.lab-pills { display: flex; flex-wrap: wrap; gap: 3px; }
-.lab-pill { font-size: 10px; background: #ede9fe; color: #5b21b6; padding: 2px 7px; border-radius: 20px; }
-.followup { margin-top: 8px; font-size: 11px; font-weight: 600; color: #92400e; background: #fef3c7; border-left: 3px solid #f59e0b; padding: 4px 8px; border-radius: 0 4px 4px 0; }
-.notes { margin-top: 6px; font-size: 11px; color: #065f46; background: #ecfdf5; border-left: 3px solid #10b981; padding: 4px 8px; border-radius: 0 4px 4px 0; }
-
-/* SIGNATURE — always at the very bottom of rx-area */
-.rx-sig {
-  margin-top: auto;
-  padding-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-}
-.sig-line { text-align: center; }
-.sig-dash { display: block; width: 150px; border-top: 1.5px solid #374151; margin: 0 auto 4px; }
-.sig-text { font-size: 9.5px; color: #6b7280; }
-
-/* ── SIDEBAR ── */
-.sidebar { padding: 8px 0; display: flex; flex-direction: column; }
-.sb-section { padding: 0 9px 7px 9px; border-bottom: 1px solid #c8e6c9; margin-bottom: 0; }
-.sb-section:last-child { border-bottom: none; }
-.sb-title { font-size: 11.5px; font-weight: 700; color: #1a7a1a; margin-bottom: 5px; padding-top: 4px; }
-.sb-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  padding: 3px 0;
-  border-bottom: 1px dotted #d1d5db;
-  font-size: 10.5px;
-}
-.sb-row:last-child { border-bottom: none; }
-.sb-lbl { color: #1a237e; font-weight: 600; }
-.sb-val { border-bottom: 1px solid #9ca3af; min-width: 42px; height: 13px; font-size: 10px; text-align:right; }
-
-/* ── FOOTER ── */
-.footer {
-  padding: 4px 14px;
-  display: grid;
-  grid-template-columns: 120px 1fr 1fr;
-  align-items: center;
-  gap: 8px;
-}
-.footer-phones { font-size: 14px; font-weight: 900; color: #1a237e; line-height: 1.45; }
-.footer-center { text-align: center; font-size: 9.5px; font-weight: 700; color: #1a237e; }
-.footer-ur {
-  font-family: 'Noto Nastaliq Urdu', serif;
-  font-size: 10.5px;
-  color: #1a7a1a;
-  direction: rtl;
-  text-align: right;
-  line-height: 1.5;
-}
-
+body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
+.page { width:191.2mm; height:268.5mm; position:relative; overflow:hidden; background:#fff; }
+.pad-bg { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; z-index:0; }
+.fill { position:absolute; z-index:1; color:#17205f; font-weight:700; white-space:nowrap; overflow:hidden; }
+.patient-name { left:15mm; top:35.7mm; width:62mm; font-size:${12 * scale}px; }
+.patient-age { left:81mm; top:35.7mm; width:25mm; font-size:${12 * scale}px; text-align:center; }
+.patient-date { left:118mm; top:35.7mm; width:26mm; font-size:${12 * scale}px; text-align:center; }
+.rx-content { position:absolute; z-index:1; left:8mm; top:66mm; width:137mm; min-height:150mm; }
+.pad-note { font-size:${10.5 * scale}px; line-height:1.3; margin-bottom:3mm; color:#17205f; background:rgba(255,255,255,.72); padding:1.2mm 1.5mm; border-left:2px solid #1a7a1a; }
+.rx-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:${10.8 * scale}px; color:#17205f; background:rgba(255,255,255,.86); }
+.rx-table th, .rx-table td { border:1px solid #1f2937; padding:2mm 1mm; vertical-align:middle; }
+.rx-table th { text-align:center; font-size:${8.8 * scale}px; font-weight:800; line-height:1.08; white-space:normal; overflow:hidden; }
+.rx-num { width:7mm; text-align:center; font-size:${13 * scale}px; font-weight:700; }
+.rx-drug { width:37mm; }
+.rx-drug-en { font-size:${11.8 * scale}px; font-weight:800; line-height:1.2; }
+.rx-drug-ur, .rx-time-ur, .rx-inst-ur { font-family:'Noto Nastaliq Urdu', serif; color:#1a7a1a; direction:rtl; line-height:1.4; }
+.rx-time-ur { display:block; font-size:${9.8 * scale}px; line-height:1.15; white-space:nowrap; }
+.rx-drug-ur { font-size:${10.8 * scale}px; font-weight:700; text-align:right; }
+.rx-dose { width:15mm; text-align:center; font-size:${15 * scale}px; font-weight:800; }
+.rx-days { width:11mm; text-align:center; font-size:${13 * scale}px; font-weight:800; }
+.rx-inst { width:22mm; font-size:${9.5 * scale}px; line-height:1.22; }
+.rx-inst-ur { margin-top:1mm; font-size:${10 * scale}px; font-weight:700; text-align:right; }
+.side-val { position:absolute; z-index:1; left:161mm; width:22mm; font-size:${settings.vitalsFontSize * scale}px; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; }
+.bp { top:121mm; } .temp { top:134mm; } .spo2 { top:148mm; } .pulse { top:162mm; }
 @media print {
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  body { margin:0; padding:0; }
+  html, body { margin:0; padding:0; width:191.2mm; height:268.5mm; }
 }
 </style>
 </head>
 <body>
 <div class="page">
-
-  <div class="header">
-    <div class="header-left">
-      <img src="${CLINIC_LOGO}" class="logo" alt="Logo"/>
-      <div>
-        <div class="clinic-name">AL-FATEH CLINIC</div>
-        <div class="clinic-addr">Dhandi Road Kot Sabzal</div>
-      </div>
-    </div>
-    <div class="header-right">
-      <div class="dr-block">
-        <div class="dr-ur">ڈاکٹرز زاہد خالطی</div>
-        <div class="dr-qual">MBBS, (Pb), RMP</div>
-      </div>
-      <div class="dr-block">
-        <div class="dr-ur">ڈاکٹر منصور زاہد خالطی</div>
-        <div class="dr-qual">MBBS - BMU Karachi &nbsp; RMP, MCPS Anaesthesia<br/>(TC CMH PNL) &nbsp; Ultrasound Specialist- Toranomon Institute</div>
-      </div>
-      <div class="dr-block">
-        <div class="dr-ur">ڈاکٹر حمزہ منصور</div>
-        <div class="dr-qual">MBBS CMH BWP, Infertility Specialist Cardiff University<br/>Sonologist Toranomon Institute</div>
-      </div>
-      <div class="dr-block">
-        <div class="dr-ur">ایم ڈی: حمزہ زاہد خالطی</div>
-      </div>
-    </div>
+  <img class="pad-bg" src="/assets/al-fateh-prescription-pad.png" alt="Al-Fateh prescription pad"/>
+  <div class="fill patient-name">${esc(data.patientName)}</div>
+  <div class="fill patient-age">${esc(data.patientAge || '')}</div>
+  <div class="fill patient-date">${esc(data.date)}</div>
+  <div class="rx-content">
+    ${complaints}
+    ${diagnosis}
+    <table class="rx-table">
+      <thead>
+        <tr>
+          <th class="rx-num">#</th>
+          <th class="rx-drug">Drug<br/><span class="rx-time-ur">دوا</span></th>
+          ${DOSE_GRID_TIME_OPTIONS.map(time => `<th><span class="rx-time-ur">${esc(time.ur)}</span></th>`).join('')}
+          <th>Days<br/><span class="rx-time-ur">دن</span></th>
+          <th>Instructions<br/><span class="rx-time-ur">ہدایت</span></th>
+        </tr>
+      </thead>
+      <tbody>${rxRows}</tbody>
+    </table>
+    ${labOrders}
+    ${followup}
+    ${notes}
   </div>
-
-  <div class="patient-bar">
-    <div class="pb-field">
-      <span class="pb-label">Name</span>
-      <span class="pb-val">${data.patientName || ''}</span>
-    </div>
-    <div class="pb-field">
-      <span class="pb-label">Age</span>
-      <span class="pb-val sm">${data.patientAge || ''}</span>
-    </div>
-    <div class="pb-field">
-      <span class="pb-label">Date</span>
-      <span class="pb-val sm">${data.date || ''}</span>
-    </div>
-  </div>
-
-  <div class="body">
-    <div class="rx-area">
-      <div class="rx-top">
-        <div class="rx-sym">R<sub>x</sub></div>
-        <div class="hawash">ہوالشافی</div>
-      </div>
-      ${complaints}
-      ${diagnosis}
-      <div class="rx-meds">
-        ${medRows}
-      </div>
-      ${labSection}
-      ${followup}
-      ${notes}
-      <div class="rx-sig">
-        <div class="sig-line">
-          <span class="sig-dash"></span>
-          <span class="sig-text">Doctor's Signature / دستخط</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="sidebar">
-      <div class="sb-section">
-        <div class="sb-title">Vitals:</div>
-        <div class="sb-row"><span class="sb-lbl">BP(mmHg):</span><span class="sb-val">${data.vitals?.bp || ''}</span></div>
-        <div class="sb-row"><span class="sb-lbl">T(.F)</span><span class="sb-val">${data.vitals?.temperature || ''}</span></div>
-        <div class="sb-row"><span class="sb-lbl">SpO2(%)</span><span class="sb-val">${data.vitals?.spo2 || ''}</span></div>
-        <div class="sb-row"><span class="sb-lbl">HR(bpm)</span><span class="sb-val">${data.vitals?.pulse || ''}</span></div>
-      </div>
-      <div class="sb-section">
-        <div class="sb-title">Investigation:</div>
-        <div class="sb-row"><span class="sb-lbl">Hb:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">TLC:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">PLT:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">HepBsAg:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">Anti HCV:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">MP:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">Widal:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">Urine R/E:</span><span class="sb-val"></span></div>
-        <div class="sb-row"><span class="sb-lbl">Serum Uric acid:</span><span class="sb-val"></span></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="footer">
-    <div class="footer-phones">0304-7459201<br/>0301-6373904</div>
-    <div class="footer-center">Not Valid For Court</div>
-    <div class="footer-ur">معیاری الٹراساؤنڈ (ڈوپلر) Xray اور لیبارٹری کی سہولت موجود ہے —</div>
-  </div>
-
+  <div class="side-val bp">${esc(data.vitals?.bp || '')}</div>
+  <div class="side-val temp">${esc(data.vitals?.temperature || '')}</div>
+  <div class="side-val spo2">${esc(data.vitals?.spo2 || '')}</div>
+  <div class="side-val pulse">${esc(data.vitals?.pulse || '')}</div>
 </div>
-</body></html>`;
+</body>
+</html>`;
+}
 
-  printHTML(html);
+export function printPrescription(data: PrescriptionPrintData) {
+  const settings = getPrescriptionPrintSettings();
+  if (settings.mode === 'fullPad') {
+    printHTML(buildFullPadPrescriptionHTML(data));
+    return;
+  }
+
+  printHTML(buildPreprintedPrescriptionHTML(data));
+  return;
 }
 
 // ─── BILL ─────────────────────────────────────────────────────────────────────
