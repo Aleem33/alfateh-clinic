@@ -10,6 +10,7 @@ import {
   DEFAULT_PRESCRIPTION_PRINT_SETTINGS,
   getPrescriptionPrintSettings,
   savePrescriptionPrintSettings,
+  type PrescriptionPrintMode,
   type PrescriptionPrintSettings,
 } from '../lib/prescriptionPrintSettings';
 import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
@@ -105,6 +106,23 @@ export function Settings() {
   const savePrintSettings = () => {
     savePrescriptionPrintSettings(printSettings);
     setPrintSettingsMsg('✓ Prescription print settings saved!');
+    setTimeout(() => setPrintSettingsMsg(''), 3000);
+  };
+
+  const savePrintMode = (mode: PrescriptionPrintMode, title: string) => {
+    setPrintSettings(s => {
+      const next = { ...s, mode };
+      savePrescriptionPrintSettings(next);
+      return next;
+    });
+    setPrintSettingsMsg(`âœ“ Print mode saved: ${title}`);
+    setTimeout(() => setPrintSettingsMsg(''), 3000);
+  };
+
+  const resetPrintSettings = () => {
+    savePrescriptionPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS);
+    setPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS);
+    setPrintSettingsMsg('âœ“ Prescription print settings reset!');
     setTimeout(() => setPrintSettingsMsg(''), 3000);
   };
 
@@ -361,7 +379,7 @@ export function Settings() {
             <button
               key={option.mode}
               type="button"
-              onClick={() => setPrintSettings(s => ({ ...s, mode: option.mode }))}
+              onClick={() => savePrintMode(option.mode, option.title)}
               className={`text-left border rounded-xl p-4 transition-colors ${printSettings.mode === option.mode ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}
             >
               <span className="block text-sm font-semibold text-gray-900">{option.title}</span>
@@ -430,7 +448,7 @@ export function Settings() {
           </button>
           <button
             type="button"
-            onClick={() => setPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS)}
+            onClick={resetPrintSettings}
             className="border border-gray-200 text-gray-600 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
           >
             Reset Defaults
