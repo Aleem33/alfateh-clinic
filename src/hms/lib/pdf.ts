@@ -272,8 +272,8 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .rx-days { width:11mm; text-align:center; font-size:${13 * scale}px; font-weight:800; }
 .rx-inst { width:22mm; font-size:${9.5 * scale}px; line-height:1.22; }
 .rx-inst-ur { margin-top:1mm; font-size:${10 * scale}px; font-weight:700; text-align:right; }
-.side-val { position:absolute; z-index:1; left:173mm; width:13mm; font-size:${settings.vitalsFontSize * scale}px; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; text-align:left; }
-.bp { top:119.5mm; } .temp { top:132.5mm; } .spo2 { top:143mm; } .pulse { top:151.5mm; }
+.side-val { position:absolute; z-index:1; left:173mm; width:13mm; font-size:13px; line-height:1; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; text-align:left; }
+.bp { top:119.5mm; } .temp { top:131.5mm; } .spo2 { top:142mm; } .pulse { top:150.5mm; }
 @media print {
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   html, body { margin:0; padding:0; width:191.2mm; height:268.5mm; }
