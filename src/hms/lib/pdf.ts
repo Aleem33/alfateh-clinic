@@ -254,9 +254,9 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .page { width:191.2mm; height:268.5mm; position:relative; overflow:hidden; background:#fff; }
 .pad-bg { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; z-index:0; }
 .fill { position:absolute; z-index:1; color:#17205f; font-weight:700; white-space:nowrap; overflow:hidden; }
-.patient-name { left:15mm; top:35.7mm; width:62mm; font-size:${12 * scale}px; }
-.patient-age { left:81mm; top:35.7mm; width:25mm; font-size:${12 * scale}px; text-align:center; }
-.patient-date { left:118mm; top:35.7mm; width:26mm; font-size:${12 * scale}px; text-align:center; }
+.patient-name { left:15mm; top:33.2mm; width:62mm; font-size:${12 * scale}px; }
+.patient-age { left:81mm; top:33.2mm; width:25mm; font-size:${12 * scale}px; text-align:center; }
+.patient-date { left:118mm; top:33.2mm; width:26mm; font-size:${12 * scale}px; text-align:center; }
 .rx-content { position:absolute; z-index:1; left:8mm; top:66mm; width:137mm; min-height:150mm; }
 .pad-note { font-size:${10.5 * scale}px; line-height:1.3; margin-bottom:3mm; color:#17205f; background:rgba(255,255,255,.72); padding:1.2mm 1.5mm; border-left:2px solid #1a7a1a; }
 .rx-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:${10.8 * scale}px; color:#17205f; background:rgba(255,255,255,.86); }
@@ -272,7 +272,7 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .rx-days { width:11mm; text-align:center; font-size:${13 * scale}px; font-weight:800; }
 .rx-inst { width:22mm; font-size:${9.5 * scale}px; line-height:1.22; }
 .rx-inst-ur { margin-top:1mm; font-size:${10 * scale}px; font-weight:700; text-align:right; }
-.side-val { position:absolute; z-index:1; left:161mm; width:22mm; font-size:${settings.vitalsFontSize * scale}px; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; }
+.side-val { position:absolute; z-index:1; left:171mm; width:13mm; font-size:${settings.vitalsFontSize * scale}px; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; text-align:left; }
 .bp { top:121mm; } .temp { top:134mm; } .spo2 { top:148mm; } .pulse { top:162mm; }
 @media print {
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
