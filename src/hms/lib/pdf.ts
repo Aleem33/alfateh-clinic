@@ -274,6 +274,9 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .rx-inst-ur { margin-top:1mm; font-size:${10 * scale}px; font-weight:700; text-align:right; }
 .side-val { position:absolute; z-index:1; left:173mm; width:13mm; font-size:13px; line-height:1; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; text-align:left; }
 .bp { top:119.5mm; } .temp { top:130.5mm; } .spo2 { top:141mm; } .pulse { top:150.5mm; }
+.footer-mask { position:absolute; z-index:1; left:0; right:0; top:241.5mm; height:27mm; background:#fff; }
+.footer-phones { position:absolute; z-index:2; left:4mm; top:247mm; width:42mm; font-size:20px; line-height:.96; font-weight:900; color:#283092; letter-spacing:.2px; }
+.footer-service { position:absolute; z-index:2; left:47mm; right:4mm; top:248.5mm; font-size:18px; line-height:1.12; font-weight:800; color:#283092; font-family:'Noto Nastaliq Urdu', serif; direction:rtl; text-align:right; white-space:nowrap; }
 @media print {
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   html, body { margin:0; padding:0; width:191.2mm; height:268.5mm; }
@@ -309,6 +312,9 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
   <div class="side-val temp">${esc(data.vitals?.temperature || '')}</div>
   <div class="side-val spo2">${esc(data.vitals?.spo2 || '')}</div>
   <div class="side-val pulse">${esc(data.vitals?.pulse || '')}</div>
+  <div class="footer-mask"></div>
+  <div class="footer-phones">0304-7459201<br/>0301-6373904</div>
+  <div class="footer-service">معیاری الٹراساؤنڈ (ڈوپلر)، Xray، ECG اور لیبارٹری کی سہولت موجود ہے</div>
 </div>
 </body>
 </html>`;

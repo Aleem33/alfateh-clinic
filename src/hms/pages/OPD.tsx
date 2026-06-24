@@ -331,7 +331,7 @@ export function OPD() {
   });
 
   const filteredPatients = patients.filter(p => !patientSearch || p.name?.toLowerCase().includes(patientSearch.toLowerCase()) || p.mrn?.includes(patientSearch)).slice(0, 5);
-  const filteredMeds = medicines.filter(m => medSearch && m.name?.toLowerCase().includes(medSearch.toLowerCase()) && m.stock > 0).slice(0, 5);
+  const filteredMeds = medicines.filter(m => medSearch && m.name?.toLowerCase().includes(medSearch.toLowerCase())).slice(0, 5);
   const filteredLabTests = labTests.filter(t => labSearch && t.name?.toLowerCase().includes(labSearch.toLowerCase())).slice(0, 5);
 
   const openAppointmentInOPD = (appt: any) => {
@@ -1092,11 +1092,17 @@ export function OPD() {
                   <input value={medSearch} onChange={e => setMedSearch(e.target.value)} placeholder="Search medicine to add..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   {medSearch && filteredMeds.length > 0 && (
                     <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 mt-1">
-                      {filteredMeds.map(m => (
-                        <button key={m.id} onClick={() => addPrescription(m)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b border-gray-50 last:border-0">
-                          {m.name} <span className="text-xs text-gray-400">— Stock: {m.stock}</span>
-                        </button>
-                      ))}
+                      {filteredMeds.map(m => {
+                        const stock = Number(m.stock || 0);
+                        return (
+                          <button key={m.id} onClick={() => addPrescription(m)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b border-gray-50 last:border-0">
+                            {m.name}{' '}
+                            <span className={stock > 0 ? 'text-xs text-gray-400' : 'text-xs font-semibold text-red-500'}>
+                              {stock > 0 ? `— Stock: ${stock}` : '— Out of stock'}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
