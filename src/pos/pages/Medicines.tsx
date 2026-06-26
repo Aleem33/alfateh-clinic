@@ -9,6 +9,16 @@ import Papa from 'papaparse';
 
 const CATEGORIES = ['Tablet','Capsule','Syrup','Injection','Drops','Cream/Ointment','Powder','Inhaler','IV Fluid','Other'];
 
+const emptyMedicineForm = {
+  name: '', form: 'Tablet', unitsPerBox: '1',
+  costPrice: '', retailPrice: '', unitPrice: '',
+  stockBoxes: '0', stockLoose: '0',
+  expiryDate: '', batchNo: '',
+  supplierId: '', supplierName: '',
+};
+
+const emptySupplierForm = { name: '', contact: '', address: '' };
+
 const toNumber = (value: string, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -16,6 +26,7 @@ const toNumber = (value: string, fallback = 0) => {
 
 export function Medicines() {
   const [medicines, setMedicines]       = useState<any[]>([]);
+  const [suppliers, setSuppliers]       = useState<any[]>([]);
   const [search, setSearch]             = useState('');
   const [isModalOpen, setIsModalOpen]   = useState(false);
   const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
@@ -24,19 +35,19 @@ export function Medicines() {
   const [editingId, setEditingId]       = useState<string | null>(null);
   const [successMsg, setSuccessMsg]     = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [showInlineSupplier, setShowInlineSupplier] = useState(false);
+  const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
 
-  const [formData, setFormData] = useState({
-    name: '', form: 'Tablet', unitsPerBox: '1',
-    costPrice: '', retailPrice: '', unitPrice: '',
-    stockBoxes: '0', stockLoose: '0',
-    expiryDate: '', batchNo: '',
-  });
+  const [formData, setFormData] = useState(emptyMedicineForm);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'medicines'), snap => {
+    const unsubMedicines = onSnapshot(collection(db, 'medicines'), snap => {
       setMedicines(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, err => handleFirestoreError(err, OperationType.GET, 'medicines'));
-    return () => unsub();
+    const unsubSuppliers = onSnapshot(collection(db, 'suppliers'), snap => {
+      setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => handleFirestoreError(err, OperationType.GET, 'suppliers'));
+    return () => { unsubMedicines(); unsubSuppliers(); };
   }, []);
 
   const filteredMedicines = medicines.filter(m =>
@@ -59,6 +70,8 @@ export function Medicines() {
     try {
       const unitsPerBox = Math.max(1, Math.floor(toNumber(formData.unitsPerBox, 1)));
       const totalStock = (Math.floor(toNumber(formData.stockBoxes)) * unitsPerBox) + Math.floor(toNumber(formData.stockLoose));
+      const supplier = suppliers.find(s => s.id === formData.supplierId);
+      const supplierName = supplier?.name || formData.supplierName || '';
       const data = {
         name: formData.name.trim(), form: formData.form, category: formData.form,
         unitsPerBox,
@@ -66,15 +79,35 @@ export function Medicines() {
         retailPrice: toNumber(formData.retailPrice),
         unitPrice:   toNumber(formData.unitPrice),
         stock: totalStock, expiryDate: formData.expiryDate || '', batchNo: formData.batchNo || '',
+        supplierId: formData.supplierId || '',
+        supplierName,
       };
       if (editingId) {
         await updateDoc(doc(db, 'medicines', editingId), data);
       } else {
         await addDoc(collection(db, 'medicines'), { ...data, createdAt: new Date().toISOString() });
       }
-      setIsModalOpen(false); setEditingId(null);
+      setIsModalOpen(false); setEditingId(null); setShowInlineSupplier(false);
     } catch (error) {
       handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'medicines');
+    }
+  };
+
+  const handleQuickAddSupplier = async () => {
+    const name = supplierForm.name.trim();
+    if (!name) return;
+    try {
+      const ref = await addDoc(collection(db, 'suppliers'), {
+        name,
+        contact: supplierForm.contact.trim(),
+        address: supplierForm.address.trim(),
+        createdAt: new Date().toISOString(),
+      });
+      setFormData(prev => ({ ...prev, supplierId: ref.id, supplierName: name }));
+      setSupplierForm(emptySupplierForm);
+      setShowInlineSupplier(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'suppliers');
     }
   };
 
@@ -89,8 +122,9 @@ export function Medicines() {
       stockBoxes:  Math.floor((med.stock || 0) / unitsPerBox).toString(),
       stockLoose:  ((med.stock || 0) % unitsPerBox).toString(),
       expiryDate:  med.expiryDate || '', batchNo: med.batchNo || '',
+      supplierId:  med.supplierId || '', supplierName: med.supplierName || '',
     });
-    setEditingId(med.id); setIsModalOpen(true);
+    setEditingId(med.id); setShowInlineSupplier(false); setIsModalOpen(true);
   };
 
   const confirmDelete = async () => {
@@ -203,7 +237,9 @@ export function Medicines() {
           <button
             onClick={() => {
               setEditingId(null);
-              setFormData({ name: '', form: 'Tablet', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', stockBoxes: '0', stockLoose: '0', expiryDate: '', batchNo: '' });
+              setFormData(emptyMedicineForm);
+              setSupplierForm(emptySupplierForm);
+              setShowInlineSupplier(false);
               setIsModalOpen(true);
             }}
             className="bg-blue-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-blue-700 text-sm font-medium">
@@ -349,6 +385,59 @@ export function Medicines() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="border border-gray-100 rounded-lg p-3 space-y-3">
+                <div>
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <label className="block text-sm font-medium text-gray-700">Supplier</label>
+                    <button type="button" onClick={() => setShowInlineSupplier(prev => !prev)} className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                      {showInlineSupplier ? 'Cancel supplier' : '+ Add Supplier'}
+                    </button>
+                  </div>
+                  <select
+                    value={formData.supplierId}
+                    onChange={e => {
+                      const supplier = suppliers.find(s => s.id === e.target.value);
+                      setFormData({ ...formData, supplierId: supplier?.id || '', supplierName: supplier?.name || '' });
+                    }}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select Supplier (optional)</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+
+                {showInlineSupplier && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-blue-50 border border-blue-100 rounded-lg p-3">
+                    <input
+                      type="text"
+                      value={supplierForm.name}
+                      onChange={e => setSupplierForm({ ...supplierForm, name: e.target.value })}
+                      placeholder="Supplier name"
+                      className="p-2 border border-blue-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <input
+                      type="text"
+                      value={supplierForm.contact}
+                      onChange={e => setSupplierForm({ ...supplierForm, contact: e.target.value })}
+                      placeholder="Contact"
+                      className="p-2 border border-blue-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={supplierForm.address}
+                        onChange={e => setSupplierForm({ ...supplierForm, address: e.target.value })}
+                        placeholder="Address"
+                        className="min-w-0 flex-1 p-2 border border-blue-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <button type="button" onClick={handleQuickAddSupplier} disabled={!supplierForm.name.trim()} className="px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-3">

@@ -58,6 +58,7 @@ export function Purchases() {
       unitPrice: (med.unitPrice || (med.unitsPerBox > 0 ? (Number(med.retailPrice || med.price || 0) / med.unitsPerBox) : med.price) || 0).toString(),
       batchNo: med.batchNo || '',
       expiryDate: med.expiryDate || '',
+      supplierId: med.supplierId || '',
     }));
   };
 
@@ -81,13 +82,15 @@ export function Purchases() {
       const totalUnits   = (boxesBought * unitsPerBox) + looseBought;
       if (totalUnits <= 0) return;
       const supplier     = suppliers.find(s => s.id === formData.supplierId);
+      const supplierName = formData.supplierId ? (supplier?.name || selectedMedicine.supplierName || 'N/A') : 'N/A';
+      const medicineSupplierName = formData.supplierId ? (supplier?.name || selectedMedicine.supplierName || '') : '';
       const costPrice    = parseFloat(formData.costPrice || '0');
       const costPricePerUnit = costPrice / unitsPerBox;
       const totalCost    = totalUnits * costPricePerUnit;
 
       await addDoc(collection(db, 'purchases'), {
         medicineId: selectedMedicine.id, medicineName: selectedMedicine.name,
-        supplierId: formData.supplierId || null, supplierName: supplier?.name || 'N/A',
+        supplierId: formData.supplierId || null, supplierName,
         boxesPurchased: boxesBought, looseUnitsPurchased: looseBought,
         totalUnitsAdded: totalUnits, unitsPerBox,
         costPrice,
@@ -105,6 +108,8 @@ export function Purchases() {
         retailPrice: parseFloat(formData.retailPrice || '0'),
         unitPrice: parseFloat(formData.unitPrice || '0'),
         batchNo: formData.batchNo, expiryDate: formData.expiryDate,
+        supplierId: formData.supplierId || '',
+        supplierName: medicineSupplierName,
       });
 
       setIsModalOpen(false); setSelectedMedicine(null); setMedSearch('');
