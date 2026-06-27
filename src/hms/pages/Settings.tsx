@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db, auth, registerUser } from '../../firebase';
@@ -11,8 +11,10 @@ import {
   getPrescriptionPrintSettings,
   savePrescriptionPrintSettings,
   type PrescriptionPrintMode,
+  type PrescriptionPrintProfile,
   type PrescriptionPrintSettings,
 } from '../lib/prescriptionPrintSettings';
+import { buildPrescriptionHTML, type PrescriptionPrintData } from '../lib/pdf';
 import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 
 const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier'];
@@ -26,6 +28,111 @@ function F({ label, value, onChange, type = 'text', placeholder = '' }: {
       <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
       <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+  );
+}
+
+const PRESCRIPTION_PREVIEW_DATA: PrescriptionPrintData = {
+  patientName: 'Muhammad Ahmed Khan',
+  patientMRN: 'AF-10428',
+  patientAge: '42 Y',
+  patientGender: 'Male',
+  doctorName: 'Dr. Salman Ali',
+  department: 'General Medicine',
+  date: '27-06-2026',
+  complaints: 'Fever, sore throat and body aches for 3 days',
+  diagnosis: 'Upper respiratory tract infection',
+  prescriptions: [
+    {
+      name: 'Amoxicillin / Clavulanate 625 mg',
+      form: 'Tablet',
+      nameUrdu: 'اموکسی سلین کلاوولینیٹ',
+      doseSchedule: {
+        morning: { amount: '1', amountUrdu: '۱' },
+        afternoon: { amount: '0', amountUrdu: '۰' },
+        night: { amount: '1', amountUrdu: '۱' },
+      },
+      dosage: '1 tablet',
+      frequency: 'Twice daily',
+      duration: '5 days',
+      instructions: 'After meal',
+      instructionsUrdu: 'کھانے کے بعد',
+    },
+    {
+      name: 'Paracetamol 500 mg',
+      form: 'Tablet',
+      nameUrdu: 'پیراسیٹامول',
+      doseSchedule: {
+        morning: { amount: '1', amountUrdu: '۱' },
+        afternoon: { amount: '1', amountUrdu: '۱' },
+        night: { amount: '1', amountUrdu: '۱' },
+      },
+      dosage: '1 tablet',
+      frequency: 'Three times daily',
+      duration: '3 days',
+      instructions: 'If fever or pain',
+      instructionsUrdu: 'بخار یا درد کی صورت میں',
+    },
+  ],
+  labOrders: [{ testName: 'CBC' }],
+  followUpDate: '02-07-2026',
+  notes: 'Drink plenty of fluids and rest.',
+  vitals: { bp: '120/80', temperature: '99.4°F', weight: '74 kg', pulse: '82', spo2: '98%' },
+};
+
+function PrescriptionPrintPreview({ settings }: { settings: PrescriptionPrintSettings }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [hostWidth, setHostWidth] = useState(0);
+  const isFullPad = settings.mode === 'fullPad';
+  const nativeWidth = (isFullPad ? 191.2 : 210) * (96 / 25.4);
+  const nativeHeight = (isFullPad ? 268.5 : 297) * (96 / 25.4);
+  const scale = Math.min(1, Math.max(0.1, (hostWidth - 32) / nativeWidth));
+  const html = useMemo(
+    () => buildPrescriptionHTML(PRESCRIPTION_PREVIEW_DATA, settings),
+    [settings],
+  );
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const updateWidth = () => setHostWidth(host.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800">Live Print Preview</h3>
+          <p className="text-xs text-gray-500">Updates immediately; save when the alignment looks right.</p>
+        </div>
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-100 rounded px-2 py-1">
+          {isFullPad ? 'Full pad' : 'A4 overlay'}
+        </span>
+      </div>
+      <div ref={hostRef} className="rounded-xl border border-gray-200 bg-slate-200 p-4 overflow-hidden">
+        {hostWidth > 0 && (
+          <div
+            className="relative mx-auto bg-white shadow-lg"
+            style={{ width: nativeWidth * scale, height: nativeHeight * scale }}
+          >
+            <iframe
+              title={`${isFullPad ? 'Full pad' : 'Preprinted'} prescription preview`}
+              srcDoc={html}
+              className="absolute left-0 top-0 border-0 bg-white pointer-events-none"
+              style={{
+                width: nativeWidth,
+                height: nativeHeight,
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+              }}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -96,6 +203,7 @@ export function Settings() {
   const [keyMsg, setKeyMsg] = useState('');
   const [printSettings, setPrintSettings] = useState<PrescriptionPrintSettings>(DEFAULT_PRESCRIPTION_PRINT_SETTINGS);
   const [printSettingsMsg, setPrintSettingsMsg] = useState('');
+  const activePrintProfile = printSettings.profiles[printSettings.mode];
 
   const saveGeminiKey = () => {
     setGeminiKey(geminiKey);
@@ -121,13 +229,28 @@ export function Settings() {
 
   const resetPrintSettings = () => {
     savePrescriptionPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS);
-    setPrintSettings(DEFAULT_PRESCRIPTION_PRINT_SETTINGS);
+    setPrintSettings({
+      mode: DEFAULT_PRESCRIPTION_PRINT_SETTINGS.mode,
+      profiles: {
+        preprinted: { ...DEFAULT_PRESCRIPTION_PRINT_SETTINGS.profiles.preprinted },
+        fullPad: { ...DEFAULT_PRESCRIPTION_PRINT_SETTINGS.profiles.fullPad },
+      },
+    });
     setPrintSettingsMsg('âœ“ Prescription print settings reset!');
     setTimeout(() => setPrintSettingsMsg(''), 3000);
   };
 
-  const updatePrintNumber = (key: keyof PrescriptionPrintSettings, value: string, fallback = 0) => {
-    setPrintSettings(s => ({ ...s, [key]: Number(value) || fallback }));
+  const updatePrintNumber = (key: keyof PrescriptionPrintProfile, value: string, fallback = 0) => {
+    setPrintSettings(s => ({
+      ...s,
+      profiles: {
+        ...s.profiles,
+        [s.mode]: {
+          ...s.profiles[s.mode],
+          [key]: Number(value) || fallback,
+        },
+      },
+    }));
   };
 
   // New user
@@ -236,7 +359,7 @@ export function Settings() {
   };
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-7xl">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
 
       {/* Hospital Info */}
@@ -388,58 +511,52 @@ export function Settings() {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {printSettings.mode === 'preprinted' && (
-            <>
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)] gap-6 items-start">
+          <div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <F
                 label="Whole Page X Offset (mm)"
                 type="number"
-                value={String(printSettings.offsetX)}
+                value={String(activePrintProfile.offsetX)}
                 onChange={(v: string) => updatePrintNumber('offsetX', v)}
               />
               <F
                 label="Whole Page Y Offset (mm)"
                 type="number"
-                value={String(printSettings.offsetY)}
+                value={String(activePrintProfile.offsetY)}
                 onChange={(v: string) => updatePrintNumber('offsetY', v)}
               />
-            </>
-          )}
-          <F
-            label={printSettings.mode === 'preprinted' ? 'Rx Table Font Scale (%)' : 'Full Pad Rx Scale (%)'}
-            type="number"
-            value={String(printSettings.fontScale)}
-            onChange={(v: string) => updatePrintNumber('fontScale', v, 100)}
-          />
+              <F
+                label="Content Font Scale (%)"
+                type="number"
+                value={String(activePrintProfile.fontScale)}
+                onChange={(v: string) => updatePrintNumber('fontScale', v, 100)}
+              />
+            </div>
+
+        <div className="mt-5 border border-gray-100 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Patient Details Position</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <F label="Name X Offset (mm)" type="number" value={String(activePrintProfile.patientNameOffsetX)} onChange={(v: string) => updatePrintNumber('patientNameOffsetX', v)} />
+            <F label="Name Y Offset (mm)" type="number" value={String(activePrintProfile.patientNameOffsetY)} onChange={(v: string) => updatePrintNumber('patientNameOffsetY', v)} />
+            <F label="Name Font Size" type="number" value={String(activePrintProfile.patientNameFontSize)} onChange={(v: string) => updatePrintNumber('patientNameFontSize', v, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.profiles[printSettings.mode].patientNameFontSize)} />
+            <F label="Age X Offset (mm)" type="number" value={String(activePrintProfile.patientAgeOffsetX)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetX', v)} />
+            <F label="Age Y Offset (mm)" type="number" value={String(activePrintProfile.patientAgeOffsetY)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetY', v)} />
+            <F label="Age Font Size" type="number" value={String(activePrintProfile.patientAgeFontSize)} onChange={(v: string) => updatePrintNumber('patientAgeFontSize', v, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.profiles[printSettings.mode].patientAgeFontSize)} />
+            <F label="Date X Offset (mm)" type="number" value={String(activePrintProfile.patientDateOffsetX)} onChange={(v: string) => updatePrintNumber('patientDateOffsetX', v)} />
+            <F label="Date Y Offset (mm)" type="number" value={String(activePrintProfile.patientDateOffsetY)} onChange={(v: string) => updatePrintNumber('patientDateOffsetY', v)} />
+            <F label="Date Font Size" type="number" value={String(activePrintProfile.patientDateFontSize)} onChange={(v: string) => updatePrintNumber('patientDateFontSize', v, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.profiles[printSettings.mode].patientDateFontSize)} />
+          </div>
         </div>
 
-        {printSettings.mode === 'preprinted' && (
-          <>
-            <div className="mt-5 border border-gray-100 rounded-xl p-4">
-              <h3 className="text-sm font-semibold text-gray-800 mb-3">Patient Details Position</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <F label="Name X Offset (mm)" type="number" value={String(printSettings.patientNameOffsetX)} onChange={(v: string) => updatePrintNumber('patientNameOffsetX', v)} />
-                <F label="Name Y Offset (mm)" type="number" value={String(printSettings.patientNameOffsetY)} onChange={(v: string) => updatePrintNumber('patientNameOffsetY', v)} />
-                <F label="Name Font Size" type="number" value={String(printSettings.patientNameFontSize)} onChange={(v: string) => updatePrintNumber('patientNameFontSize', v, 12)} />
-                <F label="Age X Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetX)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetX', v)} />
-                <F label="Age Y Offset (mm)" type="number" value={String(printSettings.patientAgeOffsetY)} onChange={(v: string) => updatePrintNumber('patientAgeOffsetY', v)} />
-                <F label="Age Font Size" type="number" value={String(printSettings.patientAgeFontSize)} onChange={(v: string) => updatePrintNumber('patientAgeFontSize', v, 12)} />
-                <F label="Date X Offset (mm)" type="number" value={String(printSettings.patientDateOffsetX)} onChange={(v: string) => updatePrintNumber('patientDateOffsetX', v)} />
-                <F label="Date Y Offset (mm)" type="number" value={String(printSettings.patientDateOffsetY)} onChange={(v: string) => updatePrintNumber('patientDateOffsetY', v)} />
-                <F label="Date Font Size" type="number" value={String(printSettings.patientDateFontSize)} onChange={(v: string) => updatePrintNumber('patientDateFontSize', v, 12)} />
-              </div>
-            </div>
-
-            <div className="mt-4 border border-gray-100 rounded-xl p-4">
-              <h3 className="text-sm font-semibold text-gray-800 mb-3">Vitals Position</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <F label="Vitals X Offset (mm)" type="number" value={String(printSettings.vitalsOffsetX)} onChange={(v: string) => updatePrintNumber('vitalsOffsetX', v)} />
-                <F label="Vitals Y Offset (mm)" type="number" value={String(printSettings.vitalsOffsetY)} onChange={(v: string) => updatePrintNumber('vitalsOffsetY', v)} />
-                <F label="Vitals Font Size" type="number" value={String(printSettings.vitalsFontSize)} onChange={(v: string) => updatePrintNumber('vitalsFontSize', v, 10.5)} />
-              </div>
-            </div>
-          </>
-        )}
+        <div className="mt-4 border border-gray-100 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Vitals Position</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <F label="Vitals X Offset (mm)" type="number" value={String(activePrintProfile.vitalsOffsetX)} onChange={(v: string) => updatePrintNumber('vitalsOffsetX', v)} />
+            <F label="Vitals Y Offset (mm)" type="number" value={String(activePrintProfile.vitalsOffsetY)} onChange={(v: string) => updatePrintNumber('vitalsOffsetY', v)} />
+            <F label="Vitals Font Size" type="number" value={String(activePrintProfile.vitalsFontSize)} onChange={(v: string) => updatePrintNumber('vitalsFontSize', v, DEFAULT_PRESCRIPTION_PRINT_SETTINGS.profiles[printSettings.mode].vitalsFontSize)} />
+          </div>
+        </div>
 
         <div className="flex flex-wrap items-center gap-3 mt-4">
           <button onClick={savePrintSettings}
@@ -454,6 +571,11 @@ export function Settings() {
             Reset Defaults
           </button>
           {printSettingsMsg && <span className="text-sm font-medium text-green-600">{printSettingsMsg}</span>}
+        </div>
+          </div>
+          <div className="xl:sticky xl:top-4">
+            <PrescriptionPrintPreview settings={printSettings} />
+          </div>
         </div>
       </div>
 

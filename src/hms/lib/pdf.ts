@@ -2,7 +2,11 @@
  * Al-Fateh Clinic — Print Utilities
  * Prescription layout prints on pre-printed pad overlays.
  */
-import { getPrescriptionPrintSettings } from './prescriptionPrintSettings';
+import {
+  getPrescriptionPrintSettings,
+  type PrescriptionPrintProfile,
+  type PrescriptionPrintSettings,
+} from './prescriptionPrintSettings';
 import { formatMedicineNameWithForm } from './prescriptionMedicine';
 import {
   DOSE_GRID_TIME_OPTIONS,
@@ -68,7 +72,7 @@ function esc(value: unknown): string {
 }
 
 // ─── PRESCRIPTION ─────────────────────────────────────────────────────────────
-type PrescriptionPrintData = {
+export type PrescriptionPrintData = {
   patientName: string;
   patientMRN: string;
   patientAge?: string;
@@ -105,8 +109,7 @@ type PrescriptionPrintData = {
   hospitalPhone?: string;
 };
 
-function buildPreprintedPrescriptionHTML(data: PrescriptionPrintData): string {
-  const settings = getPrescriptionPrintSettings();
+function buildPreprintedPrescriptionHTML(data: PrescriptionPrintData, settings: PrescriptionPrintProfile): string {
   const scale = Math.max(70, Math.min(130, settings.fontScale || 100)) / 100;
   const fieldStyle = (left: number, top: number, fontSize: number, offsetX: number, offsetY: number) =>
     `left:${left + offsetX}mm; top:${top + offsetY}mm; font-size:${fontSize * scale}px;`;
@@ -212,8 +215,7 @@ function getPrescriptionPadImageUrl() {
   return prescriptionPadImageUrl;
 }
 
-function buildFullPadPrescriptionHTML(data: PrescriptionPrintData): string {
-  const settings = getPrescriptionPrintSettings();
+function buildFullPadPrescriptionHTML(data: PrescriptionPrintData, settings: PrescriptionPrintProfile): string {
   const scale = Math.max(70, Math.min(130, settings.fontScale || 100)) / 100;
   const padImageUrl = getPrescriptionPadImageUrl();
   const rxRows = data.prescriptions.map((p, i) => `
@@ -253,11 +255,11 @@ function buildFullPadPrescriptionHTML(data: PrescriptionPrintData): string {
 body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .page { width:191.2mm; height:268.5mm; position:relative; overflow:hidden; background:#fff; }
 .pad-bg { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; z-index:0; }
-.fill { position:absolute; z-index:1; color:#17205f; font-weight:700; white-space:nowrap; overflow:hidden; }
-.patient-name { left:15mm; top:33.2mm; width:62mm; font-size:${14 * scale}px; }
-.patient-age { left:81mm; top:33.2mm; width:25mm; font-size:${14 * scale}px; text-align:center; }
-.patient-date { left:119mm; top:33.2mm; width:26mm; font-size:${14 * scale}px; text-align:center; }
-.rx-content { position:absolute; z-index:1; left:8mm; top:66mm; width:137mm; min-height:150mm; }
+.fill { position:absolute; z-index:1; color:#17205f; font-weight:700; white-space:nowrap; overflow:hidden; transform:translate(${settings.offsetX}mm, ${settings.offsetY}mm); }
+.patient-name { left:${15 + settings.patientNameOffsetX}mm; top:${33.2 + settings.patientNameOffsetY}mm; width:62mm; font-size:${settings.patientNameFontSize * scale}px; }
+.patient-age { left:${81 + settings.patientAgeOffsetX}mm; top:${33.2 + settings.patientAgeOffsetY}mm; width:25mm; font-size:${settings.patientAgeFontSize * scale}px; text-align:center; }
+.patient-date { left:${119 + settings.patientDateOffsetX}mm; top:${33.2 + settings.patientDateOffsetY}mm; width:26mm; font-size:${settings.patientDateFontSize * scale}px; text-align:center; }
+.rx-content { position:absolute; z-index:1; left:8mm; top:66mm; width:137mm; min-height:150mm; transform:translate(${settings.offsetX}mm, ${settings.offsetY}mm); }
 .pad-note { font-size:${10.5 * scale}px; line-height:1.3; margin-bottom:3mm; color:#17205f; background:rgba(255,255,255,.72); padding:1.2mm 1.5mm; border-left:2px solid #1a7a1a; }
 .rx-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:${10.8 * scale}px; color:#17205f; background:rgba(255,255,255,.86); }
 .rx-table th, .rx-table td { border:1px solid #1f2937; padding:2mm 1mm; vertical-align:middle; }
@@ -272,8 +274,8 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 .rx-days { width:11mm; text-align:center; font-size:${13 * scale}px; font-weight:800; }
 .rx-inst { width:22mm; font-size:${9.5 * scale}px; line-height:1.22; }
 .rx-inst-ur { margin-top:1mm; font-size:${10 * scale}px; font-weight:700; text-align:right; }
-.side-val { position:absolute; z-index:1; left:173mm; width:13mm; font-size:13px; line-height:1; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; text-align:left; }
-.bp { top:119.5mm; } .temp { top:130.5mm; } .spo2 { top:141mm; } .pulse { top:150.5mm; }
+.side-val { position:absolute; z-index:1; left:${173 + settings.vitalsOffsetX}mm; width:13mm; font-size:${settings.vitalsFontSize * scale}px; line-height:1; font-weight:800; color:#17205f; white-space:nowrap; overflow:hidden; text-align:left; transform:translate(${settings.offsetX}mm, ${settings.offsetY}mm); }
+.bp { top:${119.5 + settings.vitalsOffsetY}mm; } .temp { top:${130.5 + settings.vitalsOffsetY}mm; } .spo2 { top:${141 + settings.vitalsOffsetY}mm; } .pulse { top:${150.5 + settings.vitalsOffsetY}mm; }
 .footer-mask { position:absolute; z-index:1; left:0; right:0; top:241.5mm; height:27mm; background:#fff; }
 .footer-phones { position:absolute; z-index:2; left:4mm; top:247mm; width:42mm; font-size:20px; line-height:.96; font-weight:900; color:#283092; letter-spacing:.2px; }
 .footer-service { position:absolute; z-index:2; left:47mm; right:4mm; top:248.5mm; font-size:18px; line-height:1.12; font-weight:800; color:#283092; font-family:'Noto Nastaliq Urdu', serif; direction:rtl; text-align:right; white-space:nowrap; }
@@ -320,15 +322,23 @@ body { background:#fff; font-family: Arial, sans-serif; color:#17205f; }
 </html>`;
 }
 
-export function printPrescription(data: PrescriptionPrintData) {
-  const settings = getPrescriptionPrintSettings();
+export function buildPrescriptionHTML(
+  data: PrescriptionPrintData,
+  settings: PrescriptionPrintSettings = getPrescriptionPrintSettings(),
+) {
   if (settings.mode === 'fullPad') {
-    printHTML(buildFullPadPrescriptionHTML(data), { waitForSelector: '.pad-bg' });
-    return;
+    return buildFullPadPrescriptionHTML(data, settings.profiles.fullPad);
   }
 
-  printHTML(buildPreprintedPrescriptionHTML(data));
-  return;
+  return buildPreprintedPrescriptionHTML(data, settings.profiles.preprinted);
+}
+
+export function printPrescription(data: PrescriptionPrintData) {
+  const settings = getPrescriptionPrintSettings();
+  printHTML(
+    buildPrescriptionHTML(data, settings),
+    settings.mode === 'fullPad' ? { waitForSelector: '.pad-bg' } : {},
+  );
 }
 
 // ─── BILL ─────────────────────────────────────────────────────────────────────
