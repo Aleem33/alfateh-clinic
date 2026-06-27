@@ -7,7 +7,7 @@ import { useAppDialog } from '../../components/AppDialog';
 import { getPrescriptionDoseCount } from '../lib/prescriptionOptions';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
-const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Drops', 'Cream/Ointment', 'Powder', 'Inhaler', 'IV Fluid', 'Other'];
+const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Suspension', 'Injection', 'Drops', 'Cream/Ointment', 'Powder', 'Inhaler', 'IV Fluid', 'Other'];
 
 const toNumber = (value: string, fallback = 0) => {
   const parsed = Number(value);

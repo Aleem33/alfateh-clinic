@@ -7,7 +7,7 @@ import { Plus, Edit2, Trash2, Search, AlertCircle, Upload, Download, X } from 'l
 import { format, isBefore, addDays } from 'date-fns';
 import Papa from 'papaparse';
 
-const CATEGORIES = ['Tablet','Capsule','Syrup','Injection','Drops','Cream/Ointment','Powder','Inhaler','IV Fluid','Other'];
+const CATEGORIES = ['Tablet','Capsule','Syrup','Suspension','Injection','Drops','Cream/Ointment','Powder','Inhaler','IV Fluid','Other'];
 
 const emptyMedicineForm = {
   name: '', form: 'Tablet', unitsPerBox: '1',
