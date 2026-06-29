@@ -16,6 +16,7 @@ import {
 } from '../lib/prescriptionPrintSettings';
 import { buildPrescriptionHTML, type PrescriptionPrintData } from '../lib/pdf';
 import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
+import { MedicineCategoryManager } from '../../components/MedicineCategoryManager';
 
 const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier'];
 
@@ -455,6 +456,8 @@ export function Settings() {
           ))}
         </div>
       </div>
+
+      <MedicineCategoryManager />
 
       {/* Backup & Restore */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">

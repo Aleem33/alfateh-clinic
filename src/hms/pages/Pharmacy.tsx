@@ -5,9 +5,14 @@ import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
 import { getPrescriptionDoseCount } from '../lib/prescriptionOptions';
+import {
+  getDefaultMedicineCategory,
+  includeLegacyMedicineCategory,
+  resolveMedicineCategory,
+  useMedicineCategories,
+} from '../../lib/medicineCategories';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
-const CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Suspension', 'Injection', 'Drops', 'Cream/Ointment', 'Powder', 'Inhaler', 'IV Fluid', 'Other'];
 
 const toNumber = (value: string, fallback = 0) => {
   const parsed = Number(value);
@@ -55,6 +60,7 @@ function calcQty(freq: string, dur: string, prescription?: any): number {
 
 export function Pharmacy() {
   const { alert } = useAppDialog();
+  const { categories } = useMedicineCategories();
   const [medicines, setMedicines]           = useState<any[]>([]);
   const [suppliers, setSuppliers]           = useState<any[]>([]);
   const [purchases, setPurchases]           = useState<any[]>([]);
@@ -76,6 +82,7 @@ export function Pharmacy() {
   const [saving, setSaving]         = useState(false);
   const [medSearch, setMedSearch]   = useState('');
   const [error, setError]           = useState('');
+  const medicineCategoryOptions = includeLegacyMedicineCategory(categories, medForm.category);
 
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [dispenseItems, setDispenseItems] = useState<any[]>([]);
@@ -158,7 +165,7 @@ export function Pharmacy() {
   const openEdit = (m: any) => {
     const unitsPerBox = m.unitsPerBox || 1;
     setEditMedId(m.id);
-    setMedForm({ name: m.name, nameUrdu: m.nameUrdu || '', category: m.category || m.form || 'Tablet', manufacturer: m.manufacturer || '', batchNo: m.batchNo || '', expiryDate: m.expiryDate || '', costPrice: String(m.costPrice || ''), retailPrice: String(m.retailPrice || m.price || ''), unitPrice: String(m.unitPrice || ''), unitsPerBox: String(unitsPerBox), stockBoxes: String(Math.floor((m.stock || 0) / unitsPerBox)), stockLoose: String((m.stock || 0) % unitsPerBox), reorderLevel: String(m.reorderLevel || '10'), supplierId: m.supplierId || '', supplierName: m.supplierName || '' });
+    setMedForm({ name: m.name, nameUrdu: m.nameUrdu || '', category: resolveMedicineCategory(categories, m.category || m.form), manufacturer: m.manufacturer || '', batchNo: m.batchNo || '', expiryDate: m.expiryDate || '', costPrice: String(m.costPrice || ''), retailPrice: String(m.retailPrice || m.price || ''), unitPrice: String(m.unitPrice || ''), unitsPerBox: String(unitsPerBox), stockBoxes: String(Math.floor((m.stock || 0) / unitsPerBox)), stockLoose: String((m.stock || 0) % unitsPerBox), reorderLevel: String(m.reorderLevel || '10'), supplierId: m.supplierId || '', supplierName: m.supplierName || '' });
     setError(''); setShowMedModal(true);
   };
 
@@ -190,7 +197,8 @@ export function Pharmacy() {
       };
       if (editMedId) await updateDoc(doc(db, 'medicines', editMedId), data);
       else await addDoc(collection(db, 'medicines'), { ...data, createdAt: nowISO() });
-      setShowMedModal(false); setEditMedId(null); setMedForm(emptyMed);
+      setShowMedModal(false); setEditMedId(null);
+      setMedForm({ ...emptyMed, category: getDefaultMedicineCategory(categories) });
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   };
@@ -297,7 +305,7 @@ export function Pharmacy() {
           <button onClick={() => { setError(''); setShowPurchaseModal(true); }} className="flex items-center gap-2 border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50">
             <Plus className="w-4 h-4" /> New Purchase
           </button>
-          <button onClick={() => { setEditMedId(null); setMedForm(emptyMed); setError(''); setShowMedModal(true); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
+          <button onClick={() => { setEditMedId(null); setMedForm({ ...emptyMed, category: getDefaultMedicineCategory(categories) }); setError(''); setShowMedModal(true); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
             <Plus className="w-4 h-4" /> Add Medicine
           </button>
         </div>
@@ -599,7 +607,7 @@ export function Pharmacy() {
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
                   <select value={medForm.category} onChange={e => mf('category', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                    {medicineCategoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>

@@ -4,6 +4,7 @@ import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 
 import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database, Lock, Eye, EyeOff } from 'lucide-react';
 import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 import { auth } from '../../firebase';
+import { MedicineCategoryManager } from '../../components/MedicineCategoryManager';
 
 export function Settings() {
   const [currentPass, setCurrentPass] = useState('');
@@ -154,6 +155,8 @@ export function Settings() {
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
 
       {/* Change Password */}
+      <MedicineCategoryManager />
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-6 border-b border-gray-100 bg-blue-50 flex items-center gap-3">
           <Lock className="w-6 h-6 text-blue-600" />

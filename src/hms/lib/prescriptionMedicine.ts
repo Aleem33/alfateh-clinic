@@ -13,6 +13,8 @@ const MEDICINE_FORM_PREFIXES: Record<string, string> = {
   cream: 'Cr.',
   ointment: 'Oint.',
   powder: 'Pwd.',
+  sachet: 'Sachet',
+  sachets: 'Sachet',
   inhaler: 'Inh.',
   'iv fluid': 'IV',
 };

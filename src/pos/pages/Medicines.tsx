@@ -6,8 +6,12 @@ import { formatCurrency } from '../lib/utils';
 import { Plus, Edit2, Trash2, Search, AlertCircle, Upload, Download, X } from 'lucide-react';
 import { format, isBefore, addDays } from 'date-fns';
 import Papa from 'papaparse';
-
-const CATEGORIES = ['Tablet','Capsule','Syrup','Suspension','Injection','Drops','Cream/Ointment','Powder','Inhaler','IV Fluid','Other'];
+import {
+  getDefaultMedicineCategory,
+  includeLegacyMedicineCategory,
+  resolveMedicineCategory,
+  useMedicineCategories,
+} from '../../lib/medicineCategories';
 
 const emptyMedicineForm = {
   name: '', form: 'Tablet', unitsPerBox: '1',
@@ -25,6 +29,7 @@ const toNumber = (value: string, fallback = 0) => {
 };
 
 export function Medicines() {
+  const { categories } = useMedicineCategories();
   const [medicines, setMedicines]       = useState<any[]>([]);
   const [suppliers, setSuppliers]       = useState<any[]>([]);
   const [search, setSearch]             = useState('');
@@ -39,6 +44,7 @@ export function Medicines() {
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
 
   const [formData, setFormData] = useState(emptyMedicineForm);
+  const medicineCategoryOptions = includeLegacyMedicineCategory(categories, formData.form);
 
   useEffect(() => {
     const unsubMedicines = onSnapshot(collection(db, 'medicines'), snap => {
@@ -114,7 +120,7 @@ export function Medicines() {
   const handleEdit = (med: any) => {
     const unitsPerBox = med.unitsPerBox || 1;
     setFormData({
-      name: med.name, form: med.form || med.category || 'Tablet',
+      name: med.name, form: resolveMedicineCategory(categories, med.form || med.category),
       unitsPerBox: unitsPerBox.toString(),
       costPrice:   (med.costPrice   || 0).toString(),
       retailPrice: (med.retailPrice || med.price || 0).toString(),
@@ -163,8 +169,9 @@ export function Medicines() {
             const totalStock = row.stock ? parseInt(row.stock || '0') : stockFromBoxes;
             const retailPrice = parseFloat(row.retailPrice || row.salePrice || '0');
             const unitPrice = parseFloat(row.unitPrice || (unitsPerBox > 0 ? (retailPrice / unitsPerBox).toFixed(2) : '0'));
+            const form = String(row.form || row.category || 'Tablet').trim() || 'Tablet';
             await addDoc(collection(db, 'medicines'), {
-              name, form: row.form || 'Tablet', unitsPerBox,
+              name, form, category: form, unitsPerBox,
               costPrice:   parseFloat(row.costPrice   || '0'),
               retailPrice,
               unitPrice,
@@ -237,7 +244,7 @@ export function Medicines() {
           <button
             onClick={() => {
               setEditingId(null);
-              setFormData(emptyMedicineForm);
+              setFormData({ ...emptyMedicineForm, form: getDefaultMedicineCategory(categories) });
               setSupplierForm(emptySupplierForm);
               setShowInlineSupplier(false);
               setIsModalOpen(true);
@@ -380,7 +387,7 @@ export function Medicines() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
                   <select value={formData.form} onChange={e => setFormData({ ...formData, form: e.target.value })}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                    {CATEGORIES.map(f => (
+                    {medicineCategoryOptions.map(f => (
                       <option key={f} value={f}>{f}</option>
                     ))}
                   </select>
