@@ -89,30 +89,36 @@ export function Purchases() {
       const costPrice    = parseFloat(formData.costPrice || '0');
       const costPricePerUnit = costPrice / unitsPerBox;
       const totalCost    = totalUnits * costPricePerUnit;
-
-      await addDoc(collection(db, 'purchases'), {
+      const retailPriceValue = formData.retailPrice.trim() ? parseFloat(formData.retailPrice) : null;
+      const unitPriceValue = formData.unitPrice.trim() ? parseFloat(formData.unitPrice) : null;
+      const purchaseDoc: any = {
         medicineId: selectedMedicine.id, medicineName: selectedMedicine.name,
         supplierId: formData.supplierId || null, supplierName,
         boxesPurchased: boxesBought, looseUnitsPurchased: looseBought,
         totalUnitsAdded: totalUnits, unitsPerBox,
         costPrice,
         costPricePerUnit,
-        retailPrice: parseFloat(formData.retailPrice || '0'),
-        unitPrice: parseFloat(formData.unitPrice || '0'),
         batchNo: formData.batchNo, expiryDate: formData.expiryDate,
         notes: formData.notes, totalCost, date: formData.date || today(),
         addedBy: auth.currentUser?.uid || 'unknown',
-      });
-      await updateDoc(doc(db, 'medicines', selectedMedicine.id), {
+      };
+      if (retailPriceValue !== null && Number.isFinite(retailPriceValue)) purchaseDoc.retailPrice = retailPriceValue;
+      if (unitPriceValue !== null && Number.isFinite(unitPriceValue)) purchaseDoc.unitPrice = unitPriceValue;
+
+      const medicineUpdate: any = {
         stock: increment(totalUnits),
         unitsPerBox,
         costPrice,
-        retailPrice: parseFloat(formData.retailPrice || '0'),
-        unitPrice: parseFloat(formData.unitPrice || '0'),
-        batchNo: formData.batchNo, expiryDate: formData.expiryDate,
+        batchNo: formData.batchNo,
+        expiryDate: formData.expiryDate,
         supplierId: formData.supplierId || '',
         supplierName: medicineSupplierName,
-      });
+      };
+      if (retailPriceValue !== null && Number.isFinite(retailPriceValue)) medicineUpdate.retailPrice = retailPriceValue;
+      if (unitPriceValue !== null && Number.isFinite(unitPriceValue)) medicineUpdate.unitPrice = unitPriceValue;
+
+      await addDoc(collection(db, 'purchases'), purchaseDoc);
+      await updateDoc(doc(db, 'medicines', selectedMedicine.id), medicineUpdate);
 
       setIsModalOpen(false); setSelectedMedicine(null); setMedSearch('');
       setFormData({ supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: '', date: today(), notes: '' });

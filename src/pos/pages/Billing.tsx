@@ -89,7 +89,7 @@ export function Billing() {
     (c.phone || '').includes(customerSearch)
   ).slice(0, 8);
 
-  const getBoxPrice = (med: any): number => Number(med.retailPrice || med.price || 0);
+  const getBoxPrice = (med: any): number => Number(med.retailPrice || med.price || med.costPrice || 0);
   const getUnitPrice = (med: any): number => {
     const explicitUnitPrice = Number(med.unitPrice || 0);
     if (explicitUnitPrice > 0) return explicitUnitPrice;
