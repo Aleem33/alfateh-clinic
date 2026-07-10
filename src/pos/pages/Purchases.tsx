@@ -5,6 +5,8 @@ import { formatCurrency } from '../lib/utils';
 import { Plus, Search, Truck, PackagePlus, X, ChevronDown, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 
+const today = () => new Date().toISOString().split('T')[0];
+
 export function Purchases() {
   const [medicines, setMedicines] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -19,7 +21,7 @@ export function Purchases() {
   const [formData, setFormData] = useState({
     supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0',
     unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '',
-    batchNo: '', expiryDate: '', notes: '',
+    batchNo: '', expiryDate: '', date: today(), notes: '',
   });
 
   useEffect(() => {
@@ -98,7 +100,7 @@ export function Purchases() {
         retailPrice: parseFloat(formData.retailPrice || '0'),
         unitPrice: parseFloat(formData.unitPrice || '0'),
         batchNo: formData.batchNo, expiryDate: formData.expiryDate,
-        notes: formData.notes, totalCost, date: new Date().toISOString(),
+        notes: formData.notes, totalCost, date: formData.date || today(),
         addedBy: auth.currentUser?.uid || 'unknown',
       });
       await updateDoc(doc(db, 'medicines', selectedMedicine.id), {
@@ -113,7 +115,7 @@ export function Purchases() {
       });
 
       setIsModalOpen(false); setSelectedMedicine(null); setMedSearch('');
-      setFormData({ supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: '', notes: '' });
+      setFormData({ supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: '', date: today(), notes: '' });
       setSuccessMsg(`✓ Added ${totalUnits} units to "${selectedMedicine.name}"`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
@@ -294,6 +296,14 @@ export function Purchases() {
                   </select>
                   <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 </div>
+              </div>
+
+              {/* Purchase Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
+                <input type="date" value={formData.date}
+                  onChange={e => setFormData({ ...formData, date: e.target.value })}
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
               </div>
 
               {/* Quantity */}
