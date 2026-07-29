@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
-import { Plus, Search, Edit2, Trash2, X, Truck, Phone, Mail, MapPin } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, Truck, Phone, Mail, MapPin, ChevronDown, Package } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
+import { SupplierMedicinesPanel } from '../../components/SupplierMedicinesPanel';
 
 const CATEGORIES = ['Medicines', 'Medical Equipment', 'Surgical Supplies', 'Lab Supplies', 'Other'];
 
@@ -32,7 +33,7 @@ export function Suppliers() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [viewSupplier, setViewSupplier] = useState<any | null>(null);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'suppliers'), snap =>
@@ -103,7 +104,11 @@ export function Suppliers() {
             {filtered.length === 0
               ? <tr><td colSpan={7} className="text-center py-12 text-gray-400">No suppliers found</td></tr>
               : filtered.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50/50">
+                <Fragment key={s.id}>
+                  <tr
+                    onClick={() => setSelectedSupplierId(current => current === s.id ? null : s.id)}
+                    className={`cursor-pointer ${selectedSupplierId === s.id ? 'bg-blue-50' : 'hover:bg-gray-50/50'}`}
+                  >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">
@@ -113,6 +118,7 @@ export function Suppliers() {
                         <div className="text-sm font-medium text-gray-900">{s.name}</div>
                         {s.ntn && <div className="text-xs text-gray-400">NTN: {s.ntn}</div>}
                       </div>
+                      <ChevronDown className={`w-4 h-4 text-gray-400 ml-auto transition-transform ${selectedSupplierId === s.id ? 'rotate-180' : ''}`} />
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -134,11 +140,22 @@ export function Suppliers() {
                   <td className="px-4 py-3 text-sm text-gray-400">{formatDate(s.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openEdit(s)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg"><Edit2 className="w-4 h-4" /></button>
-                      <button onClick={() => setDeleteConfirm(s.id)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                      <span className="hidden xl:flex items-center gap-1 text-xs font-medium text-blue-600 mr-1">
+                        <Package className="w-3.5 h-3.5" /> Medicines
+                      </span>
+                      <button onClick={event => { event.stopPropagation(); openEdit(s); }} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={event => { event.stopPropagation(); setDeleteConfirm(s.id); }} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </td>
-                </tr>
+                  </tr>
+                  {selectedSupplierId === s.id && (
+                    <tr>
+                      <td colSpan={7} className="p-0">
+                        <SupplierMedicinesPanel supplier={s} onCollapse={() => setSelectedSupplierId(null)} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
           </tbody>
         </table>

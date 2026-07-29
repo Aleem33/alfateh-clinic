@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { Plus, Edit2, Trash2, Search, X, Phone, MapPin } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, X, Phone, MapPin, ChevronDown, Package } from 'lucide-react';
 import { format } from 'date-fns';
+import { SupplierMedicinesPanel } from '../../components/SupplierMedicinesPanel';
 
 export function Suppliers() {
   const [suppliers, setSuppliers]   = useState<any[]>([]);
@@ -10,6 +11,7 @@ export function Suppliers() {
   const [isModalOpen, setIsModalOpen]       = useState(false);
   const [editingId, setEditingId]           = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({ name: '', contact: '', address: '' });
 
@@ -96,9 +98,21 @@ export function Suppliers() {
         {/* ── Mobile: cards ── */}
         <div className="md:hidden divide-y divide-gray-100">
           {filteredSuppliers.map(supp => (
-            <div key={supp.id} className="p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
+            <div key={supp.id}>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedSupplierId(current => current === supp.id ? null : supp.id)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedSupplierId(current => current === supp.id ? null : supp.id);
+                  }
+                }}
+                className={`p-4 cursor-pointer ${selectedSupplierId === supp.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
                   <p className="font-semibold text-gray-900">{supp.name}</p>
                   {supp.contact && (
                     <p className="flex items-center gap-1 text-sm text-gray-500 mt-0.5">
@@ -113,16 +127,21 @@ export function Suppliers() {
                   <p className="text-xs text-gray-400 mt-1">
                     Added: {supp.createdAt ? format(new Date(supp.createdAt), 'MMM dd, yyyy') : 'N/A'}
                   </p>
-                </div>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => handleEdit(supp)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => setConfirmDeleteId(supp.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={event => { event.stopPropagation(); handleEdit(supp); }} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button onClick={event => { event.stopPropagation(); setConfirmDeleteId(supp.id); }} className="p-1.5 text-red-600 hover:bg-red-50 rounded">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${selectedSupplierId === supp.id ? 'rotate-180' : ''}`} />
+                  </div>
                 </div>
               </div>
+              {selectedSupplierId === supp.id && (
+                <SupplierMedicinesPanel supplier={supp} onCollapse={() => setSelectedSupplierId(null)} />
+              )}
             </div>
           ))}
           {filteredSuppliers.length === 0 && (
@@ -144,16 +163,38 @@ export function Suppliers() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredSuppliers.map(supp => (
-                <tr key={supp.id} className="hover:bg-gray-50">
-                  <td className="p-4 font-medium text-gray-900">{supp.name}</td>
+                <React.Fragment key={supp.id}>
+                  <tr
+                    onClick={() => setSelectedSupplierId(current => current === supp.id ? null : supp.id)}
+                    className={`cursor-pointer ${selectedSupplierId === supp.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                  >
+                  <td className="p-4 font-medium text-gray-900">
+                    <div className="flex items-center gap-2">
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${selectedSupplierId === supp.id ? 'rotate-180' : ''}`} />
+                      {supp.name}
+                    </div>
+                  </td>
                   <td className="p-4 text-gray-600">{supp.contact}</td>
                   <td className="p-4 text-gray-600">{supp.address || '—'}</td>
                   <td className="p-4 text-gray-600">{supp.createdAt ? format(new Date(supp.createdAt), 'MMM dd, yyyy') : 'N/A'}</td>
-                  <td className="p-4 flex justify-end gap-2">
-                    <button onClick={() => handleEdit(supp)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => setConfirmDeleteId(supp.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                  <td className="p-4">
+                    <div className="flex justify-end items-center gap-2">
+                      <span className="hidden lg:flex items-center gap-1 text-xs font-medium text-blue-600 mr-1">
+                        <Package className="w-3.5 h-3.5" /> Medicines
+                      </span>
+                      <button onClick={event => { event.stopPropagation(); handleEdit(supp); }} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={event => { event.stopPropagation(); setConfirmDeleteId(supp.id); }} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </td>
-                </tr>
+                  </tr>
+                  {selectedSupplierId === supp.id && (
+                    <tr>
+                      <td colSpan={5} className="p-0">
+                        <SupplierMedicinesPanel supplier={supp} onCollapse={() => setSelectedSupplierId(null)} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
               {filteredSuppliers.length === 0 && (
                 <tr><td colSpan={5} className="p-8 text-center text-gray-500">No suppliers found.</td></tr>
