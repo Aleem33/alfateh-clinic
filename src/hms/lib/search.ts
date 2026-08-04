@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { searchMedicines } from '../../lib/medicineIndex';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 export interface SearchResult {
   id: string;
@@ -23,9 +25,7 @@ export function useGlobalSearch(query: string) {
     const u2 = onSnapshot(collection(db, 'staff'), s =>
       setStaff(s.docs.map(d => ({ id: d.id, ...d.data() })))
     );
-    const u3 = onSnapshot(collection(db, 'medicines'), s =>
-      setMedicines(s.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
+    const u3 = subscribeToMedicines(setMedicines);
     return () => { u1(); u2(); u3(); };
   }, []);
 
@@ -44,9 +44,7 @@ export function useGlobalSearch(query: string) {
       .slice(0, 3)
       .forEach(s => out.push({ id: s.id, type: 'staff', title: s.name, subtitle: `${s.role} · ${s.department}`, path: '/staff' }));
 
-    medicines
-      .filter(m => m.name?.toLowerCase().includes(q))
-      .slice(0, 3)
+    searchMedicines(medicines, q, { limit: 3 })
       .forEach(m => out.push({ id: m.id, type: 'medicine', title: m.name, subtitle: `Stock: ${m.stock} · Rs. ${m.retailPrice}`, path: '/pharmacy' }));
 
     setResults(out);

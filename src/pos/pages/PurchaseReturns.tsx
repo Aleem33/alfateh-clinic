@@ -6,6 +6,7 @@ import { formatCurrency } from '../lib/utils';
 import { getReturnNo } from '../lib/receiptNumbers';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 // ── Print via hidden iframe ───────────────────────────────────────────────────
 function printSlip(slipHtml: string) {
@@ -66,9 +67,9 @@ export function PurchaseReturns() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const unsubMedicines = onSnapshot(collection(db, 'medicines'), (snap) => {
+    const unsubMedicines = subscribeToMedicines((medicineList) => {
       const stockMap: Record<string, number> = {};
-      snap.docs.forEach(d => { stockMap[d.id] = d.data().stock || 0; });
+      medicineList.forEach(medicine => { stockMap[medicine.id] = medicine.stock || 0; });
       setMedicines(stockMap);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'medicines'));
 

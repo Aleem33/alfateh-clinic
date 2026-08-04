@@ -5,6 +5,7 @@ import { formatCurrency } from '../lib/utils';
 import { DollarSign, AlertTriangle, Package, Clock, ShoppingCart } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subDays, isBefore, addDays } from 'date-fns';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 export function Dashboard() {
   const [stats, setStats] = useState({
@@ -17,7 +18,7 @@ export function Dashboard() {
   const [salesData, setSalesData] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsubMedicines = onSnapshot(collection(db, 'medicines'), (snapshot) => {
+    const unsubMedicines = subscribeToMedicines((medicines) => {
       let lowStockCount = 0;
       let expiringCount = 0;
       let inStockCount = 0;
@@ -25,8 +26,7 @@ export function Dashboard() {
       const today = new Date();
       const nextMonth = addDays(today, 30);
 
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
+      medicines.forEach(data => {
         const stock = Number(data.stock || 0);
         if (stock > 0) inStockCount++;
         if (stock <= (data.unitsPerBox || 1) * 2) lowStockCount++;

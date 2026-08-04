@@ -1,0 +1,10 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "medicines",
+      "fieldPath": "searchText",
+      "indexes": []
+    }
+  ]
+}

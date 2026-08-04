@@ -9,6 +9,7 @@ import {
 } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Calendar, X, TrendingUp, TrendingDown, DollarSign, ShoppingCart, AlertTriangle, Clock } from 'lucide-react';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 type PeriodFilter = 'daily' | 'weekly' | 'monthly' | 'custom' | 'all';
 
@@ -24,7 +25,7 @@ export function Reports() {
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, 'sales'),    s => setSales(s.docs.map(d => ({ id: d.id, ...d.data() }))),    e => handleFirestoreError(e, OperationType.GET, 'sales'));
-    const u2 = onSnapshot(collection(db, 'medicines'),s => setMedicines(s.docs.map(d => ({ id: d.id, ...d.data() }))),e => handleFirestoreError(e, OperationType.GET, 'medicines'));
+    const u2 = subscribeToMedicines(setMedicines, e => handleFirestoreError(e, OperationType.GET, 'medicines'));
     const u3 = onSnapshot(collection(db, 'expenses'), s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => handleFirestoreError(e, OperationType.GET, 'expenses'));
     return () => { u1(); u2(); u3(); };
   }, []);

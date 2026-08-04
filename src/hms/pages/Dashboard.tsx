@@ -6,6 +6,7 @@ import { Users, CalendarDays, BedDouble, FlaskConical, DollarSign, AlertTriangle
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { format, subDays } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -32,8 +33,7 @@ export function Dashboard() {
     const u4 = onSnapshot(collection(db, 'labOrders'), snap =>
       setStats(p => ({ ...p, pendingLab: snap.docs.filter(d => d.data().status === 'pending').length }))
     );
-    const u5 = onSnapshot(collection(db, 'medicines'), snap => {
-      const meds = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+    const u5 = subscribeToMedicines(meds => {
       const lowStock = meds.filter(m => (m.stock || 0) <= (m.reorderLevel || (m.unitsPerBox || 1) * 2));
       const expiring = meds.filter(m => {
         if (!m.expiryDate) return false;

@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
 import { Plus, Tags, Trash2 } from 'lucide-react';
-import { db } from '../firebase';
 import { useAppDialog } from './AppDialog';
+import { subscribeToMedicines } from '../lib/medicineStore';
 import {
   saveMedicineCategories,
   useMedicineCategories,
@@ -17,10 +16,9 @@ export function MedicineCategoryManager() {
   const [saving, setSaving] = useState(false);
   const [usageReady, setUsageReady] = useState(false);
 
-  useEffect(() => onSnapshot(
-    collection(db, 'medicines'),
-    snapshot => {
-      setMedicines(snapshot.docs.map(item => item.data()));
+  useEffect(() => subscribeToMedicines(
+    medicinesSnapshot => {
+      setMedicines(medicinesSnapshot);
       setUsageReady(true);
     },
     snapshotError => {

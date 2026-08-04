@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { createNotification } from './audit';
 import { addDays, isBefore, parseISO } from 'date-fns';
+import { getMedicinesOnce } from '../../lib/medicineStore';
 
 /** Runs once per session, watches pharmacy data and fires notifications */
 export function useAutoNotifications() {
@@ -17,8 +18,7 @@ export function useAutoNotifications() {
 
     async function checkAndNotify() {
       try {
-        const snap = await getDocs(collection(db, 'medicines'));
-        const medicines = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+        const medicines = await getMedicinesOnce();
         const now = new Date();
         const in30Days = addDays(now, 30);
         const in7Days = addDays(now, 7);

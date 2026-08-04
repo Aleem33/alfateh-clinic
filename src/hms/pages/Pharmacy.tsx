@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, increment } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, increment, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
@@ -11,6 +11,8 @@ import {
   resolveMedicineCategory,
   useMedicineCategories,
 } from '../../lib/medicineCategories';
+import { findDuplicateMedicine, getMedicineDocumentId, getMedicineIdentity, getMedicineSearchText, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -89,8 +91,8 @@ export function Pharmacy() {
   const [rxSearch, setRxSearch]           = useState('');
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'medicines'), snap =>
-      setMedicines(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => a.name > b.name ? 1 : -1))
+    const u1 = subscribeToMedicines(items =>
+      setMedicines([...items].sort((a: any, b: any) => a.name > b.name ? 1 : -1))
     );
     const u2 = onSnapshot(collection(db, 'suppliers'), snap => setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const u3 = onSnapshot(collection(db, 'purchases'), snap =>
@@ -105,9 +107,9 @@ export function Pharmacy() {
   const loadOrder = (order: any) => {
     const items = (order.prescriptions || []).map((p: any) => {
       const qty     = calcQty(p.frequency, p.duration, p);
-      const pName = (p.name || '').toLowerCase().trim();
+      const pName = normalizeMedicineText(p.name);
       const matched = pName ? (medicines.find(m => {
-        const mName = (m.name || '').toLowerCase().trim();
+        const mName = normalizeMedicineText(m.name);
         return mName.includes(pName) || pName.includes(mName);
       }) || null) : null;
       return { ...p, qty, matchedId: matched?.id || '', matchedName: matched?.name || '' };
@@ -146,12 +148,11 @@ export function Pharmacy() {
     finally { setSaving(false); }
   };
 
-  const filteredMeds = medicines.filter(m => {
-    const matchSearch = !search || m.name?.toLowerCase().includes(search.toLowerCase()) || m.batchNo?.toLowerCase().includes(search.toLowerCase());
+  const filteredMeds = searchMedicines(medicines, search, { dedupe: Boolean(search) }).filter(m => {
     const matchFilter = stockFilter === 'all' ? true
       : stockFilter === 'low' ? m.stock <= (m.unitsPerBox || 1) * 2
       : m.expiryDate && new Date(m.expiryDate) < new Date(Date.now() + 30 * 86400000);
-    return matchSearch && matchFilter;
+    return matchFilter;
   });
 
   const filteredPurchases = purchases.filter(p => !search || p.medicineName?.toLowerCase().includes(search.toLowerCase()));
@@ -195,8 +196,18 @@ export function Pharmacy() {
         supplierName: medForm.supplierName || '',
         updatedAt: nowISO(),
       };
+      const duplicate = findDuplicateMedicine(medicines, data, editMedId);
+      if (duplicate) {
+        setError(`${duplicate.name} already exists${duplicate.batchNo ? ` in batch ${duplicate.batchNo}` : ''}. Edit it or record a purchase instead.`);
+        return;
+      }
+      Object.assign(data, {
+        medicineKey: getMedicineIdentity(data),
+        searchName: normalizeMedicineText(name),
+        searchText: getMedicineSearchText(data),
+      });
       if (editMedId) await updateDoc(doc(db, 'medicines', editMedId), data);
-      else await addDoc(collection(db, 'medicines'), { ...data, createdAt: nowISO() });
+      else await setDoc(doc(db, 'medicines', getMedicineDocumentId(data)), { ...data, createdAt: nowISO() });
       setShowMedModal(false); setEditMedId(null);
       setMedForm({ ...emptyMed, category: getDefaultMedicineCategory(categories) });
     } catch (e: any) { setError(e.message); }
@@ -681,7 +692,7 @@ export function Pharmacy() {
                     <input value={medSearch} onChange={e => setMedSearch(e.target.value)} placeholder="Search medicine..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     {medSearch && (
                       <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 mt-1 max-h-40 overflow-y-auto">
-                        {medicines.filter(m => m.name?.toLowerCase().includes(medSearch.toLowerCase())).slice(0, 6).map(m => (
+                        {searchMedicines(medicines, medSearch, { limit: 6 }).map(m => (
                           <button key={m.id} onClick={() => selectPurchaseMedicine(m)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0">{m.name}</button>
                         ))}
                       </div>

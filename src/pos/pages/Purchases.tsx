@@ -4,6 +4,8 @@ import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Plus, Search, Truck, PackagePlus, X, ChevronDown, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import { searchMedicines } from '../../lib/medicineIndex';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 const today = () => new Date().toISOString().split('T')[0];
 
@@ -25,7 +27,7 @@ export function Purchases() {
   });
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'medicines'), s => setMedicines(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+    const u1 = subscribeToMedicines(setMedicines,
       e => handleFirestoreError(e, OperationType.GET, 'medicines'));
     const u2 = onSnapshot(collection(db, 'suppliers'), s => setSuppliers(s.docs.map(d => ({ id: d.id, ...d.data() }))),
       e => handleFirestoreError(e, OperationType.GET, 'suppliers'));
@@ -43,10 +45,7 @@ export function Purchases() {
     p.supplierName?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const filteredMeds = medicines.filter(m =>
-    m.name.toLowerCase().includes(medSearch.toLowerCase()) ||
-    m.batchNo?.toLowerCase().includes(medSearch.toLowerCase())
-  );
+  const filteredMeds = searchMedicines(medicines, medSearch);
 
   const handleSelectMedicine = (med: any) => {
     setSelectedMedicine(med);

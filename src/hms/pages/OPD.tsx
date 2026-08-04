@@ -29,6 +29,8 @@ import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppDialog } from '../../components/AppDialog';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
+import { normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology', 'Anesthesia'];
 const FOLLOW_UP_DAYS = Array.from({ length: 14 }, (_, i) => i + 1);
@@ -120,7 +122,7 @@ export function OPD() {
     const u2 = onSnapshot(collection(db, 'patients'), snap => setPatients(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const u3 = onSnapshot(collection(db, 'staff'), snap => setStaff(snap.docs.filter(d => d.data().role === 'doctor').map(d => ({ id: d.id, ...d.data() }))));
     const u4 = onSnapshot(collection(db, 'labTests'), snap => setLabTests(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u5 = onSnapshot(collection(db, 'medicines'), snap => setMedicines(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const u5 = subscribeToMedicines(setMedicines);
     const u6 = onSnapshot(collection(db, 'prescriptionTemplates'), snap => setTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const u8 = onSnapshot(collection(db, 'appointments'), snap =>
       setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) =>
@@ -331,7 +333,7 @@ export function OPD() {
   });
 
   const filteredPatients = patients.filter(p => !patientSearch || p.name?.toLowerCase().includes(patientSearch.toLowerCase()) || p.mrn?.includes(patientSearch)).slice(0, 5);
-  const filteredMeds = medicines.filter(m => medSearch && m.name?.toLowerCase().includes(medSearch.toLowerCase())).slice(0, 5);
+  const filteredMeds = medSearch ? searchMedicines(medicines, medSearch, { limit: 5 }) : [];
   const filteredLabTests = labTests.filter(t => labSearch && t.name?.toLowerCase().includes(labSearch.toLowerCase())).slice(0, 5);
 
   const openAppointmentInOPD = (appt: any) => {
@@ -503,7 +505,7 @@ export function OPD() {
   };
 
   const withMedicineForms = (items: any[]) => items.map((item: any) => {
-    const med = medicines.find((m: any) => m.id === item.medicineId || m.name?.toLowerCase().trim() === item.name?.toLowerCase().trim());
+    const med = medicines.find((m: any) => m.id === item.medicineId || normalizeMedicineText(m.name) === normalizeMedicineText(item.name));
     return {
       ...item,
       form: item.form || item.category || item.type || med?.form || med?.category || '',

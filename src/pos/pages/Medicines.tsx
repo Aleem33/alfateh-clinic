@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -12,6 +12,15 @@ import {
   resolveMedicineCategory,
   useMedicineCategories,
 } from '../../lib/medicineCategories';
+import {
+  findDuplicateMedicine,
+  getMedicineDocumentId,
+  getMedicineIdentity,
+  getMedicineSearchText,
+  normalizeMedicineText,
+  searchMedicines,
+} from '../../lib/medicineIndex';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 const emptyMedicineForm = {
   name: '', form: 'Tablet', unitsPerBox: '1',
@@ -39,6 +48,7 @@ export function Medicines() {
   const [isUploading, setIsUploading]   = useState(false);
   const [editingId, setEditingId]       = useState<string | null>(null);
   const [successMsg, setSuccessMsg]     = useState('');
+  const [formError, setFormError]       = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showInlineSupplier, setShowInlineSupplier] = useState(false);
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
@@ -47,19 +57,17 @@ export function Medicines() {
   const medicineCategoryOptions = includeLegacyMedicineCategory(categories, formData.form);
 
   useEffect(() => {
-    const unsubMedicines = onSnapshot(collection(db, 'medicines'), snap => {
-      setMedicines(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'medicines'));
+    const unsubMedicines = subscribeToMedicines(
+      setMedicines,
+      err => setFormError(handleFirestoreError(err, OperationType.GET, 'medicines')),
+    );
     const unsubSuppliers = onSnapshot(collection(db, 'suppliers'), snap => {
       setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, err => handleFirestoreError(err, OperationType.GET, 'suppliers'));
     return () => { unsubMedicines(); unsubSuppliers(); };
   }, []);
 
-  const filteredMedicines = medicines.filter(m =>
-    m.name.toLowerCase().includes(search.toLowerCase()) ||
-    (m.batchNo || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredMedicines = search ? searchMedicines(medicines, search) : medicines;
 
   const handleRetailPriceChange = (retail: string, units: string) => {
     const rPrice = parseFloat(retail);
@@ -73,6 +81,7 @@ export function Medicines() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
     try {
       const unitsPerBox = Math.max(1, Math.floor(toNumber(formData.unitsPerBox, 1)));
       const totalStock = (Math.floor(toNumber(formData.stockBoxes)) * unitsPerBox) + Math.floor(toNumber(formData.stockLoose));
@@ -88,14 +97,24 @@ export function Medicines() {
         supplierId: formData.supplierId || '',
         supplierName,
       };
+      const duplicate = findDuplicateMedicine(medicines, data, editingId);
+      if (duplicate) {
+        setFormError(`${duplicate.name} already exists${duplicate.batchNo ? ` in batch ${duplicate.batchNo}` : ''}. Edit it or record a purchase instead of creating another entry.`);
+        return;
+      }
+      Object.assign(data, {
+        medicineKey: getMedicineIdentity(data),
+        searchName: normalizeMedicineText(data.name),
+        searchText: getMedicineSearchText(data),
+      });
       if (editingId) {
         await updateDoc(doc(db, 'medicines', editingId), data);
       } else {
-        await addDoc(collection(db, 'medicines'), { ...data, createdAt: new Date().toISOString() });
+        await setDoc(doc(db, 'medicines', getMedicineDocumentId(data)), { ...data, createdAt: new Date().toISOString() });
       }
       setIsModalOpen(false); setEditingId(null); setShowInlineSupplier(false);
     } catch (error) {
-      handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'medicines');
+      setFormError(handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'medicines'));
     }
   };
 
@@ -130,7 +149,7 @@ export function Medicines() {
       expiryDate:  med.expiryDate || '', batchNo: med.batchNo || '',
       supplierId:  med.supplierId || '', supplierName: med.supplierName || '',
     });
-    setEditingId(med.id); setShowInlineSupplier(false); setIsModalOpen(true);
+    setEditingId(med.id); setShowInlineSupplier(false); setFormError(''); setIsModalOpen(true);
   };
 
   const confirmDelete = async () => {
@@ -161,6 +180,8 @@ export function Medicines() {
         try {
           const rows = results.data as any[];
           let successCount = 0;
+          let duplicateCount = 0;
+          const knownMedicineKeys = new Set(medicines.map(getMedicineIdentity));
           for (const row of rows) {
             const name = String(row.name || '').trim();
             if (!name) continue;
@@ -170,22 +191,38 @@ export function Medicines() {
             const retailPrice = parseFloat(row.retailPrice || row.salePrice || '0');
             const unitPrice = parseFloat(row.unitPrice || (unitsPerBox > 0 ? (retailPrice / unitsPerBox).toFixed(2) : '0'));
             const form = String(row.form || row.category || 'Tablet').trim() || 'Tablet';
-            await addDoc(collection(db, 'medicines'), {
-              name, form, category: form, unitsPerBox,
+            const candidate = {
+              name, form, category: form,
+              batchNo: row.batchNo || '',
+              supplierId: '', supplierName: '',
+            };
+            const medicineKey = getMedicineIdentity(candidate);
+            if (knownMedicineKeys.has(medicineKey)) {
+              duplicateCount++;
+              continue;
+            }
+            await setDoc(doc(db, 'medicines', getMedicineDocumentId(candidate)), {
+              ...candidate, unitsPerBox,
               costPrice:   parseFloat(row.costPrice   || '0'),
               retailPrice,
               unitPrice,
               stock: totalStock, expiryDate: row.expiryDate || '', batchNo: row.batchNo || '',
+              medicineKey,
+              searchName: normalizeMedicineText(name),
+              searchText: getMedicineSearchText(candidate),
               createdAt: new Date().toISOString(),
             });
+            knownMedicineKeys.add(medicineKey);
             successCount++;
           }
           if (successCount === 0) {
-            setCsvError('No medicines were imported. Make sure the CSV has a name column with medicine names.');
+            setCsvError(duplicateCount
+              ? `No medicines were imported because ${duplicateCount} exact duplicate${duplicateCount === 1 ? ' was' : 's were'} skipped.`
+              : 'No medicines were imported. Make sure the CSV has a name column with medicine names.');
             return;
           }
           setIsCsvModalOpen(false);
-          setSuccessMsg(`✓ Successfully imported ${successCount} medicines!`);
+          setSuccessMsg(`Successfully imported ${successCount} medicines${duplicateCount ? `; skipped ${duplicateCount} exact duplicates` : ''}.`);
           setTimeout(() => setSuccessMsg(''), 4000);
         } catch (error) {
           setCsvError('An error occurred while importing data.');
@@ -247,6 +284,7 @@ export function Medicines() {
               setFormData({ ...emptyMedicineForm, form: getDefaultMedicineCategory(categories) });
               setSupplierForm(emptySupplierForm);
               setShowInlineSupplier(false);
+              setFormError('');
               setIsModalOpen(true);
             }}
             className="bg-blue-600 text-white px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-blue-700 text-sm font-medium">
@@ -375,6 +413,8 @@ export function Medicines() {
               <button onClick={() => setIsModalOpen(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
+
+              {formError && <div className="bg-red-50 border border-red-100 text-red-600 text-sm p-3 rounded-lg">{formError}</div>}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2 sm:col-span-1">

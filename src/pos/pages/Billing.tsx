@@ -11,6 +11,8 @@ import {
   UserPlus, Check, X, Pill, ClipboardList, CheckCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -46,9 +48,10 @@ export function Billing() {
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
 
   useEffect(() => {
-    const unsub1 = onSnapshot(collection(db, 'medicines'), snap => {
-      setMedicines(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'medicines'));
+    const unsub1 = subscribeToMedicines(
+      setMedicines,
+      err => handleFirestoreError(err, OperationType.GET, 'medicines'),
+    );
     const unsub2 = onSnapshot(collection(db, 'customers'), snap => {
       setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, err => handleFirestoreError(err, OperationType.GET, 'customers'));
@@ -77,12 +80,7 @@ export function Billing() {
     };
   }, []);
 
-  const filteredMedicines = medicines.filter(m =>
-    m.stock > 0 && (
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      (m.batchNo || '').toLowerCase().includes(search.toLowerCase())
-    )
-  );
+  const filteredMedicines = searchMedicines(medicines, search, { inStockOnly: true });
 
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
@@ -714,7 +712,7 @@ export function Billing() {
                     o.patientMRN?.includes(rxSearch))
                   .map(order => {
                     const matchCount = (order.prescriptions || []).filter((rx: any) =>
-                      medicines.some(m => m.name.toLowerCase().trim() === rx.name.toLowerCase().trim() && m.stock > 0)
+                      medicines.some(m => normalizeMedicineText(m.name) === normalizeMedicineText(rx.name) && m.stock > 0)
                     ).length;
                     return (
                       <div key={order.id} className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition-all">
@@ -729,7 +727,7 @@ export function Billing() {
                             {order.diagnosis && <p className="text-xs text-blue-600 mt-1 font-medium">Dx: {order.diagnosis}</p>}
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {(order.prescriptions || []).map((rx: any, i: number) => {
-                                const inStock = medicines.some(m => m.name.toLowerCase().trim() === rx.name.toLowerCase().trim() && m.stock > 0);
+                                const inStock = medicines.some(m => normalizeMedicineText(m.name) === normalizeMedicineText(rx.name) && m.stock > 0);
                                 return (
                                   <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${inStock ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-400 line-through'}`}>
                                     {rx.name}

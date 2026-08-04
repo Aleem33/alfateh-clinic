@@ -5,6 +5,7 @@ import { formatCurrency, formatDate } from '../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
 import { format, subDays, subMonths, startOfMonth, endOfMonth, differenceInDays, parseISO } from 'date-fns';
 import { Download, TrendingUp, AlertCircle, DollarSign, Activity, FileText, Search, CalendarDays } from 'lucide-react';
+import { subscribeToMedicines } from '../../lib/medicineStore';
 
 function exportCSV(filename: string, rows: any[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
@@ -59,7 +60,7 @@ export function Reports() {
       onSnapshot(collection(db, 'admissions'),     s => setAdmissions(s.docs.map(d => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'labOrders'),      s => setLabOrders(s.docs.map(d => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'expenses'),       s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'medicines'),      s => setMedicines(s.docs.map(d => ({ id: d.id, ...d.data() })))),
+      subscribeToMedicines(setMedicines),
       onSnapshot(collection(db, 'sales'),          s => setPosSales(s.docs.map(d => ({ id: d.id, ...d.data() })))),
     ];
     return () => u.forEach(f => f());

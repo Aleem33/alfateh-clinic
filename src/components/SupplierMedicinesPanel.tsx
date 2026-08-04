@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, doc, increment, onSnapshot, writeBatch } from 'firebase/firestore';
+import { collection, doc, increment, setDoc, writeBatch } from 'firebase/firestore';
 import { CheckCircle, ChevronUp, Package, PackagePlus, Plus, X } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import {
   getDefaultMedicineCategory,
   useMedicineCategories,
 } from '../lib/medicineCategories';
+import {
+  dedupeMedicines,
+  findDuplicateMedicine,
+  getMedicineDocumentId,
+  getMedicineIdentity,
+  getMedicineSearchText,
+  normalizeMedicineText,
+} from '../lib/medicineIndex';
+import { subscribeToMedicines } from '../lib/medicineStore';
 
 type Supplier = {
   id: string;
@@ -105,9 +114,8 @@ export function SupplierMedicinesPanel({
   );
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, 'medicines'),
-      snapshot => setMedicines(snapshot.docs.map(item => ({ id: item.id, ...item.data() }))),
+    const unsubscribe = subscribeToMedicines(
+      setMedicines,
       error => handleFirestoreError(error, OperationType.GET, 'medicines')
     );
     return unsubscribe;
@@ -124,13 +132,13 @@ export function SupplierMedicinesPanel({
 
   const supplierMedicines = useMemo(() => {
     const supplierName = supplier.name.trim().toLocaleLowerCase();
-    return medicines
+    return dedupeMedicines(medicines
       .filter(medicine =>
         medicine.supplierId === supplier.id ||
         (!medicine.supplierId &&
           String(medicine.supplierName || '').trim().toLocaleLowerCase() === supplierName)
       )
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    ).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   }, [medicines, supplier.id, supplier.name]);
 
   const handleSave = async (event: React.FormEvent) => {
@@ -146,11 +154,24 @@ export function SupplierMedicinesPanel({
     const stockLoose = Math.max(0, Math.floor(toNumber(form.stockLoose)));
     const retailPrice = Math.max(0, toNumber(form.retailPrice));
     const category = form.category || getDefaultMedicineCategory(categories);
+    const candidate = {
+      name,
+      category,
+      form: category,
+      batchNo: form.batchNo.trim(),
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+    };
+    const duplicate = findDuplicateMedicine(medicines, candidate);
+    if (duplicate) {
+      setError(`${duplicate.name} already exists for this supplier${duplicate.batchNo ? ` in batch ${duplicate.batchNo}` : ''}. Record a purchase instead of adding it again.`);
+      return;
+    }
 
     setSaving(true);
     setError('');
     try {
-      await addDoc(collection(db, 'medicines'), {
+      await setDoc(doc(db, 'medicines', getMedicineDocumentId(candidate)), {
         name,
         form: category,
         category,
@@ -163,6 +184,9 @@ export function SupplierMedicinesPanel({
         expiryDate: form.expiryDate || '',
         supplierId: supplier.id,
         supplierName: supplier.name,
+        medicineKey: getMedicineIdentity(candidate),
+        searchName: normalizeMedicineText(name),
+        searchText: getMedicineSearchText(candidate),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
