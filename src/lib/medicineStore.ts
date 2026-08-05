@@ -18,7 +18,9 @@ function startListener() {
   firestoreUnsubscribe = onSnapshot(
     collection(db, 'medicines'),
     snapshot => {
-      cachedMedicines = snapshot.docs.map(item => indexMedicine({ id: item.id, ...item.data() }));
+      // The Firestore document ID is authoritative. Some legacy documents have
+      // an `id` field in their payload, which must not overwrite the real ID.
+      cachedMedicines = snapshot.docs.map(item => indexMedicine({ ...item.data(), id: item.id }));
       hasLoaded = true;
       for (const subscriber of subscribers) subscriber.onData(cachedMedicines);
     },

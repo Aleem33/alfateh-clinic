@@ -100,7 +100,19 @@ export function findDuplicateMedicine(
 ): MedicineRecord | undefined {
   const identity = getMedicineIdentity(candidate);
   if (!normalizeMedicineText(candidate.name)) return undefined;
-  return medicines.find(medicine => medicine.id !== excludeId && getMedicineIdentity(medicine) === identity);
+
+  // Existing installations can already contain duplicate rows. Do not prevent a
+  // user from updating prices, stock, or expiry when the edited row's identity
+  // has not changed; only guard identity changes that collide with another row.
+  if (excludeId) {
+    const editedMedicine = medicines.find(medicine => String(medicine.id) === String(excludeId));
+    if (editedMedicine && getMedicineIdentity(editedMedicine) === identity) return undefined;
+  }
+
+  return medicines.find(medicine => (
+    String(medicine.id) !== String(excludeId ?? '')
+    && getMedicineIdentity(medicine) === identity
+  ));
 }
 
 export function searchMedicines(
