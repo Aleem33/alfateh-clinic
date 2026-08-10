@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
-import { Plus, Edit2, Trash2, Search, AlertCircle, Upload, Download, X } from 'lucide-react';
+import { Plus, Edit2, Archive, RotateCcw, Search, AlertCircle, Upload, Download, X } from 'lucide-react';
 import { format, isBefore, addDays } from 'date-fns';
 import Papa from 'papaparse';
 import {
@@ -14,13 +14,18 @@ import {
 } from '../../lib/medicineCategories';
 import {
   findDuplicateMedicine,
-  getMedicineDocumentId,
   getMedicineIdentity,
   getMedicineSearchText,
   normalizeMedicineText,
   searchMedicines,
 } from '../../lib/medicineIndex';
-import { subscribeToMedicines } from '../../lib/medicineStore';
+import { subscribeToArchivedMedicines, subscribeToMedicines } from '../../lib/medicineStore';
+import {
+  archiveMedicine,
+  createMedicineSafely,
+  MedicineConflictError,
+  restoreMedicine,
+} from '../../lib/medicineOperations';
 
 const emptyMedicineForm = {
   name: '', form: 'Tablet', unitsPerBox: '1',
@@ -37,9 +42,10 @@ const toNumber = (value: string, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-export function Medicines() {
+export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
   const { categories } = useMedicineCategories();
   const [medicines, setMedicines]       = useState<any[]>([]);
+  const [archivedMedicines, setArchivedMedicines] = useState<any[]>([]);
   const [suppliers, setSuppliers]       = useState<any[]>([]);
   const [search, setSearch]             = useState('');
   const [isModalOpen, setIsModalOpen]   = useState(false);
@@ -49,7 +55,8 @@ export function Medicines() {
   const [editingId, setEditingId]       = useState<string | null>(null);
   const [successMsg, setSuccessMsg]     = useState('');
   const [formError, setFormError]       = useState('');
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [showInlineSupplier, setShowInlineSupplier] = useState(false);
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
 
@@ -61,13 +68,18 @@ export function Medicines() {
       setMedicines,
       err => setFormError(handleFirestoreError(err, OperationType.GET, 'medicines')),
     );
+    const unsubArchived = subscribeToArchivedMedicines(
+      setArchivedMedicines,
+      err => setFormError(handleFirestoreError(err, OperationType.GET, 'medicines')),
+    );
     const unsubSuppliers = onSnapshot(collection(db, 'suppliers'), snap => {
       setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, err => handleFirestoreError(err, OperationType.GET, 'suppliers'));
-    return () => { unsubMedicines(); unsubSuppliers(); };
+    return () => { unsubMedicines(); unsubArchived(); unsubSuppliers(); };
   }, []);
 
-  const filteredMedicines = search ? searchMedicines(medicines, search) : medicines;
+  const visibleMedicines = showArchived && canArchive ? archivedMedicines : medicines;
+  const filteredMedicines = search ? searchMedicines(visibleMedicines, search) : visibleMedicines;
 
   const handleRetailPriceChange = (retail: string, units: string) => {
     const rPrice = parseFloat(retail);
@@ -110,11 +122,13 @@ export function Medicines() {
       if (editingId) {
         await updateDoc(doc(db, 'medicines', editingId), data);
       } else {
-        await setDoc(doc(db, 'medicines', getMedicineDocumentId(data)), { ...data, createdAt: new Date().toISOString() });
+        await createMedicineSafely(data, [...medicines, ...archivedMedicines]);
       }
       setIsModalOpen(false); setEditingId(null); setShowInlineSupplier(false);
     } catch (error) {
-      setFormError(handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'medicines'));
+      setFormError(error instanceof MedicineConflictError
+        ? error.message
+        : handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'medicines'));
     }
   };
 
@@ -152,11 +166,29 @@ export function Medicines() {
     setEditingId(med.id); setShowInlineSupplier(false); setFormError(''); setIsModalOpen(true);
   };
 
-  const confirmDelete = async () => {
-    if (!confirmDeleteId) return;
-    try { await deleteDoc(doc(db, 'medicines', confirmDeleteId)); }
-    catch (error) { handleFirestoreError(error, OperationType.DELETE, `medicines/${confirmDeleteId}`); }
-    finally { setConfirmDeleteId(null); }
+  const confirmArchive = async () => {
+    const medicine = medicines.find(item => item.id === confirmArchiveId);
+    if (!medicine || !canArchive) return;
+    try {
+      await archiveMedicine(medicine);
+      setSuccessMsg(`${medicine.name} moved to Archived Medicines.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (error) {
+      setFormError(handleFirestoreError(error, OperationType.UPDATE, `medicines/${medicine.id}`));
+    } finally {
+      setConfirmArchiveId(null);
+    }
+  };
+
+  const handleRestore = async (medicine: any) => {
+    if (!canArchive) return;
+    try {
+      await restoreMedicine(medicine);
+      setSuccessMsg(`${medicine.name} restored to active inventory.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (error) {
+      setFormError(handleFirestoreError(error, OperationType.UPDATE, `medicines/${medicine.id}`));
+    }
   };
 
   const isExpiringSoon = (dateStr: string) => {
@@ -181,7 +213,8 @@ export function Medicines() {
           const rows = results.data as any[];
           let successCount = 0;
           let duplicateCount = 0;
-          const knownMedicineKeys = new Set(medicines.map(getMedicineIdentity));
+          const knownMedicines = [...medicines, ...archivedMedicines];
+          const knownMedicineKeys = new Set(knownMedicines.map(getMedicineIdentity));
           for (const row of rows) {
             const name = String(row.name || '').trim();
             if (!name) continue;
@@ -201,18 +234,24 @@ export function Medicines() {
               duplicateCount++;
               continue;
             }
-            await setDoc(doc(db, 'medicines', getMedicineDocumentId(candidate)), {
+            try {
+              await createMedicineSafely({
               ...candidate, unitsPerBox,
               costPrice:   parseFloat(row.costPrice   || '0'),
               retailPrice,
               unitPrice,
               stock: totalStock, expiryDate: row.expiryDate || '', batchNo: row.batchNo || '',
-              medicineKey,
-              searchName: normalizeMedicineText(name),
-              searchText: getMedicineSearchText(candidate),
-              createdAt: new Date().toISOString(),
-            });
+              }, knownMedicines);
+            } catch (error) {
+              if (error instanceof MedicineConflictError) {
+                duplicateCount++;
+                knownMedicineKeys.add(medicineKey);
+                continue;
+              }
+              throw error;
+            }
             knownMedicineKeys.add(medicineKey);
+            knownMedicines.push({ ...candidate, id: `import-${medicineKey}` });
             successCount++;
           }
           if (successCount === 0) {
@@ -255,15 +294,15 @@ export function Medicines() {
         </div>
       )}
 
-      {/* Confirm Delete Modal */}
-      {confirmDeleteId && (
+      {/* Confirm Archive Modal */}
+      {confirmArchiveId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Delete Medicine</h3>
-            <p className="text-gray-600 mb-6">Are you sure? This cannot be undone.</p>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Archive Medicine</h3>
+            <p className="text-gray-600 mb-6">This medicine will be hidden from billing and purchases. An admin can restore it later.</p>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setConfirmDeleteId(null)} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700">Delete</button>
+              <button onClick={() => setConfirmArchiveId(null)} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={confirmArchive} className="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700">Archive</button>
             </div>
           </div>
         </div>
@@ -273,12 +312,19 @@ export function Medicines() {
       <div className="flex justify-between items-center gap-2">
         <h1 className="text-xl md:text-2xl font-bold text-gray-900">Medicines</h1>
         <div className="flex gap-2">
-          <button onClick={() => setIsCsvModalOpen(true)}
+          {canArchive && (
+            <button onClick={() => { setShowArchived(value => !value); setSearch(''); }}
+              className={`px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium border ${showArchived ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
+              {showArchived ? <RotateCcw className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+              <span>{showArchived ? 'Active Medicines' : `Archived (${archivedMedicines.length})`}</span>
+            </button>
+          )}
+          {!showArchived && <button onClick={() => setIsCsvModalOpen(true)}
             className="bg-white text-gray-700 border border-gray-300 px-3 py-2 rounded-lg flex items-center gap-1.5 hover:bg-gray-50 text-sm font-medium">
             <Upload className="w-4 h-4" />
             <span className="hidden sm:inline">Import CSV</span>
-          </button>
-          <button
+          </button>}
+          {!showArchived && <button
             onClick={() => {
               setEditingId(null);
               setFormData({ ...emptyMedicineForm, form: getDefaultMedicineCategory(categories) });
@@ -291,7 +337,7 @@ export function Medicines() {
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">Add Medicine</span>
             <span className="sm:hidden">Add</span>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -303,6 +349,9 @@ export function Medicines() {
               value={search} onChange={e => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
+          <p className="mt-2 text-xs text-gray-500">
+            Showing {filteredMedicines.length} of {visibleMedicines.length} {showArchived ? 'archived' : 'active'} medicine records
+          </p>
         </div>
 
         {/* ── Mobile: cards ── */}
@@ -320,16 +369,22 @@ export function Medicines() {
                     )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {med.form}{med.unitsPerBox > 1 ? ` • ${med.unitsPerBox}/box` : ''} • #{med.batchNo}
+                    {med.form}{med.unitsPerBox > 1 ? ` • ${med.unitsPerBox}/box` : ''} • Batch: {med.batchNo || 'N/A'} • {med.supplierName || 'No supplier'}
                   </p>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  <button onClick={() => handleEdit(med)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
+                  {!showArchived && <button onClick={() => handleEdit(med)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
                     <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => setConfirmDeleteId(med.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  </button>}
+                  {canArchive && (showArchived ? (
+                    <button onClick={() => handleRestore(med)} title="Restore medicine" className="p-1.5 text-green-600 hover:bg-green-50 rounded">
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button onClick={() => setConfirmArchiveId(med.id)} title="Archive medicine" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded">
+                      <Archive className="w-4 h-4" />
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -370,7 +425,7 @@ export function Medicines() {
                 <tr key={med.id} className="hover:bg-gray-50">
                   <td className="p-4">
                     <p className="font-medium text-gray-900">{med.name}</p>
-                    <p className="text-xs text-gray-500">{med.form} {med.unitsPerBox > 1 ? `(${med.unitsPerBox}/box)` : ''}</p>
+                    <p className="text-xs text-gray-500">{med.form} {med.unitsPerBox > 1 ? `(${med.unitsPerBox}/box)` : ''} • {med.supplierName || 'No supplier'}</p>
                   </td>
                   <td className="p-4 text-gray-600">{med.batchNo}</td>
                   <td className="p-4">
@@ -391,8 +446,12 @@ export function Medicines() {
                     </div>
                   </td>
                   <td className="p-4 flex justify-end gap-2">
-                    <button onClick={() => handleEdit(med)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => setConfirmDeleteId(med.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                    {!showArchived && <button onClick={() => handleEdit(med)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>}
+                    {canArchive && (showArchived ? (
+                      <button onClick={() => handleRestore(med)} title="Restore medicine" className="p-1.5 text-green-600 hover:bg-green-50 rounded"><RotateCcw className="w-4 h-4" /></button>
+                    ) : (
+                      <button onClick={() => setConfirmArchiveId(med.id)} title="Archive medicine" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded"><Archive className="w-4 h-4" /></button>
+                    ))}
                   </td>
                 </tr>
               ))}

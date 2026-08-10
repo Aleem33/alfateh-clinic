@@ -45,7 +45,18 @@ export function useGlobalSearch(query: string) {
       .forEach(s => out.push({ id: s.id, type: 'staff', title: s.name, subtitle: `${s.role} · ${s.department}`, path: '/staff' }));
 
     searchMedicines(medicines, q, { limit: 3 })
-      .forEach(m => out.push({ id: m.id, type: 'medicine', title: m.name, subtitle: `Stock: ${m.stock} · Rs. ${m.retailPrice}`, path: '/pharmacy' }));
+      .forEach(m => out.push({
+        id: m.id,
+        type: 'medicine',
+        title: m.name,
+        subtitle: [
+          m.supplierName || 'No supplier',
+          m.batchNo ? `Batch ${m.batchNo}` : 'No batch',
+          `Stock: ${m.stock}`,
+          `Rs. ${m.retailPrice}`,
+        ].join(' · '),
+        path: '/pharmacy',
+      }));
 
     setResults(out);
   }, [query, patients, staff, medicines]);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, increment, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, increment } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
@@ -11,8 +11,9 @@ import {
   resolveMedicineCategory,
   useMedicineCategories,
 } from '../../lib/medicineCategories';
-import { findDuplicateMedicine, getMedicineDocumentId, getMedicineIdentity, getMedicineSearchText, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
+import { findDuplicateMedicine, getMedicineIdentity, getMedicineSearchText, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { createMedicineSafely, MedicineConflictError } from '../../lib/medicineOperations';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -148,7 +149,7 @@ export function Pharmacy() {
     finally { setSaving(false); }
   };
 
-  const filteredMeds = searchMedicines(medicines, search, { dedupe: Boolean(search) }).filter(m => {
+  const filteredMeds = searchMedicines(medicines, search).filter(m => {
     const matchFilter = stockFilter === 'all' ? true
       : stockFilter === 'low' ? m.stock <= (m.unitsPerBox || 1) * 2
       : m.expiryDate && new Date(m.expiryDate) < new Date(Date.now() + 30 * 86400000);
@@ -207,7 +208,7 @@ export function Pharmacy() {
         searchText: getMedicineSearchText(data),
       });
       if (editMedId) await updateDoc(doc(db, 'medicines', editMedId), data);
-      else await setDoc(doc(db, 'medicines', getMedicineDocumentId(data)), { ...data, createdAt: nowISO() });
+      else await createMedicineSafely(data, medicines);
       setShowMedModal(false); setEditMedId(null);
       setMedForm({ ...emptyMed, category: getDefaultMedicineCategory(categories) });
     } catch (e: any) { setError(e.message); }
@@ -259,7 +260,7 @@ export function Pharmacy() {
       });
       setShowPurchaseModal(false);
       setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', looseUnits: '0', unitsPerBox: '1', costPerBox: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) { setError(e instanceof MedicineConflictError ? e.message : e.message); }
     finally { setSaving(false); }
   };
 
@@ -360,6 +361,9 @@ export function Pharmacy() {
       {/* Stock Tab */}
       {tab === 'stock' && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-2 border-b border-gray-100 text-xs text-gray-500">
+            Showing {filteredMeds.length} of {medicines.length} active medicine records
+          </div>
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>{['Medicine', 'Category', 'Stock', 'Batch', 'Expiry', 'Cost', 'Retail Price', ''].map(h => (
@@ -381,6 +385,7 @@ export function Pharmacy() {
                           <div className="text-sm font-medium text-gray-900">{m.name}</div>
                           {m.nameUrdu && <div className="text-xs text-green-700" dir="rtl" style={{ fontFamily: 'Noto Nastaliq Urdu, serif' }}>{m.nameUrdu}</div>}
                           {m.manufacturer && <div className="text-xs text-gray-400">{m.manufacturer}</div>}
+                          <div className="text-xs text-gray-400">{m.supplierName || 'No supplier'}</div>
                         </div>
                       </div>
                     </td>
@@ -692,8 +697,11 @@ export function Pharmacy() {
                     <input value={medSearch} onChange={e => setMedSearch(e.target.value)} placeholder="Search medicine..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     {medSearch && (
                       <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 mt-1 max-h-40 overflow-y-auto">
-                        {searchMedicines(medicines, medSearch, { limit: 6 }).map(m => (
-                          <button key={m.id} onClick={() => selectPurchaseMedicine(m)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0">{m.name}</button>
+                        {searchMedicines(medicines, medSearch).map(m => (
+                          <button key={m.id} onClick={() => selectPurchaseMedicine(m)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0">
+                            <span className="block font-medium text-gray-900">{m.name}</span>
+                            <span className="block text-xs text-gray-500">{m.category || m.form || 'Medicine'} • {m.supplierName || 'No supplier'} • Batch: {m.batchNo || 'N/A'} • Stock: {m.stock || 0}</span>
+                          </button>
                         ))}
                       </div>
                     )}

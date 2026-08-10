@@ -365,6 +365,7 @@ export function Billing() {
             )}
           </button>
         </div>
+        <p className="mt-2 text-xs text-gray-500">Showing {filteredMedicines.length} matching in-stock records</p>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -372,7 +373,8 @@ export function Billing() {
             <div key={med.id} className="p-3 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all bg-white flex flex-col">
               <div className="flex-1">
                 <h3 className="font-bold text-gray-900 line-clamp-2 text-sm leading-tight">{med.name}</h3>
-                <p className="text-[11px] text-gray-400 mt-0.5">{med.form} • {med.batchNo}</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">{med.form} • Batch: {med.batchNo || 'N/A'}</p>
+                <p className="text-[11px] text-gray-400">{med.supplierName || 'No supplier'}</p>
                 <p className="text-[11px] font-semibold text-blue-600 mt-1">{formatStock(med.stock, med.unitsPerBox)}</p>
                 {med.costPrice > 0 && (
                   <div className="mt-1.5 inline-flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">

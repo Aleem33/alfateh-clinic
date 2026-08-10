@@ -24,26 +24,6 @@ export function getMedicineIdentity(medicine: Partial<MedicineRecord>): string {
   ].join('|');
 }
 
-export function getMedicineDocumentId(medicine: Partial<MedicineRecord>): string {
-  const identity = getMedicineIdentity(medicine);
-  let first = 0x811c9dc5;
-  let second = 0x9e3779b9;
-  for (let index = 0; index < identity.length; index++) {
-    const code = identity.charCodeAt(index);
-    first = Math.imul(first ^ code, 0x01000193);
-    second = Math.imul(second ^ code, 0x85ebca6b);
-  }
-  return `med_${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
-}
-
-function getMedicineDisplayIdentity(medicine: Partial<MedicineRecord>): string {
-  return [
-    normalizeMedicineText(medicine.name),
-    normalizeMedicineText(medicine.category || medicine.form),
-    normalizeMedicineText(medicine.batchNo),
-  ].join('|');
-}
-
 export function getMedicineSearchText(medicine: Partial<MedicineRecord>): string {
   if (medicine.__searchText) return medicine.__searchText;
   return [
@@ -66,31 +46,13 @@ export function indexMedicine(medicine: MedicineRecord): MedicineRecord {
   };
 }
 
-function medicineTimestamp(medicine: Partial<MedicineRecord>): number {
-  const raw = medicine.updatedAt || medicine.createdAt || '';
-  const parsed = Date.parse(String(raw));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function preferMedicine(current: MedicineRecord, candidate: MedicineRecord): MedicineRecord {
-  const currentInStock = Number(current.stock || 0) > 0;
-  const candidateInStock = Number(candidate.stock || 0) > 0;
-  if (currentInStock !== candidateInStock) return candidateInStock ? candidate : current;
-  if (Number(candidate.stock || 0) !== Number(current.stock || 0)) {
-    return Number(candidate.stock || 0) > Number(current.stock || 0) ? candidate : current;
-  }
-  return medicineTimestamp(candidate) > medicineTimestamp(current) ? candidate : current;
-}
-
-export function dedupeMedicines(medicines: MedicineRecord[]): MedicineRecord[] {
-  const unique = new Map<string, MedicineRecord>();
+export function partitionMedicines(medicines: MedicineRecord[]) {
+  const active: MedicineRecord[] = [];
+  const archived: MedicineRecord[] = [];
   for (const medicine of medicines) {
-    const identity = getMedicineDisplayIdentity(medicine);
-    const key = identity.replace(/\|/g, '') ? identity : `id:${medicine.id}`;
-    const existing = unique.get(key);
-    unique.set(key, existing ? preferMedicine(existing, medicine) : medicine);
+    (medicine.archived === true ? archived : active).push(medicine);
   }
-  return [...unique.values()];
+  return { active, archived };
 }
 
 export function findDuplicateMedicine(
@@ -118,7 +80,7 @@ export function findDuplicateMedicine(
 export function searchMedicines(
   medicines: MedicineRecord[],
   query: string,
-  options: { inStockOnly?: boolean; limit?: number; dedupe?: boolean } = {},
+  options: { inStockOnly?: boolean; limit?: number } = {},
 ): MedicineRecord[] {
   const normalizedQuery = normalizeMedicineText(query);
   const queryTokens = normalizedQuery.split(' ').filter(Boolean);
@@ -128,8 +90,6 @@ export function searchMedicines(
     const searchText = getMedicineSearchText(medicine);
     return queryTokens.every(token => searchText.includes(token));
   });
-
-  if (options.dedupe !== false) results = dedupeMedicines(results);
 
   results.sort((a, b) => {
     if (normalizedQuery) {

@@ -269,11 +269,12 @@ export function Purchases() {
                     className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                   {medDropdownOpen && medSearch && filteredMeds.length > 0 && (
                     <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-auto">
+                      <div className="px-4 py-1.5 text-xs text-gray-500 bg-gray-50 border-b">{filteredMeds.length} matching medicine records</div>
                       {filteredMeds.map(med => (
                         <button key={med.id} type="button" onClick={() => handleSelectMedicine(med)}
                           className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-gray-100 last:border-0">
                           <p className="font-medium text-gray-900">{med.name}</p>
-                          <p className="text-xs text-gray-500">{med.form} • Stock: {formatStock(med.stock, med.unitsPerBox)} • Batch: {med.batchNo}</p>
+                          <p className="text-xs text-gray-500">{med.form} • {med.supplierName || 'No supplier'} • Stock: {formatStock(med.stock, med.unitsPerBox)} • Batch: {med.batchNo || 'N/A'}</p>
                         </button>
                       ))}
                     </div>
