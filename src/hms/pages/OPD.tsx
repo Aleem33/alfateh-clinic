@@ -333,7 +333,7 @@ export function OPD() {
   });
 
   const filteredPatients = patients.filter(p => !patientSearch || p.name?.toLowerCase().includes(patientSearch.toLowerCase()) || p.mrn?.includes(patientSearch)).slice(0, 5);
-  const filteredMeds = medSearch ? searchMedicines(medicines, medSearch, { limit: 5 }) : [];
+  const filteredMeds = medSearch ? searchMedicines(medicines, medSearch) : [];
   const filteredLabTests = labTests.filter(t => labSearch && t.name?.toLowerCase().includes(labSearch.toLowerCase())).slice(0, 5);
 
   const openAppointmentInOPD = (appt: any) => {
@@ -1093,15 +1093,17 @@ export function OPD() {
                 <div className="relative mb-2">
                   <input value={medSearch} onChange={e => setMedSearch(e.target.value)} placeholder="Search medicine to add..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   {medSearch && filteredMeds.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 mt-1">
+                    <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 mt-1 max-h-64 overflow-y-auto">
+                      <div className="px-3 py-1.5 text-xs text-gray-500 bg-gray-50 border-b">{filteredMeds.length} matching medicine records</div>
                       {filteredMeds.map(m => {
                         const stock = Number(m.stock || 0);
                         return (
                           <button key={m.id} onClick={() => addPrescription(m)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b border-gray-50 last:border-0">
-                            {m.name}{' '}
+                            <span className="font-medium text-gray-900">{m.name}</span>{' '}
                             <span className={stock > 0 ? 'text-xs text-gray-400' : 'text-xs font-semibold text-red-500'}>
                               {stock > 0 ? `— Stock: ${stock}` : '— Out of stock'}
                             </span>
+                            <span className="block text-xs text-gray-400">{m.supplierName || 'No supplier'} • Batch: {m.batchNo || 'N/A'} • {m.category || m.form || 'Medicine'}</span>
                           </button>
                         );
                       })}

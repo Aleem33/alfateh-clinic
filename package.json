@@ -2,7 +2,7 @@
   "name": "alfateh-healthcare-suite",
   "productName": "Al-Fateh Clinic",
   "private": true,
-  "version": "3.1.65",
+  "version": "3.1.66",
   "description": "Al-Fateh Clinic Integrated Hospital & Pharmacy Management Suite",
   "author": "Al-Fateh Clinic",
   "main": "main.js",
@@ -16,6 +16,7 @@
     "build": "vite build",
     "electron:dev": "vite build --watch",
     "lint": "tsc --noEmit",
+    "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs",
     "dist": "npm run build && electron-builder --win --publish never",
     "release": "npm run build && electron-builder --win --publish always",
@@ -108,6 +109,7 @@
     "sharp": "^0.34.5",
     "tailwindcss": "^3.4.15",
     "typescript": "~5.6.3",
-    "vite": "^8.0.13"
+    "vite": "^8.0.13",
+    "vitest": "^4.1.10"
   }
 }

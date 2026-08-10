@@ -84,7 +84,26 @@ service cloud.firestore {
     // ── Medicines ──────────────────────────────────────────────────────────────
     match /medicines/{doc} {
       allow read: if isAuth();
-      allow create, update: if isAdmin() || isPharmacist();
+      allow create: if isAdmin() || (
+        isPharmacist() &&
+        request.resource.data.archived != true &&
+        !request.resource.data.keys().hasAny([
+          'archivedAt',
+          'archivedBy',
+          'restoredAt',
+          'restoredBy'
+        ])
+      );
+      allow update: if isAdmin() || (
+        isPharmacist() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'archived',
+          'archivedAt',
+          'archivedBy',
+          'restoredAt',
+          'restoredBy'
+        ])
+      );
       allow delete: if isAdmin();
     }
 

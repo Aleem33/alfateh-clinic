@@ -1,20 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, increment, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, increment, writeBatch } from 'firebase/firestore';
 import { CheckCircle, ChevronUp, Package, PackagePlus, Plus, X } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import {
   getDefaultMedicineCategory,
   useMedicineCategories,
 } from '../lib/medicineCategories';
-import {
-  dedupeMedicines,
-  findDuplicateMedicine,
-  getMedicineDocumentId,
-  getMedicineIdentity,
-  getMedicineSearchText,
-  normalizeMedicineText,
-} from '../lib/medicineIndex';
+import { findDuplicateMedicine } from '../lib/medicineIndex';
 import { subscribeToMedicines } from '../lib/medicineStore';
+import { createMedicineSafely, MedicineConflictError } from '../lib/medicineOperations';
 
 type Supplier = {
   id: string;
@@ -132,13 +126,13 @@ export function SupplierMedicinesPanel({
 
   const supplierMedicines = useMemo(() => {
     const supplierName = supplier.name.trim().toLocaleLowerCase();
-    return dedupeMedicines(medicines
+    return medicines
       .filter(medicine =>
         medicine.supplierId === supplier.id ||
         (!medicine.supplierId &&
           String(medicine.supplierName || '').trim().toLocaleLowerCase() === supplierName)
       )
-    ).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   }, [medicines, supplier.id, supplier.name]);
 
   const handleSave = async (event: React.FormEvent) => {
@@ -171,7 +165,7 @@ export function SupplierMedicinesPanel({
     setSaving(true);
     setError('');
     try {
-      await setDoc(doc(db, 'medicines', getMedicineDocumentId(candidate)), {
+      await createMedicineSafely({
         name,
         form: category,
         category,
@@ -184,16 +178,13 @@ export function SupplierMedicinesPanel({
         expiryDate: form.expiryDate || '',
         supplierId: supplier.id,
         supplierName: supplier.name,
-        medicineKey: getMedicineIdentity(candidate),
-        searchName: normalizeMedicineText(name),
-        searchText: getMedicineSearchText(candidate),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      }, medicines);
       setForm(makeEmptyForm(getDefaultMedicineCategory(categories)));
       setShowAddForm(false);
     } catch (saveError) {
-      setError('Medicine could not be saved. Please try again.');
+      setError(saveError instanceof MedicineConflictError
+        ? saveError.message
+        : 'Medicine could not be saved. Please try again.');
       handleFirestoreError(saveError, OperationType.CREATE, 'medicines');
     } finally {
       setSaving(false);
