@@ -341,6 +341,14 @@ export function SupplierMedicinesPanel({
                       {medicine.category || medicine.form || 'Medicine'}
                       {medicine.batchNo ? ` - Batch ${medicine.batchNo}` : ''}
                     </p>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
+                      <span className="text-gray-600">
+                        Cost / Box: <strong className="text-gray-900">Rs. {Number(medicine.costPrice || 0).toFixed(2)}</strong>
+                      </span>
+                      <span className="text-gray-600">
+                        Retail / Box: <strong className="text-blue-700">Rs. {Number(medicine.retailPrice || medicine.price || 0).toFixed(2)}</strong>
+                      </span>
+                    </div>
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <span className="text-xs font-medium text-green-700 bg-green-50 rounded-full px-2 py-1 h-fit">
@@ -366,6 +374,7 @@ export function SupplierMedicinesPanel({
                   <th className="px-4 py-2.5 font-semibold">Category</th>
                   <th className="px-4 py-2.5 font-semibold">Batch</th>
                   <th className="px-4 py-2.5 font-semibold">Stock</th>
+                  <th className="px-4 py-2.5 font-semibold">Cost / Box</th>
                   <th className="px-4 py-2.5 font-semibold">Retail / Box</th>
                   <th className="px-4 py-2.5 font-semibold">Expiry</th>
                   <th className="px-4 py-2.5 font-semibold text-right">Purchase</th>
@@ -378,6 +387,7 @@ export function SupplierMedicinesPanel({
                     <td className="px-4 py-3 text-sm text-gray-600">{medicine.category || medicine.form || '-'}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{medicine.batchNo || '-'}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{formatStock(medicine.stock, medicine.unitsPerBox)}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-700">Rs. {Number(medicine.costPrice || 0).toFixed(2)}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">Rs. {Number(medicine.retailPrice || medicine.price || 0).toFixed(2)}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{medicine.expiryDate || '-'}</td>
                     <td className="px-4 py-3 text-right">
