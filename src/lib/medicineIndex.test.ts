@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findDuplicateMedicine,
+  groupMedicineBatches,
   normalizeMedicineText,
   partitionMedicines,
   searchMedicines,
@@ -52,6 +53,20 @@ describe('medicine indexing and visibility', () => {
     expect(searchMedicines(records, 'Injection')).toHaveLength(3);
     expect(findDuplicateMedicine(records, medicine('new', { supplierId: 'supplier-c' }))).toBeUndefined();
     expect(findDuplicateMedicine(records, medicine('new', { batchNo: 'B-2' }))?.id).toBe('batch-b');
+  });
+
+  it('groups a medicine for billing without collapsing its batch records', () => {
+    const records = [
+      medicine('batch-b', { batchNo: 'B-2', expiryDate: '2027-12-31', retailPrice: 350, stock: 8 }),
+      medicine('batch-a', { batchNo: 'B-1', expiryDate: '2027-06-30', retailPrice: 330, stock: 10 }),
+    ];
+
+    const groups = groupMedicineBatches(records);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].totalStock).toBe(18);
+    expect(groups[0].batches.map(batch => batch.id)).toEqual(['batch-a', 'batch-b']);
+    expect(groups[0].batches.map(batch => batch.retailPrice)).toEqual([330, 350]);
   });
 
   it('filters stock only when an operational selector requests it', () => {

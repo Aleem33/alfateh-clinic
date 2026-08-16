@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, onSnapshot, addDoc, doc, updateDoc, increment, writeBatch } from 'firebase/firestore';
 import { printOrShare, printPageOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosReceiptNo } from '../../firebase';
@@ -11,7 +11,7 @@ import {
   UserPlus, Check, X, Pill, ClipboardList, CheckCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
+import { groupMedicineBatches, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 
 export function Billing() {
@@ -28,6 +28,7 @@ export function Billing() {
   const [pharmacyOrders, setPharmacyOrders] = useState<any[]>([]);
   const [showRxModal, setShowRxModal] = useState(false);
   const [rxSearch, setRxSearch] = useState('');
+  const [batchSelector, setBatchSelector] = useState<any[] | null>(null);
 
   // Mobile: which tab is active
   const [mobileTab, setMobileTab] = useState<'medicines' | 'cart'>('medicines');
@@ -81,6 +82,8 @@ export function Billing() {
   }, []);
 
   const filteredMedicines = searchMedicines(medicines, search, { inStockOnly: true });
+
+  const medicineGroups = useMemo(() => groupMedicineBatches(filteredMedicines), [filteredMedicines]);
 
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
@@ -377,18 +380,32 @@ export function Billing() {
             )}
           </button>
         </div>
-        <p className="mt-2 text-xs text-gray-500">Showing {filteredMedicines.length} matching in-stock batch records. Select the exact batch you are selling.</p>
+        <p className="mt-2 text-xs text-gray-500">Showing {medicineGroups.length} medicines across {filteredMedicines.length} in-stock batch records.</p>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {filteredMedicines.map(med => (
-            <div key={med.id} className="p-3 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all bg-white flex flex-col">
+          {medicineGroups.map(group => {
+            const med = group.batches[0];
+            const hasMultipleBatches = group.batches.length > 1;
+            const retailPrices = group.batches.map((batch: any) => getBoxPrice(batch));
+            const minRetail = Math.min(...retailPrices);
+            const maxRetail = Math.max(...retailPrices);
+            return (
+              <div key={group.key} className={`p-3 rounded-xl border hover:border-blue-400 hover:shadow-md transition-all bg-white flex flex-col ${hasMultipleBatches ? 'border-orange-200' : 'border-gray-200'}`}>
               <div className="flex-1">
-                <h3 className="font-bold text-gray-900 line-clamp-2 text-sm leading-tight">{med.name}</h3>
-                <p className="text-[11px] font-semibold text-orange-700 bg-orange-50 border border-orange-100 rounded px-1.5 py-0.5 mt-1 inline-block">Batch: {med.batchNo || 'N/A'}</p>
-                <p className="text-[11px] text-gray-400">{med.supplierName || 'No supplier'}</p>
-                <p className="text-[11px] font-semibold text-blue-600 mt-1">{formatStock(med.stock, med.unitsPerBox)}</p>
-                {med.costPrice > 0 && (
+                <h3 className="font-bold text-gray-900 line-clamp-2 text-sm leading-tight">{group.name}</h3>
+                {hasMultipleBatches ? (
+                  <p className="text-[11px] font-bold text-orange-700 bg-orange-50 border border-orange-200 rounded px-1.5 py-1 mt-1 inline-block">{group.batches.length} batches available</p>
+                ) : (
+                  <p className="text-[11px] font-semibold text-orange-700 bg-orange-50 border border-orange-100 rounded px-1.5 py-0.5 mt-1 inline-block">Batch: {med.batchNo || 'N/A'}</p>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1">{hasMultipleBatches ? `${group.totalStock} total units` : (med.supplierName || 'No supplier')}</p>
+                <p className="text-[11px] font-semibold text-blue-600 mt-1">
+                  {hasMultipleBatches
+                    ? `Retail ${formatCurrency(minRetail)}${minRetail !== maxRetail ? ` – ${formatCurrency(maxRetail)}` : ''}`
+                    : formatStock(med.stock, med.unitsPerBox)}
+                </p>
+                {!hasMultipleBatches && med.costPrice > 0 && (
                   <div className="mt-1.5 inline-flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">
                     <Tag className="w-2.5 h-2.5 text-amber-500 shrink-0" />
                     <span className="text-[10px] font-semibold text-amber-700 leading-none">Cost {formatCurrency(med.costPrice)}</span>
@@ -396,7 +413,12 @@ export function Billing() {
                 )}
               </div>
               <div className="mt-2.5 flex flex-col gap-1.5">
-                {med.unitsPerBox > 1 ? (
+                {hasMultipleBatches ? (
+                  <button onClick={() => setBatchSelector(group.batches)}
+                    className="w-full bg-orange-600 text-white py-2 rounded-md text-xs font-bold hover:bg-orange-700">
+                    Select Batch ({group.batches.length})
+                  </button>
+                ) : med.unitsPerBox > 1 ? (
                   <div className="flex gap-1.5">
                     <button onClick={() => addToCart(med, 'box')}
                       className="flex-1 bg-blue-50 text-blue-700 py-1.5 rounded-md text-[11px] font-bold hover:bg-blue-100 border border-blue-100 text-center leading-snug">
@@ -414,8 +436,9 @@ export function Billing() {
                   </button>
                 )}
               </div>
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -685,6 +708,54 @@ export function Billing() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
           </svg>
           <span className="font-medium">{stockError}</span>
+        </div>
+      )}
+
+      {batchSelector && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 print:hidden">
+          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-bold text-gray-900 text-lg">Select Batch — {batchSelector[0]?.name}</h2>
+                <p className="text-xs text-gray-500 mt-1">Choose the exact batch to sell. Stock will be deducted only from that batch.</p>
+              </div>
+              <button type="button" onClick={() => setBatchSelector(null)} aria-label="Close batch selector" className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4 space-y-3">
+              {batchSelector.map(batch => (
+                <div key={batch.id} className="border border-gray-200 rounded-xl p-4 hover:border-orange-300 bg-white">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-orange-700 bg-orange-50 border border-orange-200 rounded-md px-2 py-1 text-sm">Batch {batch.batchNo || 'N/A'}</span>
+                        <span className="text-sm font-semibold text-blue-700">{formatStock(batch.stock, batch.unitsPerBox)}</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1 mt-2 text-xs text-gray-600">
+                        <span>Expiry: <strong className="text-gray-900">{batch.expiryDate ? format(new Date(batch.expiryDate), 'MMM dd, yyyy') : 'N/A'}</strong></span>
+                        <span>Supplier: <strong className="text-gray-900">{batch.supplierName || 'No supplier'}</strong></span>
+                        <span>Cost / Box: <strong className="text-gray-900">{formatCurrency(batch.costPrice || 0)}</strong></span>
+                        <span>Retail / Box: <strong className="text-blue-700">{formatCurrency(getBoxPrice(batch))}</strong></span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button type="button" onClick={() => { addToCart(batch, 'box'); setBatchSelector(null); }}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-700">
+                        Add Box
+                      </button>
+                      {Number(batch.unitsPerBox || 1) > 1 && (
+                        <button type="button" onClick={() => { addToCart(batch, 'unit'); setBatchSelector(null); }}
+                          className="bg-green-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-green-700">
+                          Add Unit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

@@ -4,6 +4,14 @@ export type MedicineRecord = Record<string, any> & {
   __searchText?: string;
 };
 
+export type MedicineBatchGroup = {
+  key: string;
+  name: string;
+  form: string;
+  batches: MedicineRecord[];
+  totalStock: number;
+};
+
 export function normalizeMedicineText(value: unknown): string {
   return String(value ?? '')
     .normalize('NFKC')
@@ -103,4 +111,30 @@ export function searchMedicines(
   });
 
   return options.limit ? results.slice(0, options.limit) : results;
+}
+
+export function groupMedicineBatches(medicines: MedicineRecord[]): MedicineBatchGroup[] {
+  const groups = new Map<string, MedicineRecord[]>();
+
+  for (const medicine of medicines) {
+    const key = [
+      normalizeMedicineText(medicine.name),
+      normalizeMedicineText(medicine.category || medicine.form),
+    ].join('|');
+    const group = groups.get(key) || [];
+    group.push(medicine);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()].map(([key, batches]) => ({
+    key,
+    name: batches[0]?.name || 'Medicine',
+    form: batches[0]?.category || batches[0]?.form || 'Medicine',
+    batches: [...batches].sort((a, b) => (
+      String(a.expiryDate || '9999').localeCompare(String(b.expiryDate || '9999'))
+      || String(a.batchNo || '').localeCompare(String(b.batchNo || ''))
+      || String(a.id).localeCompare(String(b.id))
+    )),
+    totalStock: batches.reduce((sum, medicine) => sum + Number(medicine.stock || 0), 0),
+  }));
 }
