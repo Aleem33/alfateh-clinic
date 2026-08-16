@@ -1,21 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
+import { collection, onSnapshot, doc, increment, writeBatch } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
-import { Plus, Search, Truck, PackagePlus, X, ChevronDown, CheckCircle } from 'lucide-react';
+import { Search, Truck, PackagePlus, X, ChevronDown, CheckCircle, Edit2, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { ensureMedicinePurchaseBatch } from '../../lib/medicineOperations';
 
 const today = () => new Date().toISOString().split('T')[0];
 
-export function Purchases() {
+export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   const [medicines, setMedicines] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [formError, setFormError] = useState('');
+  const [editingPurchase, setEditingPurchase] = useState<any | null>(null);
 
   const [selectedMedicine, setSelectedMedicine] = useState<any>(null);
   const [medSearch, setMedSearch] = useState('');
@@ -76,6 +79,7 @@ export function Purchases() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMedicine) return;
+    setFormError('');
     try {
       const unitsPerBox  = Math.max(1, parseInt(formData.unitsPerBox || '1') || 1);
       const boxesBought  = parseInt(formData.boxesPurchased || '0');
@@ -100,32 +104,107 @@ export function Purchases() {
         batchNo: formData.batchNo, expiryDate: formData.expiryDate,
         notes: formData.notes, totalCost, date: formData.date || today(),
         addedBy: auth.currentUser?.uid || 'unknown',
+        updatedAt: new Date().toISOString(),
       };
       if (retailPriceValue !== null && Number.isFinite(retailPriceValue)) purchaseDoc.retailPrice = retailPriceValue;
       if (unitPriceValue !== null && Number.isFinite(unitPriceValue)) purchaseDoc.unitPrice = unitPriceValue;
 
-      const medicineUpdate: any = {
-        stock: increment(totalUnits),
-        unitsPerBox,
-        costPrice,
-        batchNo: formData.batchNo,
-        expiryDate: formData.expiryDate,
-        supplierId: formData.supplierId || '',
-        supplierName: medicineSupplierName,
-      };
-      if (retailPriceValue !== null && Number.isFinite(retailPriceValue)) medicineUpdate.retailPrice = retailPriceValue;
-      if (unitPriceValue !== null && Number.isFinite(unitPriceValue)) medicineUpdate.unitPrice = unitPriceValue;
+      if (editingPurchase) {
+        if (!canEdit) return;
+        const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
+        const stockDelta = totalUnits - oldUnits;
+        if (selectedMedicine && Number(selectedMedicine.stock || 0) + stockDelta < 0) {
+          setFormError('This change would make the batch stock negative. Reduce the adjustment or correct current stock first.');
+          return;
+        }
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'purchases', editingPurchase.id), {
+          ...purchaseDoc,
+          medicineId: editingPurchase.medicineId || selectedMedicine.id,
+          updatedBy: auth.currentUser?.uid || 'unknown',
+        });
+        if (selectedMedicine) {
+          batch.update(doc(db, 'medicines', selectedMedicine.id), {
+            stock: increment(stockDelta),
+            unitsPerBox,
+            costPrice,
+            retailPrice: retailPriceValue ?? Number(selectedMedicine.retailPrice || selectedMedicine.price || 0),
+            unitPrice: unitPriceValue ?? Number(selectedMedicine.unitPrice || 0),
+            expiryDate: formData.expiryDate,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        await batch.commit();
+        setSuccessMsg(`✓ Updated purchase for "${selectedMedicine.name}"`);
+      } else {
+        const batchNo = formData.batchNo.trim() || selectedMedicine.batchNo || '';
+        const batchTarget = await ensureMedicinePurchaseBatch(selectedMedicine, {
+          batchNo,
+          expiryDate: formData.expiryDate || selectedMedicine.expiryDate || '',
+          stock: totalUnits,
+          unitsPerBox,
+          costPrice,
+          retailPrice: retailPriceValue ?? Number(selectedMedicine.retailPrice || selectedMedicine.price || 0),
+          unitPrice: unitPriceValue ?? Number(selectedMedicine.unitPrice || 0),
+          supplierId: formData.supplierId || '',
+          supplierName: medicineSupplierName,
+        }, medicines);
+        purchaseDoc.medicineId = batchTarget.medicineId;
+        purchaseDoc.batchNo = batchNo;
+        purchaseDoc.createdAt = new Date().toISOString();
+        const batch = writeBatch(db);
+        batch.set(doc(collection(db, 'purchases')), purchaseDoc);
+        if (!batchTarget.created) {
+          batch.update(doc(db, 'medicines', batchTarget.medicineId), {
+            stock: increment(totalUnits),
+            unitsPerBox,
+            costPrice,
+            retailPrice: retailPriceValue ?? Number(selectedMedicine.retailPrice || selectedMedicine.price || 0),
+            unitPrice: unitPriceValue ?? Number(selectedMedicine.unitPrice || 0),
+            expiryDate: formData.expiryDate || selectedMedicine.expiryDate || '',
+            supplierId: formData.supplierId || '',
+            supplierName: medicineSupplierName,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        await batch.commit();
+        setSuccessMsg(`✓ Recorded ${selectedMedicine.name}, batch ${batchNo || 'N/A'} (${totalUnits} units)`);
+      }
 
-      await addDoc(collection(db, 'purchases'), purchaseDoc);
-      await updateDoc(doc(db, 'medicines', selectedMedicine.id), medicineUpdate);
-
-      setIsModalOpen(false); setSelectedMedicine(null); setMedSearch('');
+      setIsModalOpen(false); setSelectedMedicine(null); setEditingPurchase(null); setMedSearch('');
       setFormData({ supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: '', date: today(), notes: '' });
-      setSuccessMsg(`✓ Added ${totalUnits} units to "${selectedMedicine.name}"`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'purchases');
+      setFormError(handleFirestoreError(error, editingPurchase ? OperationType.UPDATE : OperationType.CREATE, 'purchases'));
     }
+  };
+
+  const openEditPurchase = (purchase: any) => {
+    if (!canEdit) return;
+    const medicine = medicines.find(item => item.id === purchase.medicineId);
+    if (!medicine) {
+      setFormError('The medicine batch linked to this purchase is not available.');
+      return;
+    }
+    const unitsPerBox = Math.max(1, Number(purchase.unitsPerBox || medicine.unitsPerBox || 1));
+    setEditingPurchase(purchase);
+    setSelectedMedicine(medicine);
+    setMedSearch(medicine.name);
+    setFormData({
+      supplierId: purchase.supplierId || medicine.supplierId || '',
+      boxesPurchased: String(purchase.boxesPurchased ?? purchase.boxes ?? 0),
+      looseUnitsPurchased: String(purchase.looseUnitsPurchased ?? purchase.looseUnits ?? 0),
+      unitsPerBox: String(unitsPerBox),
+      costPrice: String(purchase.costPrice ?? purchase.costPerBox ?? medicine.costPrice ?? ''),
+      retailPrice: String(purchase.retailPrice ?? medicine.retailPrice ?? medicine.price ?? ''),
+      unitPrice: String(purchase.unitPrice ?? medicine.unitPrice ?? ''),
+      batchNo: purchase.batchNo || medicine.batchNo || '',
+      expiryDate: purchase.expiryDate || medicine.expiryDate || '',
+      date: purchase.date || today(),
+      notes: purchase.notes || '',
+    });
+    setFormError('');
+    setIsModalOpen(true);
   };
 
   const formatStock = (stock: number, unitsPerBox: number) => {
@@ -137,7 +216,13 @@ export function Purchases() {
     return `${loose} loose`;
   };
 
-  const closeModal = () => { setIsModalOpen(false); setSelectedMedicine(null); setMedSearch(''); };
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedMedicine(null);
+    setEditingPurchase(null);
+    setMedSearch('');
+    setFormError('');
+  };
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -150,7 +235,7 @@ export function Purchases() {
       {/* Header */}
       <div className="flex justify-between items-center gap-3">
         <h1 className="text-xl md:text-2xl font-bold text-gray-900">Purchases</h1>
-        <button onClick={() => setIsModalOpen(true)}
+        <button onClick={() => { setEditingPurchase(null); setFormError(''); setIsModalOpen(true); }}
           className="bg-blue-600 text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 hover:bg-blue-700 text-sm font-medium shrink-0">
           <PackagePlus className="w-4 h-4" />
           <span className="hidden sm:inline">Record Purchase</span>
@@ -191,6 +276,11 @@ export function Purchases() {
                 <span className="text-gray-500">Cost/box: {formatCurrency(p.costPrice)}</span>
                 {p.expiryDate && <span className="text-gray-400">Exp: {format(new Date(p.expiryDate), 'MMM yyyy')}</span>}
               </div>
+              {canEdit && (
+                <button type="button" onClick={() => openEditPurchase(p)} className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800">
+                  <Edit2 className="w-3.5 h-3.5" /> Edit Purchase
+                </button>
+              )}
             </div>
           ))}
           {filteredPurchases.length === 0 && (
@@ -213,6 +303,7 @@ export function Purchases() {
                 <th className="p-4 font-medium">Qty Added</th>
                 <th className="p-4 font-medium">Cost/Box</th>
                 <th className="p-4 font-medium">Total Cost</th>
+                {canEdit && <th className="p-4 font-medium text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -234,10 +325,17 @@ export function Purchases() {
                   </td>
                   <td className="p-4 text-gray-600">{formatCurrency(p.costPrice)}</td>
                   <td className="p-4 font-medium text-gray-900">{formatCurrency(p.totalCost)}</td>
+                  {canEdit && (
+                    <td className="p-4 text-right">
+                      <button type="button" onClick={() => openEditPurchase(p)} title="Edit purchase" className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
               {filteredPurchases.length === 0 && (
-                <tr><td colSpan={7} className="p-8 text-center text-gray-500">
+                <tr><td colSpan={canEdit ? 8 : 7} className="p-8 text-center text-gray-500">
                   <PackagePlus className="w-10 h-10 text-gray-300 mx-auto mb-2" />No purchase records yet.
                 </td></tr>
               )}
@@ -251,11 +349,17 @@ export function Purchases() {
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-lg overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
             <div className="p-5 border-b border-gray-100 flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-bold text-gray-900">Record Purchase</h2>
+              <h2 className="text-xl font-bold text-gray-900">{editingPurchase ? 'Edit Purchase' : 'Record Purchase'}</h2>
               <button onClick={closeModal} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
 
             <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
+
+              {formError && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2.5 text-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {formError}
+                </div>
+              )}
 
               {/* Medicine search */}
               <div>
@@ -264,10 +368,11 @@ export function Purchases() {
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input type="text" placeholder="Search medicine by name..."
                     value={medSearch}
+                    disabled={Boolean(editingPurchase)}
                     onChange={e => { setMedSearch(e.target.value); setMedDropdownOpen(true); setSelectedMedicine(null); }}
                     onFocus={() => setMedDropdownOpen(true)}
-                    className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
-                  {medDropdownOpen && medSearch && filteredMeds.length > 0 && (
+                    className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500" />
+                  {!editingPurchase && medDropdownOpen && medSearch && filteredMeds.length > 0 && (
                     <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-auto">
                       <div className="px-4 py-1.5 text-xs text-gray-500 bg-gray-50 border-b">{filteredMeds.length} matching medicine records</div>
                       {filteredMeds.map(med => (
@@ -372,7 +477,9 @@ export function Purchases() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Batch No</label>
                   <input type="text" value={formData.batchNo}
                     onChange={e => setFormData({ ...formData, batchNo: e.target.value })}
-                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
+                    disabled={Boolean(editingPurchase)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500" />
+                  {editingPurchase && <p className="text-xs text-gray-400 mt-1">The linked batch is fixed; record a new purchase to add another batch.</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
@@ -395,8 +502,7 @@ export function Purchases() {
                 <div className="bg-green-50 border border-green-100 rounded-lg p-3">
                   <p className="text-sm font-medium text-green-800">Preview:</p>
                   <p className="text-sm text-green-700 mt-1">
-                    Stock ↑ by <strong>{(parseInt(formData.boxesPurchased || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
-                    {' '}→ New total: <strong>{selectedMedicine.stock + (parseInt(formData.boxesPurchased || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
+                    {editingPurchase ? 'Corrected purchase quantity' : 'New batch stock'}: <strong>{(parseInt(formData.boxesPurchased || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
                   </p>
                 </div>
               )}
@@ -406,7 +512,8 @@ export function Purchases() {
                   className="flex-1 py-2.5 text-gray-700 border border-gray-200 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
                 <button type="submit" disabled={!selectedMedicine}
                   className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                  <PackagePlus className="w-4 h-4" /> Save Purchase
+                  {editingPurchase ? <Edit2 className="w-4 h-4" /> : <PackagePlus className="w-4 h-4" />}
+                  {editingPurchase ? 'Save Changes' : 'Save Purchase'}
                 </button>
               </div>
             </form>

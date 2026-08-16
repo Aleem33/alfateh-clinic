@@ -8,7 +8,11 @@ import {
 } from '../lib/medicineCategories';
 import { findDuplicateMedicine } from '../lib/medicineIndex';
 import { subscribeToMedicines } from '../lib/medicineStore';
-import { createMedicineSafely, MedicineConflictError } from '../lib/medicineOperations';
+import {
+  createMedicineSafely,
+  ensureMedicinePurchaseBatch,
+  MedicineConflictError,
+} from '../lib/medicineOperations';
 
 type Supplier = {
   id: string;
@@ -229,14 +233,26 @@ export function SupplierMedicinesPanel({
     const costPricePerUnit = costPrice / unitsPerBox;
     const totalCost = totalUnitsAdded * costPricePerUnit;
     const timestamp = new Date().toISOString();
+    const batchNo = purchaseForm.batchNo.trim() || purchasingMedicine.batchNo || '';
 
     setSaving(true);
     setError('');
     try {
+      const batchTarget = await ensureMedicinePurchaseBatch(purchasingMedicine, {
+        batchNo,
+        expiryDate: purchaseForm.expiryDate || purchasingMedicine.expiryDate || '',
+        stock: totalUnitsAdded,
+        unitsPerBox,
+        costPrice,
+        retailPrice,
+        unitPrice,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+      }, medicines);
       const batch = writeBatch(db);
       const purchaseRef = doc(collection(db, 'purchases'));
       batch.set(purchaseRef, {
-        medicineId: purchasingMedicine.id,
+        medicineId: batchTarget.medicineId,
         medicineName: purchasingMedicine.name,
         supplierId: supplier.id,
         supplierName: supplier.name,
@@ -253,7 +269,7 @@ export function SupplierMedicinesPanel({
         retailPrice,
         unitPrice,
         totalCost,
-        batchNo: purchaseForm.batchNo.trim(),
+        batchNo,
         expiryDate: purchaseForm.expiryDate || '',
         invoiceNo: purchaseForm.invoiceNo.trim(),
         notes: purchaseForm.notes.trim(),
@@ -261,23 +277,24 @@ export function SupplierMedicinesPanel({
         addedBy: auth.currentUser?.uid || 'unknown',
         createdAt: timestamp,
       });
-      batch.update(doc(db, 'medicines', purchasingMedicine.id), {
-        stock: increment(totalUnitsAdded),
-        unitsPerBox,
-        costPrice,
-        retailPrice,
-        unitPrice,
-        batchNo: purchaseForm.batchNo.trim() || purchasingMedicine.batchNo || '',
-        expiryDate: purchaseForm.expiryDate || purchasingMedicine.expiryDate || '',
-        supplierId: supplier.id,
-        supplierName: supplier.name,
-        updatedAt: timestamp,
-      });
+      if (!batchTarget.created) {
+        batch.update(doc(db, 'medicines', batchTarget.medicineId), {
+          stock: increment(totalUnitsAdded),
+          unitsPerBox,
+          costPrice,
+          retailPrice,
+          unitPrice,
+          expiryDate: purchaseForm.expiryDate || purchasingMedicine.expiryDate || '',
+          supplierId: supplier.id,
+          supplierName: supplier.name,
+          updatedAt: timestamp,
+        });
+      }
       await batch.commit();
 
       setPurchasingMedicine(null);
       setPurchaseForm(null);
-      setSuccessMessage(`Purchase recorded: ${totalUnitsAdded} units added to ${purchasingMedicine.name}.`);
+      setSuccessMessage(`Purchase recorded: ${purchasingMedicine.name}, batch ${batchNo || 'N/A'} (${totalUnitsAdded} units).`);
       window.setTimeout(() => setSuccessMessage(''), 4000);
     } catch (purchaseError) {
       setError('Purchase could not be recorded. Please try again.');

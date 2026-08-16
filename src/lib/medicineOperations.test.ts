@@ -28,7 +28,7 @@ vi.mock('./medicineStore', () => ({
   }),
 }));
 
-import { createMedicineSafely, MedicineConflictError } from './medicineOperations';
+import { createMedicineSafely, ensureMedicinePurchaseBatch, MedicineConflictError } from './medicineOperations';
 
 const input = {
   name: 'Novidat 200 mg',
@@ -85,5 +85,53 @@ describe('createMedicineSafely', () => {
 
     await expect(createMedicineSafely({ ...input, supplierId: 'supplier-b' })).resolves.toBe('auto-generated-id');
     expect(firestore.addDoc).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ensureMedicinePurchaseBatch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('navigator', { onLine: true });
+    store.all = [];
+    firestore.getDocsFromServer.mockResolvedValue({ empty: true, docs: [] });
+    firestore.addDoc.mockResolvedValue({ id: 'new-batch-id' });
+  });
+
+  const source = { id: 'batch-a', ...input, stock: 10, retailPrice: 330, unitPrice: 330 };
+  const purchase = {
+    batchNo: 'B-2', expiryDate: '2027-12-31', stock: 5, unitsPerBox: 1,
+    costPrice: 210, retailPrice: 340, unitPrice: 340,
+    supplierId: 'supplier-a', supplierName: 'Ahsan Trader',
+  };
+
+  it('keeps stock on the selected record when the purchased batch already exists', async () => {
+    await expect(ensureMedicinePurchaseBatch(source, { ...purchase, batchNo: 'B-1' }, [source])).resolves.toEqual({
+      medicineId: 'batch-a',
+      created: false,
+    });
+    expect(firestore.addDoc).not.toHaveBeenCalled();
+  });
+
+  it('routes a repeat purchase into an existing matching batch record', async () => {
+    const batchB = { ...source, id: 'batch-b', batchNo: 'B-2', stock: 3 };
+    await expect(ensureMedicinePurchaseBatch(source, purchase, [source, batchB])).resolves.toEqual({
+      medicineId: 'batch-b',
+      created: false,
+    });
+    expect(firestore.addDoc).not.toHaveBeenCalled();
+  });
+
+  it('creates a separate medicine record for a genuinely new batch', async () => {
+    await expect(ensureMedicinePurchaseBatch(source, purchase, [source])).resolves.toEqual({
+      medicineId: 'new-batch-id',
+      created: true,
+    });
+    expect(firestore.addDoc.mock.calls[0][1]).toMatchObject({
+      name: source.name,
+      batchNo: 'B-2',
+      stock: 5,
+      createdFromMedicineId: 'batch-a',
+      createdFromPurchase: true,
+    });
   });
 });

@@ -88,6 +88,66 @@ export async function createMedicineSafely(
   return created.id;
 }
 
+type MedicineBatchInput = {
+  batchNo: string;
+  expiryDate?: string;
+  stock: number;
+  unitsPerBox: number;
+  costPrice: number;
+  retailPrice?: number;
+  unitPrice?: number;
+  supplierId?: string;
+  supplierName?: string;
+};
+
+export async function ensureMedicinePurchaseBatch(
+  sourceMedicine: MedicineRecord,
+  batchInput: MedicineBatchInput,
+  knownMedicines: MedicineRecord[],
+): Promise<{ medicineId: string; created: boolean }> {
+  const candidate = {
+    name: sourceMedicine.name,
+    category: sourceMedicine.category || sourceMedicine.form,
+    form: sourceMedicine.form || sourceMedicine.category,
+    batchNo: batchInput.batchNo.trim(),
+    supplierId: batchInput.supplierId || sourceMedicine.supplierId || '',
+    supplierName: batchInput.supplierName || sourceMedicine.supplierName || '',
+  };
+  const existing = findDuplicateMedicine(knownMedicines, candidate);
+  if (existing) return { medicineId: existing.id, created: false };
+
+  const newBatch = {
+    name: sourceMedicine.name,
+    nameUrdu: sourceMedicine.nameUrdu || '',
+    genericName: sourceMedicine.genericName || '',
+    manufacturer: sourceMedicine.manufacturer || '',
+    category: candidate.category,
+    form: candidate.form,
+    batchNo: candidate.batchNo,
+    expiryDate: batchInput.expiryDate || '',
+    stock: batchInput.stock,
+    unitsPerBox: batchInput.unitsPerBox,
+    costPrice: batchInput.costPrice,
+    retailPrice: batchInput.retailPrice ?? Number(sourceMedicine.retailPrice || sourceMedicine.price || 0),
+    unitPrice: batchInput.unitPrice ?? Number(sourceMedicine.unitPrice || 0),
+    reorderLevel: Number(sourceMedicine.reorderLevel || 10),
+    supplierId: candidate.supplierId,
+    supplierName: candidate.supplierName,
+    createdFromMedicineId: sourceMedicine.id,
+    createdFromPurchase: true,
+  };
+
+  try {
+    const medicineId = await createMedicineSafely(newBatch, knownMedicines);
+    return { medicineId, created: true };
+  } catch (error) {
+    if (error instanceof MedicineConflictError && !error.archived && error.medicineId) {
+      return { medicineId: error.medicineId, created: false };
+    }
+    throw error;
+  }
+}
+
 async function writeMedicineAudit(action: 'archive' | 'restore', medicine: MedicineRecord) {
   try {
     await addDoc(collection(db, 'auditLogs'), {
