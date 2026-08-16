@@ -137,6 +137,8 @@ export function Billing() {
       return [...prev, {
         cartItemId, medicineId: med.id, name: med.name, sellType, price,
         costPrice: med.costPrice || 0, quantity: 1,
+        batchNo: med.batchNo || '', expiryDate: med.expiryDate || '',
+        supplierName: med.supplierName || '',
         discountType: 'rs' as 'rs' | 'pct', discountValue: 0, itemDiscount: 0,
         total: price, unitsPerBox: med.unitsPerBox || 1,
       }];
@@ -242,9 +244,15 @@ export function Billing() {
   const loadPrescription = (order: any) => {
     const newItems: any[] = [];
     for (const rx of (order.prescriptions || [])) {
-      const med = medicines.find(
+      const matchingBatches = medicines.filter(
         m => m.name.toLowerCase().trim() === rx.name.toLowerCase().trim() && m.stock > 0
       );
+      if (matchingBatches.length > 1) {
+        setStockError(`${rx.name} has multiple batches. Search it and select the batch to sell.`);
+        setTimeout(() => setStockError(''), 5000);
+        continue;
+      }
+      const med = matchingBatches[0];
       if (!med) continue;
       const cartItemId = `${med.id}-unit`;
       if (newItems.find(i => i.cartItemId === cartItemId) || cart.find(i => i.cartItemId === cartItemId)) continue;
@@ -256,6 +264,9 @@ export function Billing() {
         sellType: 'unit',
         price,
         costPrice: med.costPrice || 0,
+        batchNo: med.batchNo || '',
+        expiryDate: med.expiryDate || '',
+        supplierName: med.supplierName || '',
         quantity: 1,
         discountType: 'rs' as 'rs' | 'pct',
         discountValue: 0,
@@ -306,6 +317,7 @@ export function Billing() {
           receiptNo,
           medicineId: item.medicineId,
           medicineName: item.name,
+          batchNo: item.batchNo || '',
           quantity: -unitsToDeduct,
           deviceReceiptNo: receiptNo,
           createdAt: new Date().toISOString(),
@@ -365,7 +377,7 @@ export function Billing() {
             )}
           </button>
         </div>
-        <p className="mt-2 text-xs text-gray-500">Showing {filteredMedicines.length} matching in-stock records</p>
+        <p className="mt-2 text-xs text-gray-500">Showing {filteredMedicines.length} matching in-stock batch records. Select the exact batch you are selling.</p>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -373,7 +385,7 @@ export function Billing() {
             <div key={med.id} className="p-3 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all bg-white flex flex-col">
               <div className="flex-1">
                 <h3 className="font-bold text-gray-900 line-clamp-2 text-sm leading-tight">{med.name}</h3>
-                <p className="text-[11px] text-gray-400 mt-0.5">{med.form} • Batch: {med.batchNo || 'N/A'}</p>
+                <p className="text-[11px] font-semibold text-orange-700 bg-orange-50 border border-orange-100 rounded px-1.5 py-0.5 mt-1 inline-block">Batch: {med.batchNo || 'N/A'}</p>
                 <p className="text-[11px] text-gray-400">{med.supplierName || 'No supplier'}</p>
                 <p className="text-[11px] font-semibold text-blue-600 mt-1">{formatStock(med.stock, med.unitsPerBox)}</p>
                 {med.costPrice > 0 && (
@@ -537,6 +549,7 @@ export function Billing() {
                     {item.sellType}
                   </span>
                   <span className="text-[10px] text-gray-400">{formatCurrency(item.price)} each</span>
+                  <span className="text-[10px] font-semibold text-orange-700">Batch: {item.batchNo || 'N/A'}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
@@ -785,6 +798,7 @@ export function Billing() {
                 <td className="py-1">
                   <div className="line-clamp-1">{item.name}</div>
                   <div className="text-xs text-gray-500">{item.sellType === 'box' ? '(Box)' : '(Unit)'} @ {formatCurrency(item.price)}</div>
+                  <div className="text-xs">Batch: {item.batchNo || 'N/A'}</div>
                   {item.itemDiscount > 0 && <div className="text-xs">Disc: -{formatCurrency(item.itemDiscount)}</div>}
                 </td>
                 <td className="text-center py-1">{item.quantity}</td>

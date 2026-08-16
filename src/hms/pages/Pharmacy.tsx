@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, increment } from 'firebase/firestore';
+import { collection, onSnapshot, updateDoc, doc, increment, writeBatch } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
@@ -13,7 +13,7 @@ import {
 } from '../../lib/medicineCategories';
 import { findDuplicateMedicine, getMedicineIdentity, getMedicineSearchText, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
-import { createMedicineSafely, MedicineConflictError } from '../../lib/medicineOperations';
+import { createMedicineSafely, ensureMedicinePurchaseBatch, MedicineConflictError } from '../../lib/medicineOperations';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -61,7 +61,7 @@ function calcQty(freq: string, dur: string, prescription?: any): number {
   return q > 0 ? q : 1;
 }
 
-export function Pharmacy() {
+export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: boolean }) {
   const { alert } = useAppDialog();
   const { categories } = useMedicineCategories();
   const [medicines, setMedicines]           = useState<any[]>([]);
@@ -74,6 +74,7 @@ export function Pharmacy() {
   const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'expiring'>('all');
   const [showMedModal, setShowMedModal]           = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<any | null>(null);
   const [editMedId, setEditMedId]   = useState<string | null>(null);
   const [medForm, setMedForm]       = useState(emptyMed);
   const [purchaseForm, setPurchaseForm] = useState({
@@ -109,11 +110,19 @@ export function Pharmacy() {
     const items = (order.prescriptions || []).map((p: any) => {
       const qty     = calcQty(p.frequency, p.duration, p);
       const pName = normalizeMedicineText(p.name);
-      const matched = pName ? (medicines.find(m => {
+      const matches = pName ? medicines.filter(m => {
         const mName = normalizeMedicineText(m.name);
-        return mName.includes(pName) || pName.includes(mName);
-      }) || null) : null;
-      return { ...p, qty, matchedId: matched?.id || '', matchedName: matched?.name || '' };
+        return (mName.includes(pName) || pName.includes(mName)) && Number(m.stock || 0) > 0;
+      }) : [];
+      const matched = matches.length === 1 ? matches[0] : null;
+      return {
+        ...p,
+        qty,
+        matchedId: matched?.id || '',
+        matchedName: matched?.name || '',
+        matchedBatchNo: matched?.batchNo || '',
+        requiresBatchSelection: matches.length > 1,
+      };
     });
     setDispenseItems(items);
     setSelectedOrder(order);
@@ -126,6 +135,8 @@ export function Pharmacy() {
       if (key === 'matchedId') {
         const med = medicines.find(m => m.id === value);
         next[idx].matchedName = med?.name || '';
+        next[idx].matchedBatchNo = med?.batchNo || '';
+        next[idx].requiresBatchSelection = false;
       }
       return next;
     });
@@ -142,7 +153,7 @@ export function Pharmacy() {
       }
       await updateDoc(doc(db, 'pharmacyOrders', selectedOrder.id), {
         status: 'dispensed', dispensedAt: nowISO(),
-        dispensedItems: toDispense.map(i => ({ name: i.name, matchedName: i.matchedName, qty: i.qty, frequency: i.frequency, duration: i.duration })),
+        dispensedItems: toDispense.map(i => ({ name: i.name, matchedName: i.matchedName, batchNo: i.matchedBatchNo || '', medicineId: i.matchedId, qty: i.qty, frequency: i.frequency, duration: i.duration })),
       });
       setSelectedOrder(null); setDispenseItems([]);
     } catch (e: any) { await alert('Dispense failed: ' + (e.message || 'Unknown error'), 'Dispense Failed'); }
@@ -231,8 +242,63 @@ export function Pharmacy() {
       const totalCost = unitsAdded * costPricePerUnit;
       const retailPrice = parseFloat(purchaseForm.retailPrice || '0');
       const unitPrice = parseFloat(purchaseForm.unitPrice || '0');
-      await addDoc(collection(db, 'purchases'), {
+      const batchNo = purchaseForm.batchNo.trim() || med.batchNo || '';
+      if (editingPurchase) {
+        if (!canEditPurchases) return;
+        const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
+        const stockDelta = unitsAdded - oldUnits;
+        if (Number(med.stock || 0) + stockDelta < 0) {
+          setError('This correction would make the linked batch stock negative.');
+          return;
+        }
+        const editBatch = writeBatch(db);
+        editBatch.update(doc(db, 'purchases', editingPurchase.id), {
+          ...purchaseForm,
+          medicineId: med.id,
+          medicineName: med.name,
+          batchNo: editingPurchase.batchNo || med.batchNo || '',
+          boxes: boxesPurchased,
+          boxesPurchased,
+          looseUnits: looseUnitsPurchased,
+          looseUnitsPurchased,
+          totalUnitsAdded: unitsAdded,
+          unitsAdded,
+          unitsPerBox,
+          totalCost,
+          costPerBox,
+          costPrice: costPerBox,
+          costPricePerUnit,
+          retailPrice,
+          unitPrice,
+          updatedAt: nowISO(),
+        });
+        editBatch.update(doc(db, 'medicines', med.id), {
+          stock: increment(stockDelta),
+          unitsPerBox,
+          costPrice: costPerBox,
+          retailPrice,
+          unitPrice,
+          expiryDate: purchaseForm.expiryDate || med.expiryDate,
+          updatedAt: nowISO(),
+        });
+        await editBatch.commit();
+      } else {
+      const batchTarget = await ensureMedicinePurchaseBatch(med, {
+        batchNo,
+        expiryDate: purchaseForm.expiryDate || med.expiryDate || '',
+        stock: unitsAdded,
+        unitsPerBox,
+        costPrice: costPerBox,
+        retailPrice,
+        unitPrice,
+        supplierId: purchaseForm.supplierId || med.supplierId || '',
+        supplierName: purchaseForm.supplierName || med.supplierName || '',
+      }, medicines);
+      const batch = writeBatch(db);
+      batch.set(doc(collection(db, 'purchases')), {
         ...purchaseForm,
+        medicineId: batchTarget.medicineId,
+        batchNo,
         boxes: boxesPurchased,
         boxesPurchased,
         looseUnits: looseUnitsPurchased,
@@ -248,20 +314,54 @@ export function Pharmacy() {
         unitPrice,
         createdAt: nowISO(),
       });
-      await updateDoc(doc(db, 'medicines', purchaseForm.medicineId), {
-        stock: increment(unitsAdded),
-        unitsPerBox,
-        costPrice: costPerBox,
-        retailPrice,
-        unitPrice,
-        batchNo: purchaseForm.batchNo || med.batchNo,
-        expiryDate: purchaseForm.expiryDate || med.expiryDate,
-        updatedAt: nowISO(),
-      });
+      if (!batchTarget.created) {
+        batch.update(doc(db, 'medicines', batchTarget.medicineId), {
+          stock: increment(unitsAdded),
+          unitsPerBox,
+          costPrice: costPerBox,
+          retailPrice,
+          unitPrice,
+          expiryDate: purchaseForm.expiryDate || med.expiryDate,
+          supplierId: purchaseForm.supplierId || med.supplierId || '',
+          supplierName: purchaseForm.supplierName || med.supplierName || '',
+          updatedAt: nowISO(),
+        });
+      }
+      await batch.commit();
+      }
       setShowPurchaseModal(false);
+      setEditingPurchase(null);
       setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', looseUnits: '0', unitsPerBox: '1', costPerBox: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
     } catch (e: any) { setError(e instanceof MedicineConflictError ? e.message : e.message); }
     finally { setSaving(false); }
+  };
+
+  const openEditPurchase = (purchase: any) => {
+    if (!canEditPurchases) return;
+    const medicine = medicines.find(m => m.id === purchase.medicineId);
+    if (!medicine) {
+      setError('The medicine batch linked to this purchase is not available.');
+      return;
+    }
+    setEditingPurchase(purchase);
+    setPurchaseForm({
+      medicineId: medicine.id,
+      medicineName: medicine.name,
+      supplierId: purchase.supplierId || medicine.supplierId || '',
+      supplierName: purchase.supplierName || medicine.supplierName || '',
+      boxes: String(purchase.boxesPurchased ?? purchase.boxes ?? 0),
+      looseUnits: String(purchase.looseUnitsPurchased ?? purchase.looseUnits ?? 0),
+      unitsPerBox: String(purchase.unitsPerBox || medicine.unitsPerBox || 1),
+      costPerBox: String(purchase.costPerBox ?? purchase.costPrice ?? medicine.costPrice ?? ''),
+      retailPrice: String(purchase.retailPrice ?? medicine.retailPrice ?? medicine.price ?? ''),
+      unitPrice: String(purchase.unitPrice ?? medicine.unitPrice ?? ''),
+      batchNo: purchase.batchNo || medicine.batchNo || '',
+      expiryDate: purchase.expiryDate || medicine.expiryDate || today(),
+      invoiceNo: purchase.invoiceNo || '',
+      date: purchase.date || today(),
+    });
+    setError('');
+    setShowPurchaseModal(true);
   };
 
   const mf = (k: string, v: string) => setMedForm(p => ({ ...p, [k]: v }));
@@ -314,7 +414,7 @@ export function Pharmacy() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => { setError(''); setShowPurchaseModal(true); }} className="flex items-center gap-2 border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50">
+          <button onClick={() => { setEditingPurchase(null); setError(''); setShowPurchaseModal(true); }} className="flex items-center gap-2 border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50">
             <Plus className="w-4 h-4" /> New Purchase
           </button>
           <button onClick={() => { setEditMedId(null); setMedForm({ ...emptyMed, category: getDefaultMedicineCategory(categories) }); setError(''); setShowMedModal(true); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
@@ -416,13 +516,13 @@ export function Pharmacy() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>{['Date', 'Medicine', 'Supplier', 'Boxes', 'Cost/Box', 'Total', 'Invoice', 'Batch'].map(h => (
+              <tr>{['Date', 'Medicine', 'Supplier', 'Boxes', 'Cost/Box', 'Total', 'Invoice', 'Batch', ...(canEditPurchases ? ['Actions'] : [])].map(h => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
               ))}</tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filteredPurchases.length === 0
-                ? <tr><td colSpan={8} className="text-center py-12 text-gray-400">No purchases yet</td></tr>
+                ? <tr><td colSpan={canEditPurchases ? 9 : 8} className="text-center py-12 text-gray-400">No purchases yet</td></tr>
                 : filteredPurchases.map(p => (
                   <tr key={p.id} className="hover:bg-gray-50/50">
                     <td className="px-4 py-3 text-sm text-gray-600">{formatDate(p.date)}</td>
@@ -433,6 +533,11 @@ export function Pharmacy() {
                     <td className="px-4 py-3 text-sm font-medium text-gray-800">Rs. {p.totalCost?.toLocaleString()}</td>
                     <td className="px-4 py-3 text-xs text-gray-400">{p.invoiceNo || '—'}</td>
                     <td className="px-4 py-3 text-xs font-mono text-gray-400">{p.batchNo || '—'}</td>
+                    {canEditPurchases && (
+                      <td className="px-4 py-3">
+                        <button type="button" onClick={() => openEditPurchase(p)} title="Edit purchase" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button>
+                      </td>
+                    )}
                   </tr>
                 ))}
             </tbody>
@@ -560,11 +665,16 @@ export function Pharmacy() {
                         onChange={e => updateDispenseItem(idx, 'matchedId', e.target.value)}
                         className={`flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${item.matchedId ? 'border-green-300 bg-green-50' : 'border-gray-200'}`}>
                         <option value="">— Select medicine from stock —</option>
-                        {medicines.map(m => (
-                          <option key={m.id} value={m.id}>{m.name} (stock: {m.stock})</option>
+                        {medicines.filter(m => Number(m.stock || 0) > 0).map(m => (
+                          <option key={m.id} value={m.id}>{m.name} — Batch {m.batchNo || 'N/A'} — {m.supplierName || 'No supplier'} — Stock {m.stock}</option>
                         ))}
                       </select>
                     </div>
+                    {item.requiresBatchSelection && !item.matchedId && (
+                      <p className="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2.5 py-2">
+                        Multiple batches are available. Select the exact batch to dispense.
+                      </p>
+                    )}
                     {isLow && (
                       <p className="text-xs text-red-600 flex items-center gap-1">
                         <AlertTriangle className="w-3.5 h-3.5" />
@@ -680,8 +790,8 @@ export function Pharmacy() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <h2 className="font-semibold text-gray-900">Record Purchase</h2>
-              <button onClick={() => setShowPurchaseModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              <h2 className="font-semibold text-gray-900">{editingPurchase ? 'Edit Purchase' : 'Record Purchase'}</h2>
+              <button onClick={() => { setShowPurchaseModal(false); setEditingPurchase(null); }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="p-5 space-y-4">
               {error && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg">{error}</div>}
@@ -690,7 +800,7 @@ export function Pharmacy() {
                 {purchaseForm.medicineId ? (
                   <div className="flex items-center gap-2 border border-green-200 bg-green-50 rounded-lg px-3 py-2">
                     <span className="text-sm font-medium text-green-800 flex-1">{purchaseForm.medicineName}</span>
-                    <button onClick={() => setPurchaseForm(p => ({ ...p, medicineId: '', medicineName: '' }))}><X className="w-3.5 h-3.5 text-green-600" /></button>
+                    {!editingPurchase && <button onClick={() => setPurchaseForm(p => ({ ...p, medicineId: '', medicineName: '' }))}><X className="w-3.5 h-3.5 text-green-600" /></button>}
                   </div>
                 ) : (
                   <div className="relative">
@@ -727,12 +837,13 @@ export function Pharmacy() {
                       min={key === 'unitsPerBox' ? 1 : 0}
                       step={type === 'number' ? '0.01' : undefined}
                       value={(purchaseForm as any)[key]}
+                      disabled={editingPurchase && key === 'batchNo'}
                       onChange={e => key === 'retailPrice'
                         ? updatePurchaseRetailAndUnits(e.target.value, purchaseForm.unitsPerBox)
                         : key === 'unitsPerBox'
                           ? updatePurchaseRetailAndUnits(purchaseForm.retailPrice, e.target.value)
                           : pf(key, e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
                   </div>
                 ))}
@@ -772,8 +883,8 @@ export function Pharmacy() {
               )}
             </div>
             <div className="flex gap-3 px-5 pb-5">
-              <button onClick={() => setShowPurchaseModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
-              <button onClick={handleSavePurchase} disabled={saving} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">{saving ? '...' : 'Save Purchase'}</button>
+              <button onClick={() => { setShowPurchaseModal(false); setEditingPurchase(null); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
+              <button onClick={handleSavePurchase} disabled={saving} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">{saving ? '...' : editingPurchase ? 'Save Changes' : 'Save Purchase'}</button>
             </div>
           </div>
         </div>

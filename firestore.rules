@@ -226,13 +226,15 @@ service cloud.firestore {
 
     match /posPurchases/{doc} {
       allow read: if isAuth();
-      allow create, update: if isAdmin() || isPharmacist();
+      allow create: if isAdmin() || isPharmacist();
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     match /purchases/{doc} {
       allow read: if isAuth();
-      allow create, update: if isAdmin() || isPharmacist();
+      allow create: if isAdmin() || isPharmacist();
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 

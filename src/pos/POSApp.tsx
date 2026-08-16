@@ -40,7 +40,7 @@ export function POSApp({ userRole, onSwitchApp, onLoginSuccess, onBack, onLogout
             {(isAdmin || r === 'pharmacist') && <Route index element={<Dashboard />} />}
             {(isAdmin || r === 'cashier')    && <Route path="billing"          element={<Billing />} />}
             {(isAdmin || r === 'pharmacist') && <Route path="medicines"        element={<Medicines canArchive={isAdmin} />} />}
-            {(isAdmin || r === 'pharmacist') && <Route path="purchases"        element={<Purchases />} />}
+            {(isAdmin || r === 'pharmacist') && <Route path="purchases"        element={<Purchases canEdit={isAdmin} />} />}
             {(isAdmin || r === 'pharmacist') && <Route path="purchase-returns" element={<PurchaseReturns />} />}
                                                  <Route path="sales"           element={<SalesHistory />} />
             {(isAdmin || r === 'cashier')    && <Route path="sale-returns"     element={<SalesReturns />} />}
