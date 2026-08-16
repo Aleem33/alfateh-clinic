@@ -28,7 +28,12 @@ vi.mock('./medicineStore', () => ({
   }),
 }));
 
-import { createMedicineSafely, ensureMedicinePurchaseBatch, MedicineConflictError } from './medicineOperations';
+import {
+  createMedicineSafely,
+  ensureMedicinePurchaseBatch,
+  findMedicinePurchaseBatch,
+  MedicineConflictError,
+} from './medicineOperations';
 
 const input = {
   name: 'Novidat 200 mg',
@@ -122,6 +127,7 @@ describe('ensureMedicinePurchaseBatch', () => {
   });
 
   it('creates a separate medicine record for a genuinely new batch', async () => {
+    const originalSource = { ...source };
     await expect(ensureMedicinePurchaseBatch(source, purchase, [source])).resolves.toEqual({
       medicineId: 'new-batch-id',
       created: true,
@@ -132,6 +138,17 @@ describe('ensureMedicinePurchaseBatch', () => {
       stock: 5,
       createdFromMedicineId: 'batch-a',
       createdFromPurchase: true,
+      costPrice: 210,
+      retailPrice: 340,
+      unitPrice: 340,
     });
+    expect(source).toEqual(originalSource);
+  });
+
+  it('identifies an existing batch before a purchase changes any prices', () => {
+    const batchB = { ...source, id: 'batch-b', batchNo: 'B-2', retailPrice: 410 };
+
+    expect(findMedicinePurchaseBatch(source, purchase, [source, batchB])).toBe(batchB);
+    expect(findMedicinePurchaseBatch(source, { ...purchase, batchNo: 'B-3' }, [source, batchB])).toBeUndefined();
   });
 });

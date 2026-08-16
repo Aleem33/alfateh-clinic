@@ -11,6 +11,7 @@ import { subscribeToMedicines } from '../lib/medicineStore';
 import {
   createMedicineSafely,
   ensureMedicinePurchaseBatch,
+  findMedicinePurchaseBatch,
   MedicineConflictError,
 } from '../lib/medicineOperations';
 
@@ -104,6 +105,7 @@ export function SupplierMedicinesPanel({
   const [showAddForm, setShowAddForm] = useState(false);
   const [purchasingMedicine, setPurchasingMedicine] = useState<any | null>(null);
   const [purchaseForm, setPurchaseForm] = useState<PurchaseForm | null>(null);
+  const [purchaseBatchMode, setPurchaseBatchMode] = useState<'existing' | 'new'>('existing');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -123,6 +125,7 @@ export function SupplierMedicinesPanel({
     setShowAddForm(false);
     setPurchasingMedicine(null);
     setPurchaseForm(null);
+    setPurchaseBatchMode('existing');
     setError('');
     setSuccessMessage('');
     setForm(makeEmptyForm(getDefaultMedicineCategory(categories)));
@@ -198,6 +201,7 @@ export function SupplierMedicinesPanel({
   const openPurchase = (medicine: any) => {
     setPurchasingMedicine(medicine);
     setPurchaseForm(makePurchaseForm(medicine));
+    setPurchaseBatchMode('existing');
     setError('');
   };
 
@@ -233,7 +237,21 @@ export function SupplierMedicinesPanel({
     const costPricePerUnit = costPrice / unitsPerBox;
     const totalCost = totalUnitsAdded * costPricePerUnit;
     const timestamp = new Date().toISOString();
-    const batchNo = purchaseForm.batchNo.trim() || purchasingMedicine.batchNo || '';
+    const batchNo = purchaseBatchMode === 'new'
+      ? purchaseForm.batchNo.trim()
+      : (purchaseForm.batchNo.trim() || purchasingMedicine.batchNo || '');
+    if (purchaseBatchMode === 'new' && !batchNo) {
+      setError('Enter a batch number for the new batch. Existing batches will not be changed.');
+      return;
+    }
+    if (purchaseBatchMode === 'new' && findMedicinePurchaseBatch(purchasingMedicine, {
+      batchNo,
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+    }, medicines)) {
+      setError(`Batch ${batchNo} already exists for this supplier. Choose Existing Batch or enter a different batch number.`);
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -294,6 +312,7 @@ export function SupplierMedicinesPanel({
 
       setPurchasingMedicine(null);
       setPurchaseForm(null);
+      setPurchaseBatchMode('existing');
       setSuccessMessage(`Purchase recorded: ${purchasingMedicine.name}, batch ${batchNo || 'N/A'} (${totalUnitsAdded} units).`);
       window.setTimeout(() => setSuccessMessage(''), 4000);
     } catch (purchaseError) {
@@ -565,7 +584,7 @@ export function SupplierMedicinesPanel({
               </div>
               <button
                 type="button"
-                onClick={() => { setPurchasingMedicine(null); setPurchaseForm(null); setError(''); }}
+                onClick={() => { setPurchasingMedicine(null); setPurchaseForm(null); setPurchaseBatchMode('existing'); setError(''); }}
                 className="p-1 text-gray-400 hover:text-gray-600"
               >
                 <X className="w-5 h-5" />
@@ -573,6 +592,21 @@ export function SupplierMedicinesPanel({
             </div>
             <form onSubmit={handlePurchaseSave} className="p-5 space-y-4">
               {error && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg">{error}</div>}
+
+              <div className="rounded-xl border border-gray-200 p-1 bg-gray-50 grid grid-cols-2 gap-1">
+                <button type="button" onClick={() => {
+                  setPurchaseBatchMode('existing');
+                  setPurchaseForm(makePurchaseForm(purchasingMedicine));
+                }} className={`rounded-lg px-3 py-2 text-sm font-medium ${purchaseBatchMode === 'existing' ? 'bg-white text-blue-700 shadow-sm border border-blue-200' : 'text-gray-500'}`}>
+                  Existing Batch
+                </button>
+                <button type="button" onClick={() => {
+                  setPurchaseBatchMode('new');
+                  setPurchaseForm(current => current ? ({ ...current, batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '' }) : current);
+                }} className={`rounded-lg px-3 py-2 text-sm font-medium ${purchaseBatchMode === 'new' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500'}`}>
+                  New Batch
+                </button>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
@@ -644,9 +678,12 @@ export function SupplierMedicinesPanel({
                   <label className="block text-xs font-medium text-gray-600 mb-1">Batch Number</label>
                   <input
                     value={purchaseForm.batchNo}
+                    disabled={purchaseBatchMode === 'existing'}
                     onChange={event => setPurchaseForm(current => current ? ({ ...current, batchNo: event.target.value }) : current)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100 disabled:text-gray-500"
                   />
+                  {purchaseBatchMode === 'existing' && <p className="text-[11px] text-gray-500 mt-1">Choose New Batch to enter another batch number and prices.</p>}
+                  {purchaseBatchMode === 'new' && <p className="text-[11px] text-emerald-600 mt-1">Required. Prices remain isolated from older batches.</p>}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Expiry Date</label>
@@ -707,13 +744,15 @@ export function SupplierMedicinesPanel({
                 </div>
               </div>
 
-              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm text-blue-700">
-                This purchase will be recorded for <strong>{supplier.name}</strong> and will increase <strong>{purchasingMedicine.name}</strong> stock.
+              <div className={`${purchaseBatchMode === 'new' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-blue-50 border-blue-100 text-blue-700'} border rounded-lg p-3 text-sm`}>
+                {purchaseBatchMode === 'new'
+                  ? <>A separate batch record will be created for <strong>{purchasingMedicine.name}</strong>. Existing batch prices will remain unchanged.</>
+                  : <>This purchase will update only batch <strong>{purchasingMedicine.batchNo || 'N/A'}</strong> for <strong>{supplier.name}</strong>.</>}
               </div>
               <div className="flex gap-3 pt-1">
                 <button
                   type="button"
-                  onClick={() => { setPurchasingMedicine(null); setPurchaseForm(null); setError(''); }}
+                  onClick={() => { setPurchasingMedicine(null); setPurchaseForm(null); setPurchaseBatchMode('existing'); setError(''); }}
                   className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-50"
                 >
                   Cancel

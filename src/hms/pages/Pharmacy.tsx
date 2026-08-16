@@ -13,7 +13,7 @@ import {
 } from '../../lib/medicineCategories';
 import { findDuplicateMedicine, getMedicineIdentity, getMedicineSearchText, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
-import { createMedicineSafely, ensureMedicinePurchaseBatch, MedicineConflictError } from '../../lib/medicineOperations';
+import { createMedicineSafely, ensureMedicinePurchaseBatch, findMedicinePurchaseBatch, MedicineConflictError } from '../../lib/medicineOperations';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -75,6 +75,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
   const [showMedModal, setShowMedModal]           = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<any | null>(null);
+  const [purchaseBatchMode, setPurchaseBatchMode] = useState<'existing' | 'new'>('existing');
   const [editMedId, setEditMedId]   = useState<string | null>(null);
   const [medForm, setMedForm]       = useState(emptyMed);
   const [purchaseForm, setPurchaseForm] = useState({
@@ -242,7 +243,9 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       const totalCost = unitsAdded * costPricePerUnit;
       const retailPrice = parseFloat(purchaseForm.retailPrice || '0');
       const unitPrice = parseFloat(purchaseForm.unitPrice || '0');
-      const batchNo = purchaseForm.batchNo.trim() || med.batchNo || '';
+      const batchNo = purchaseBatchMode === 'new'
+        ? purchaseForm.batchNo.trim()
+        : (purchaseForm.batchNo.trim() || med.batchNo || '');
       if (editingPurchase) {
         if (!canEditPurchases) return;
         const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
@@ -283,6 +286,18 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
         });
         await editBatch.commit();
       } else {
+      if (purchaseBatchMode === 'new' && !batchNo) {
+        setError('Enter a batch number for the new batch. Existing batches will not be changed.');
+        return;
+      }
+      if (purchaseBatchMode === 'new' && findMedicinePurchaseBatch(med, {
+        batchNo,
+        supplierId: purchaseForm.supplierId || med.supplierId || '',
+        supplierName: purchaseForm.supplierName || med.supplierName || '',
+      }, medicines)) {
+        setError(`Batch ${batchNo} already exists for this medicine and supplier. Select Existing Batch or enter a different batch number.`);
+        return;
+      }
       const batchTarget = await ensureMedicinePurchaseBatch(med, {
         batchNo,
         expiryDate: purchaseForm.expiryDate || med.expiryDate || '',
@@ -331,6 +346,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       }
       setShowPurchaseModal(false);
       setEditingPurchase(null);
+      setPurchaseBatchMode('existing');
       setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', looseUnits: '0', unitsPerBox: '1', costPerBox: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
     } catch (e: any) { setError(e instanceof MedicineConflictError ? e.message : e.message); }
     finally { setSaving(false); }
@@ -344,6 +360,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       return;
     }
     setEditingPurchase(purchase);
+    setPurchaseBatchMode('existing');
     setPurchaseForm({
       medicineId: medicine.id,
       medicineName: medicine.name,
@@ -381,6 +398,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       batchNo: m.batchNo || '',
       expiryDate: m.expiryDate || today(),
     }));
+    setPurchaseBatchMode('existing');
     setMedSearch('');
   };
   const updatePurchaseRetailAndUnits = (retail: string, units: string) => {
@@ -414,7 +432,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => { setEditingPurchase(null); setError(''); setShowPurchaseModal(true); }} className="flex items-center gap-2 border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50">
+          <button onClick={() => { setEditingPurchase(null); setPurchaseBatchMode('existing'); setError(''); setShowPurchaseModal(true); }} className="flex items-center gap-2 border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50">
             <Plus className="w-4 h-4" /> New Purchase
           </button>
           <button onClick={() => { setEditMedId(null); setMedForm({ ...emptyMed, category: getDefaultMedicineCategory(categories) }); setError(''); setShowMedModal(true); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
@@ -791,7 +809,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
           <div className="bg-white rounded-2xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <h2 className="font-semibold text-gray-900">{editingPurchase ? 'Edit Purchase' : 'Record Purchase'}</h2>
-              <button onClick={() => { setShowPurchaseModal(false); setEditingPurchase(null); }}><X className="w-5 h-5 text-gray-400" /></button>
+              <button onClick={() => { setShowPurchaseModal(false); setEditingPurchase(null); setPurchaseBatchMode('existing'); }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="p-5 space-y-4">
               {error && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg">{error}</div>}
@@ -818,6 +836,22 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
                   </div>
                 )}
               </div>
+              {purchaseForm.medicineId && !editingPurchase && (
+                <div className="rounded-xl border border-gray-200 p-1 bg-gray-50 grid grid-cols-2 gap-1">
+                  <button type="button" onClick={() => {
+                    const medicine = medicines.find(m => m.id === purchaseForm.medicineId);
+                    if (medicine) selectPurchaseMedicine(medicine);
+                  }} className={`rounded-lg px-3 py-2 text-sm font-medium ${purchaseBatchMode === 'existing' ? 'bg-white text-blue-700 shadow-sm border border-blue-200' : 'text-gray-500'}`}>
+                    Existing Batch
+                  </button>
+                  <button type="button" onClick={() => {
+                    setPurchaseBatchMode('new');
+                    setPurchaseForm(previous => ({ ...previous, batchNo: '', expiryDate: '', costPerBox: '', retailPrice: '', unitPrice: '' }));
+                  }} className={`rounded-lg px-3 py-2 text-sm font-medium ${purchaseBatchMode === 'new' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500'}`}>
+                    New Batch
+                  </button>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { label: 'Purchase Date', key: 'date', type: 'date' },
@@ -837,7 +871,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
                       min={key === 'unitsPerBox' ? 1 : 0}
                       step={type === 'number' ? '0.01' : undefined}
                       value={(purchaseForm as any)[key]}
-                      disabled={editingPurchase && key === 'batchNo'}
+                      disabled={key === 'batchNo' && (Boolean(editingPurchase) || purchaseBatchMode === 'existing')}
                       onChange={e => key === 'retailPrice'
                         ? updatePurchaseRetailAndUnits(e.target.value, purchaseForm.unitsPerBox)
                         : key === 'unitsPerBox'
@@ -845,6 +879,8 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
                           : pf(key, e.target.value)}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                     />
+                    {!editingPurchase && purchaseBatchMode === 'new' && key === 'batchNo' && <p className="text-[11px] text-emerald-600 mt-1">Required. This batch keeps its own prices.</p>}
+                    {!editingPurchase && purchaseBatchMode === 'existing' && key === 'batchNo' && <p className="text-[11px] text-gray-500 mt-1">Choose New Batch to enter another batch number and prices.</p>}
                   </div>
                 ))}
                 <div>
@@ -882,9 +918,18 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
                 </div>
               )}
             </div>
-            <div className="flex gap-3 px-5 pb-5">
-              <button onClick={() => { setShowPurchaseModal(false); setEditingPurchase(null); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
-              <button onClick={handleSavePurchase} disabled={saving} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">{saving ? '...' : editingPurchase ? 'Save Changes' : 'Save Purchase'}</button>
+            <div className="px-5 pb-5 space-y-3">
+              {!editingPurchase && purchaseForm.medicineId && (
+                <div className={`${purchaseBatchMode === 'new' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-blue-50 border-blue-100 text-blue-700'} border rounded-lg p-3 text-sm`}>
+                  {purchaseBatchMode === 'new'
+                    ? 'A separate medicine record will be created. Existing batch prices will remain unchanged.'
+                    : 'Only the selected batch stock and prices can be updated.'}
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => { setShowPurchaseModal(false); setEditingPurchase(null); setPurchaseBatchMode('existing'); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
+                <button onClick={handleSavePurchase} disabled={saving} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">{saving ? '...' : editingPurchase ? 'Save Changes' : 'Save Purchase'}</button>
+              </div>
             </div>
           </div>
         </div>

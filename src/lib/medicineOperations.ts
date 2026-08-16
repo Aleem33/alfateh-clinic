@@ -100,6 +100,21 @@ type MedicineBatchInput = {
   supplierName?: string;
 };
 
+export function findMedicinePurchaseBatch(
+  sourceMedicine: MedicineRecord,
+  batchInput: Pick<MedicineBatchInput, 'batchNo' | 'supplierId' | 'supplierName'>,
+  knownMedicines: MedicineRecord[],
+): MedicineRecord | undefined {
+  return findDuplicateMedicine(knownMedicines, {
+    name: sourceMedicine.name,
+    category: sourceMedicine.category || sourceMedicine.form,
+    form: sourceMedicine.form || sourceMedicine.category,
+    batchNo: batchInput.batchNo.trim(),
+    supplierId: batchInput.supplierId || sourceMedicine.supplierId || '',
+    supplierName: batchInput.supplierName || sourceMedicine.supplierName || '',
+  });
+}
+
 export async function ensureMedicinePurchaseBatch(
   sourceMedicine: MedicineRecord,
   batchInput: MedicineBatchInput,
@@ -113,7 +128,7 @@ export async function ensureMedicinePurchaseBatch(
     supplierId: batchInput.supplierId || sourceMedicine.supplierId || '',
     supplierName: batchInput.supplierName || sourceMedicine.supplierName || '',
   };
-  const existing = findDuplicateMedicine(knownMedicines, candidate);
+  const existing = findMedicinePurchaseBatch(sourceMedicine, batchInput, knownMedicines);
   if (existing) return { medicineId: existing.id, created: false };
 
   const newBatch = {
