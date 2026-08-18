@@ -382,8 +382,11 @@ export function Billing() {
         </div>
         <p className="mt-2 text-xs text-gray-500">Showing {medicineGroups.length} medicines across {filteredMedicines.length} in-stock batch records.</p>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+        <div className="hidden sm:grid grid-cols-[minmax(0,2fr)_minmax(90px,1fr)_minmax(110px,1fr)_auto] gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wide text-gray-500 sticky top-0 z-10">
+          <span>Medicine</span><span>Batch / Stock</span><span>Price</span><span className="text-center">Action</span>
+        </div>
+        <div className="divide-y divide-gray-100">
           {medicineGroups.map(group => {
             const med = group.batches[0];
             const hasMultipleBatches = group.batches.length > 1;
@@ -391,31 +394,30 @@ export function Billing() {
             const minRetail = Math.min(...retailPrices);
             const maxRetail = Math.max(...retailPrices);
             return (
-              <div key={group.key} className={`p-3 rounded-xl border hover:border-blue-400 hover:shadow-md transition-all bg-white flex flex-col ${hasMultipleBatches ? 'border-orange-200' : 'border-gray-200'}`}>
-              <div className="flex-1">
-                <h3 className="font-bold text-gray-900 line-clamp-2 text-sm leading-tight">{group.name}</h3>
-                {hasMultipleBatches ? (
-                  <p className="text-[11px] font-bold text-orange-700 bg-orange-50 border border-orange-200 rounded px-1.5 py-1 mt-1 inline-block">{group.batches.length} batches available</p>
-                ) : (
-                  <p className="text-[11px] font-semibold text-orange-700 bg-orange-50 border border-orange-100 rounded px-1.5 py-0.5 mt-1 inline-block">Batch: {med.batchNo || 'N/A'}</p>
-                )}
-                <p className="text-[11px] text-gray-400 mt-1">{hasMultipleBatches ? `${group.totalStock} total units` : (med.supplierName || 'No supplier')}</p>
-                <p className="text-[11px] font-semibold text-blue-600 mt-1">
+              <div key={group.key} className={`grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(90px,1fr)_minmax(110px,1fr)_auto] gap-2 sm:gap-3 items-center px-4 py-3 hover:bg-blue-50/50 transition-colors ${hasMultipleBatches ? 'border-l-4 border-l-orange-400' : 'border-l-4 border-l-transparent'}`}>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-gray-900 text-sm leading-tight truncate">{group.name}</h3>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-purple-700 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5">{group.form || 'Medicine'}</span>
+                    <span className="text-[11px] text-gray-500 truncate">{hasMultipleBatches ? `${group.batches.length} batches available` : (med.supplierName || 'No supplier')}</span>
+                  </div>
+                </div>
+                <div className="text-xs">
+                  <p className="font-semibold text-orange-700">{hasMultipleBatches ? `${group.batches.length} batches` : `Batch ${med.batchNo || 'N/A'}`}</p>
+                  <p className="text-gray-500 mt-0.5">{hasMultipleBatches ? `${group.totalStock} total units` : formatStock(med.stock, med.unitsPerBox)}</p>
+                </div>
+                <div className="text-xs">
+                  <p className="font-bold text-blue-700">
                   {hasMultipleBatches
                     ? `Retail ${formatCurrency(minRetail)}${minRetail !== maxRetail ? ` – ${formatCurrency(maxRetail)}` : ''}`
-                    : formatStock(med.stock, med.unitsPerBox)}
-                </p>
-                {!hasMultipleBatches && med.costPrice > 0 && (
-                  <div className="mt-1.5 inline-flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">
-                    <Tag className="w-2.5 h-2.5 text-amber-500 shrink-0" />
-                    <span className="text-[10px] font-semibold text-amber-700 leading-none">Cost {formatCurrency(med.costPrice)}</span>
-                  </div>
-                )}
-              </div>
-              <div className="mt-2.5 flex flex-col gap-1.5">
-                {hasMultipleBatches ? (
+                    : formatCurrency(getBoxPrice(med))}
+                  </p>
+                  {!hasMultipleBatches && Number(med.costPrice || 0) > 0 && <p className="text-[10px] text-amber-700 mt-0.5">Cost {formatCurrency(med.costPrice)}</p>}
+                </div>
+                <div className="sm:min-w-[132px]">
+                  {hasMultipleBatches ? (
                   <button onClick={() => setBatchSelector(group.batches)}
-                    className="w-full bg-orange-600 text-white py-2 rounded-md text-xs font-bold hover:bg-orange-700">
+                    className="w-full bg-orange-600 text-white px-3 py-2 rounded-md text-xs font-bold hover:bg-orange-700">
                     Select Batch ({group.batches.length})
                   </button>
                 ) : med.unitsPerBox > 1 ? (
@@ -844,9 +846,9 @@ export function Billing() {
       )}
 
       {/* Printable Receipt */}
-      <div className="hidden print:block w-[80mm] mx-auto bg-white text-black text-sm font-mono p-4">
-        <div className="text-center mb-4">
-          <h2 className="text-xl font-bold">Al-Fateh Pharmacy</h2>
+      <div className="thermal-receipt hidden print:block bg-white text-black font-mono">
+        <div className="text-center mb-3">
+          <h2 className="text-lg font-bold">Al-Fateh Pharmacy</h2>
           <p>Receipt</p>
           <p>{lastReceipt?.date ? format(new Date(lastReceipt.date), 'dd/MM/yyyy HH:mm') : format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
           {lastReceipt && <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(lastReceipt)}</p>}
@@ -855,50 +857,53 @@ export function Billing() {
           </p>
           {lastReceipt?.customerName && <p className="text-xs mt-1">Customer: {lastReceipt.customerName}</p>}
         </div>
-        <table className="w-full mb-4">
+        <table className="w-full mb-3 text-[10px]">
+          <colgroup>
+            <col style={{ width: '42%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '26%' }} />
+          </colgroup>
           <thead>
             <tr className="border-b border-black border-dashed">
               <th className="text-left pb-1">Item</th>
+              <th className="text-right pb-1">Price</th>
               <th className="text-center pb-1">Qty</th>
-              <th className="text-right pb-1">Total</th>
+              <th className="text-right pb-1">Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-dashed">
+          <tbody>
             {(lastReceipt?.items || cart).map((item: any) => (
-              <tr key={item.cartItemId}>
-                <td className="py-1">
-                  <div className="line-clamp-1">{item.name}</div>
-                  <div className="text-xs text-gray-500">{item.sellType === 'box' ? '(Box)' : '(Unit)'} @ {formatCurrency(item.price)}</div>
-                  <div className="text-xs">Batch: {item.batchNo || 'N/A'}</div>
-                  {item.itemDiscount > 0 && <div className="text-xs">Disc: -{formatCurrency(item.itemDiscount)}</div>}
-                </td>
-                <td className="text-center py-1">{item.quantity}</td>
-                <td className="text-right py-1">{formatCurrency(item.total)}</td>
+              <tr key={item.cartItemId} className="border-b border-dashed border-gray-400">
+                <td className="py-1 pr-1 font-semibold">{item.name}</td>
+                <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.price)}</td>
+                <td className="text-center py-1 whitespace-nowrap">{item.quantity}{item.sellType === 'box' ? 'B' : 'U'}</td>
+                <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.total)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="border-t border-black border-dashed pt-2 space-y-1">
-          <div className="flex justify-between"><span>Subtotal:</span><span>{formatCurrency(lastReceipt?.grossSubtotal || grossSubtotal)}</span></div>
-          {(lastReceipt?.totalItemDiscounts || totalItemDiscounts) > 0 && (
-            <div className="flex justify-between"><span>Item Discounts:</span><span>-{formatCurrency(lastReceipt?.totalItemDiscounts || totalItemDiscounts)}</span></div>
+        <div className="border-t border-black border-dashed pt-2 space-y-1" style={{ breakInside: 'avoid' }}>
+          <div className="flex justify-between"><span>Subtotal:</span><span>{formatCurrency(lastReceipt?.grossSubtotal ?? grossSubtotal)}</span></div>
+          {(lastReceipt?.totalItemDiscounts ?? totalItemDiscounts) > 0 && (
+            <div className="flex justify-between"><span>Item Discounts:</span><span>-{formatCurrency(lastReceipt?.totalItemDiscounts ?? totalItemDiscounts)}</span></div>
           )}
-          {(lastReceipt?.orderDiscount || orderDiscountAmount) > 0 && (
-            <div className="flex justify-between"><span>Order Discount ({orderDiscount}%):</span><span>-{formatCurrency(lastReceipt?.orderDiscount || orderDiscountAmount)}</span></div>
+          {(lastReceipt?.orderDiscount ?? orderDiscountAmount) > 0 && (
+            <div className="flex justify-between"><span>Order Discount:</span><span>-{formatCurrency(lastReceipt?.orderDiscount ?? orderDiscountAmount)}</span></div>
           )}
-          <div className="flex justify-between font-bold text-lg mt-2 pt-2 border-t border-black">
-            <span>Total:</span><span>{formatCurrency(lastReceipt?.total || grandTotal)}</span>
+          <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-black">
+            <span>Total:</span><span>{formatCurrency(lastReceipt?.total ?? grandTotal)}</span>
           </div>
-          {(lastReceipt?.pendingAmount || pendingAmount) > 0 && (
+          {(lastReceipt?.pendingAmount ?? pendingAmount) > 0 && (
             <>
-              <div className="flex justify-between"><span>Paid:</span><span>{formatCurrency(lastReceipt?.amountPaid || effectiveAmountPaid)}</span></div>
+              <div className="flex justify-between"><span>Paid:</span><span>{formatCurrency(lastReceipt?.amountPaid ?? effectiveAmountPaid)}</span></div>
               <div className="flex justify-between font-bold border-t border-dashed pt-1 mt-1">
-                <span>Pending:</span><span>{formatCurrency(lastReceipt?.pendingAmount || pendingAmount)}</span>
+                <span>Pending:</span><span>{formatCurrency(lastReceipt?.pendingAmount ?? pendingAmount)}</span>
               </div>
             </>
           )}
         </div>
-        <div className="text-center mt-8 text-xs">
+        <div className="text-center mt-5 text-[10px]">
           <p>Thank you for your visit!</p>
           <p>Get Well Soon</p>
         </div>

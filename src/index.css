@@ -47,5 +47,37 @@
 
 /* Print */
 @media print {
+  @page { size: 80mm auto; margin: 2mm 3mm; }
+  html, body, #root {
+    width: 74mm !important;
+    min-width: 74mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
   .no-print { display: none !important; }
+  .thermal-receipt {
+    display: block !important;
+    width: 74mm !important;
+    max-width: 74mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    color: #000 !important;
+    font-family: "Courier New", monospace !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .thermal-receipt table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+  }
+  .thermal-receipt th,
+  .thermal-receipt td {
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
 }

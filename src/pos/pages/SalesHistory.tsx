@@ -263,30 +263,32 @@ export function SalesHistory() {
 
       {/* Printable receipt */}
       {selectedSale && (
-        <div className="hidden print:block w-[80mm] mx-auto bg-white text-black text-sm font-mono p-4">
-          <div className="text-center mb-4">
-            <h2 className="text-xl font-bold">Al-Fateh Pharmacy</h2>
+        <div className="thermal-receipt hidden print:block bg-white text-black font-mono">
+          <div className="text-center mb-3">
+            <h2 className="text-lg font-bold">Al-Fateh Pharmacy</h2>
             <p>Receipt (Reprint)</p>
             <p>{selectedSale.date ? format(new Date(selectedSale.date), 'dd/MM/yyyy HH:mm') : 'N/A'}</p>
             <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(selectedSale)}</p>
             {selectedSale.customerName && <p className="text-xs mt-1">Customer: {selectedSale.customerName}</p>}
           </div>
-          <table className="w-full mb-4">
-            <thead><tr className="border-b border-black border-dashed"><th className="text-left pb-1">Item</th><th className="text-center pb-1">Qty</th><th className="text-right pb-1">Total</th></tr></thead>
-            <tbody className="divide-y divide-gray-100 divide-dashed">
+          <table className="w-full mb-3 text-[10px]">
+            <colgroup><col style={{ width: '42%' }} /><col style={{ width: '20%' }} /><col style={{ width: '12%' }} /><col style={{ width: '26%' }} /></colgroup>
+            <thead><tr className="border-b border-black border-dashed"><th className="text-left pb-1">Item</th><th className="text-right pb-1">Price</th><th className="text-center pb-1">Qty</th><th className="text-right pb-1">Amount</th></tr></thead>
+            <tbody>
               {selectedSale.items?.map((item: any) => (
-                <tr key={item.cartItemId}>
-                  <td className="py-1"><div className="line-clamp-1">{item.name}</div><div className="text-xs text-gray-500">{item.sellType === 'box' ? '(Box)' : '(Unit)'} @ {formatCurrency(item.price)}</div></td>
-                  <td className="text-center py-1">{item.quantity}</td>
-                  <td className="text-right py-1">{formatCurrency(item.total)}</td>
+                <tr key={item.cartItemId} className="border-b border-dashed border-gray-400">
+                  <td className="py-1 pr-1 font-semibold">{item.name}</td>
+                  <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.price)}</td>
+                  <td className="text-center py-1 whitespace-nowrap">{item.quantity}{item.sellType === 'box' ? 'B' : 'U'}</td>
+                  <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.total)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="border-t border-black border-dashed pt-2 space-y-1">
+          <div className="border-t border-black border-dashed pt-2 space-y-1" style={{ breakInside: 'avoid' }}>
             <div className="flex justify-between"><span>Subtotal:</span><span>{formatCurrency(getGross(selectedSale))}</span></div>
             {selectedSale.discount > 0 && <div className="flex justify-between"><span>Discount:</span><span>-{formatCurrency(selectedSale.discount)}</span></div>}
-            <div className="flex justify-between font-bold text-lg mt-2 pt-2 border-t border-black"><span>Total:</span><span>{formatCurrency(selectedSale.total)}</span></div>
+            <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-black"><span>Total:</span><span>{formatCurrency(selectedSale.total)}</span></div>
             {selectedSale.pendingAmount > 0 && (
               <>
                 <div className="flex justify-between"><span>Paid:</span><span>{formatCurrency(selectedSale.amountPaid)}</span></div>

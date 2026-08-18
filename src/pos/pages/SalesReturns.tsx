@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, increment, writeBatch } from 'firebase/firestore';
 import { printOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosSaleReturnNo } from '../../firebase';
@@ -7,64 +7,6 @@ import { getReturnNo, getSaleReceiptLabel, getSaleReceiptNo } from '../lib/recei
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
-
-// ── Printable slip rendered in a hidden div, then printed via iframe ─────────
-function SaleReturnSlip({ data }: { data: any }) {
-  return (
-    <div style={{ width: '80mm', fontFamily: 'monospace', fontSize: '12px', color: '#000', padding: '8px' }}>
-      <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>Al-Fateh Pharmacy</div>
-        <div style={{ fontWeight: 'bold', letterSpacing: '2px', marginTop: '2px' }}>SALE RETURN SLIP</div>
-        <div>{format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
-        <div style={{ fontSize: '10px', marginTop: '2px' }}>
-          Return No: {getReturnNo(data)}
-        </div>
-        <div style={{ fontSize: '10px' }}>
-          Orig. Receipt: {data.originalReceiptNo || 'Unnumbered'}
-        </div>
-      </div>
-
-      <div style={{ borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '6px 0', marginBottom: '6px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Item</th>
-              <th style={{ textAlign: 'center', paddingBottom: '4px' }}>Qty</th>
-              <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Refund</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((item: any, i: number) => (
-              <tr key={i}>
-                <td style={{ paddingTop: '3px' }}>{item.name}<br /><span style={{ fontSize: '9px' }}>({item.sellType})</span></td>
-                <td style={{ textAlign: 'center', paddingTop: '3px' }}>{item.returnQty}</td>
-                <td style={{ textAlign: 'right', paddingTop: '3px' }}>{formatCurrency(item.refundAmount)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {data.reason && (
-        <div style={{ fontSize: '10px', marginBottom: '6px' }}>Reason: {data.reason}</div>
-      )}
-
-      <div style={{ borderTop: '1px dashed #000', paddingTop: '6px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '13px' }}>
-          <span>Total Refund:</span>
-          <span>{formatCurrency(data.totalRefund)}</span>
-        </div>
-      </div>
-
-      <div style={{ textAlign: 'center', fontSize: '10px', marginTop: '14px' }}>
-        Thank you for your understanding
-      </div>
-      <div style={{ textAlign: 'center', fontSize: '10px' }}>
-        Al-Fateh Pharmacy — {format(new Date(), 'yyyy')}
-      </div>
-    </div>
-  );
-}
 
 // ── Print via hidden iframe so main page layout is unaffected ────────────────
 function printSlip(slipHtml: string) {
@@ -80,7 +22,6 @@ export function SalesReturns() {
   const [returnReason, setReturnReason] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const slipRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'sales'), orderBy('date', 'desc'));
@@ -145,21 +86,10 @@ export function SalesReturns() {
 
   const hasAnyReturn = returnItems.some(i => i.returnQty > 0);
 
-  const triggerPrint = (returnData: any) => {
-    if (!slipRef.current) return;
-    const html = slipRef.current.innerHTML;
-    // Temporarily store data for the ref render
-    printSlip(html);
-  };
-
   // Render slip into hidden div then print
   const printReturnData = (data: any) => {
-    const container = document.createElement('div');
-    container.style.display = 'none';
-    document.body.appendChild(container);
-
     const slipHtml = `
-      <div style="width:80mm;font-family:monospace;font-size:12px;color:#000;padding:8px">
+      <div class="thermal-receipt">
         <div style="text-align:center;margin-bottom:10px">
           <div style="font-size:16px;font-weight:bold">Al-Fateh Pharmacy</div>
           <div style="font-weight:bold;letter-spacing:2px;margin-top:2px">SALE RETURN SLIP</div>
@@ -168,17 +98,20 @@ export function SalesReturns() {
           <div style="font-size:10px">Orig. Receipt: ${data.originalReceiptNo || 'Unnumbered'}</div>
         </div>
         <div style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:6px 0;margin-bottom:6px">
-          <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:10px">
+            <colgroup><col style="width:40%"><col style="width:20%"><col style="width:13%"><col style="width:27%"></colgroup>
             <thead><tr>
               <th style="text-align:left;padding-bottom:4px">Item</th>
+              <th style="text-align:right;padding-bottom:4px">Price</th>
               <th style="text-align:center;padding-bottom:4px">Qty</th>
               <th style="text-align:right;padding-bottom:4px">Refund</th>
             </tr></thead>
             <tbody>
               ${data.items.map((item: any) => `
                 <tr>
-                  <td style="padding-top:3px">${item.name}<br><span style="font-size:9px">(${item.sellType})</span></td>
-                  <td style="text-align:center;padding-top:3px">${item.returnQty}</td>
+                  <td style="padding:3px 2px 3px 0;font-weight:bold;overflow-wrap:anywhere">${item.name}</td>
+                  <td style="text-align:right;padding-top:3px;white-space:nowrap">${formatCurrency(item.price)}</td>
+                  <td style="text-align:center;padding-top:3px;white-space:nowrap">${item.returnQty}${item.sellType === 'box' ? 'B' : 'U'}</td>
                   <td style="text-align:right;padding-top:3px">${formatCurrency(item.refundAmount)}</td>
                 </tr>
               `).join('')}
@@ -186,8 +119,8 @@ export function SalesReturns() {
           </table>
         </div>
         ${data.reason ? `<div style="font-size:10px;margin-bottom:6px">Reason: ${data.reason}</div>` : ''}
-        <div style="border-top:1px dashed #000;padding-top:6px">
-          <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:13px">
+        <div style="border-top:1px dashed #000;padding-top:6px;break-inside:avoid">
+          <div style="display:grid;grid-template-columns:1fr auto;gap:6px;font-weight:bold;font-size:13px">
             <span>Total Refund:</span>
             <span>${formatCurrency(data.totalRefund)}</span>
           </div>
@@ -197,7 +130,6 @@ export function SalesReturns() {
       </div>
     `;
     printSlip(slipHtml);
-    document.body.removeChild(container);
   };
 
   const handleSubmit = async () => {

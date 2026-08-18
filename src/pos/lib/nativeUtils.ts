@@ -1,7 +1,23 @@
 const SLIP_STYLE = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: white; font-family: monospace; }
-  @page { size: 80mm auto; margin: 4mm; }
+  @page { size: 80mm auto; margin: 2mm 3mm; }
+  html, body { width: 74mm; min-width: 74mm; background: white; }
+  body {
+    color: #000;
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1.25;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .thermal-receipt {
+    width: 74mm !important;
+    max-width: 74mm !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+  .thermal-receipt table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+  .thermal-receipt th, .thermal-receipt td { overflow-wrap: anywhere; vertical-align: top; }
 `;
 
 export async function printOrShare(slipHtml: string, _filename = 'slip.html'): Promise<void> {
@@ -45,10 +61,17 @@ function iframePrint(slipHtml: string) {
     iframe.remove();
     return;
   }
+  let printed = false;
+  const printWhenReady = () => {
+    if (printed || !iframe.contentWindow) return;
+    printed = true;
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  };
+  iframe.addEventListener('load', () => window.setTimeout(printWhenReady, 100), { once: true });
   doc.open();
   doc.write(`<!DOCTYPE html><html><head><style>${SLIP_STYLE}</style></head><body>${slipHtml}</body></html>`);
   doc.close();
-  iframe.contentWindow?.focus();
-  iframe.contentWindow?.print();
-  window.setTimeout(() => iframe.remove(), 2000);
+  window.setTimeout(printWhenReady, 250);
+  window.setTimeout(() => iframe.remove(), 5000);
 }

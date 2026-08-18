@@ -24,26 +24,35 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
   };
 
   return `
-    <div style="width:80mm;font-family:monospace;font-size:12px;color:#000;padding:8px">
+    <div class="thermal-receipt">
       <div style="text-align:center;margin-bottom:10px">
         <div style="font-size:16px;font-weight:bold">Al-Fateh Pharmacy</div>
         <div style="font-weight:bold;letter-spacing:2px;margin-top:2px">PURCHASE RETURN</div>
         <div>${format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
         <div style="font-size:10px;margin-top:2px">Return No: ${getReturnNo(data)}</div>
       </div>
+      <div style="font-size:10px;margin-bottom:5px">Supplier: <strong>${data.supplierName || 'N/A'}</strong></div>
       <div style="border-top:1px dashed #000;padding:6px 0;border-bottom:1px dashed #000;margin-bottom:6px">
-        <table style="width:100%;font-size:11px;border-collapse:collapse">
-          <tr><td>Medicine:</td><td style="text-align:right;font-weight:bold">${data.medicineName}</td></tr>
-          <tr><td>Supplier:</td><td style="text-align:right">${data.supplierName}</td></tr>
-          <tr><td style="padding-top:4px">Boxes Returned:</td><td style="text-align:right;padding-top:4px">${data.boxesReturned}</td></tr>
-          ${data.looseUnitsReturned > 0 ? `<tr><td>Loose Units:</td><td style="text-align:right">${data.looseUnitsReturned}</td></tr>` : ''}
-          <tr><td>Total Units:</td><td style="text-align:right;font-weight:bold">${formatUnitsInline(data.totalUnitsReturned, upb)}</td></tr>
-          <tr><td style="font-size:9px;color:#555">Unit Cost:</td><td style="text-align:right;font-size:9px;color:#555">${formatCurrency(data.costPricePerUnit)}/unit</td></tr>
+        <table style="width:100%;table-layout:fixed;font-size:10px;border-collapse:collapse">
+          <colgroup><col style="width:40%"><col style="width:20%"><col style="width:16%"><col style="width:24%"></colgroup>
+          <thead><tr>
+            <th style="text-align:left;padding-bottom:4px">Item</th>
+            <th style="text-align:right;padding-bottom:4px">Price</th>
+            <th style="text-align:center;padding-bottom:4px">Qty</th>
+            <th style="text-align:right;padding-bottom:4px">Refund</th>
+          </tr></thead>
+          <tbody><tr>
+            <td style="padding:3px 2px 3px 0;font-weight:bold;overflow-wrap:anywhere">${data.medicineName}</td>
+            <td style="text-align:right;padding-top:3px;white-space:nowrap">${formatCurrency(data.costPricePerUnit)}</td>
+            <td style="text-align:center;padding-top:3px">${data.totalUnitsReturned}</td>
+            <td style="text-align:right;padding-top:3px">${formatCurrency(data.refundAmount)}</td>
+          </tr></tbody>
         </table>
+        <div style="font-size:9px;margin-top:3px">Returned: ${formatUnitsInline(data.totalUnitsReturned, upb)}</div>
       </div>
       ${data.reason ? `<div style="font-size:10px;margin-bottom:6px">Reason: ${data.reason}</div>` : ''}
-      <div style="border-top:1px dashed #000;padding-top:6px">
-        <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:13px">
+      <div style="border-top:1px dashed #000;padding-top:6px;break-inside:avoid">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:6px;font-weight:bold;font-size:13px">
           <span>Refund Value:</span>
           <span>${formatCurrency(data.refundAmount)}</span>
         </div>
