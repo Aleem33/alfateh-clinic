@@ -7,6 +7,7 @@ import { getReturnNo } from '../lib/receiptNumbers';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 
 // ── Print via hidden iframe ───────────────────────────────────────────────────
 function printSlip(slipHtml: string) {
@@ -26,7 +27,7 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
   return `
     <div class="thermal-receipt">
       <div style="text-align:center;margin-bottom:10px">
-        <div style="font-size:16px;font-weight:bold">Al-Fateh Pharmacy</div>
+        <div style="font-size:16px;font-weight:bold">${PHARMACY_RECEIPT_NAME}</div>
         <div style="font-weight:bold;letter-spacing:2px;margin-top:2px">PURCHASE RETURN</div>
         <div>${format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
         <div style="font-size:10px;margin-top:2px">Return No: ${getReturnNo(data)}</div>
@@ -58,7 +59,8 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
         </div>
       </div>
       <div style="text-align:center;font-size:10px;margin-top:16px">Supplier acknowledgment required</div>
-      <div style="text-align:center;font-size:10px">Al-Fateh Pharmacy</div>
+      <div style="text-align:center;font-size:10px">${PHARMACY_RECEIPT_NAME}</div>
+      ${receiptPolicyHtml()}
     </div>
   `;
 }

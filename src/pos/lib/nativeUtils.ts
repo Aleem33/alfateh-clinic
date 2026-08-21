@@ -18,6 +18,7 @@ const SLIP_STYLE = `
   }
   .thermal-receipt table { width: 100%; table-layout: fixed; border-collapse: collapse; }
   .thermal-receipt th, .thermal-receipt td { overflow-wrap: anywhere; vertical-align: top; }
+  .receipt-policy { font-family: "Noto Nastaliq Urdu", "Noto Naskh Arabic", "Segoe UI", Arial, sans-serif; direction: rtl; unicode-bidi: embed; }
 `;
 
 export async function printOrShare(slipHtml: string, _filename = 'slip.html'): Promise<void> {

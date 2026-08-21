@@ -7,6 +7,10 @@ import { getReturnNo, getSaleReceiptLabel, getSaleReceiptNo } from '../lib/recei
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
+import { subscribeToMedicines } from '../../lib/medicineStore';
+import { searchMedicines } from '../../lib/medicineIndex';
+import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
+import { calculateReturnRefund, calculateReturnStockUnits } from '../lib/saleReturn';
 
 // ── Print via hidden iframe so main page layout is unaffected ────────────────
 function printSlip(slipHtml: string) {
@@ -22,6 +26,14 @@ export function SalesReturns() {
   const [returnReason, setReturnReason] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [medicines, setMedicines] = useState<any[]>([]);
+  const [showNoReceiptReturn, setShowNoReceiptReturn] = useState(false);
+  const [medicineSearch, setMedicineSearch] = useState('');
+  const [manualMedicine, setManualMedicine] = useState<any>(null);
+  const [manualSellType, setManualSellType] = useState<'box' | 'unit'>('unit');
+  const [manualQty, setManualQty] = useState(1);
+  const [manualRefundPrice, setManualRefundPrice] = useState('');
+  const [manualReason, setManualReason] = useState('');
 
   useEffect(() => {
     const q = query(collection(db, 'sales'), orderBy('date', 'desc'));
@@ -35,8 +47,30 @@ export function SalesReturns() {
       setReturns(list);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'saleReturns'));
 
-    return () => { unsubSales(); unsubReturns(); };
+    const unsubMedicines = subscribeToMedicines(
+      setMedicines,
+      (e) => handleFirestoreError(e, OperationType.GET, 'medicines'),
+    );
+
+    return () => { unsubSales(); unsubReturns(); unsubMedicines(); };
   }, []);
+
+  const filteredMedicines = searchMedicines(medicines, medicineSearch);
+
+  const medicineBoxPrice = (medicine: any) => Number(medicine.retailPrice || medicine.price || 0);
+  const medicineUnitPrice = (medicine: any) => {
+    const explicit = Number(medicine.unitPrice || 0);
+    if (explicit > 0) return explicit;
+    const unitsPerBox = Math.max(1, Number(medicine.unitsPerBox || 1));
+    return medicineBoxPrice(medicine) / unitsPerBox;
+  };
+
+  const selectManualMedicine = (medicine: any, sellType: 'box' | 'unit' = 'unit') => {
+    setManualMedicine(medicine);
+    setManualSellType(sellType);
+    setManualQty(1);
+    setManualRefundPrice(String(sellType === 'box' ? medicineBoxPrice(medicine) : medicineUnitPrice(medicine)));
+  };
 
   const filteredSales = sales.filter(s =>
     getSaleReceiptNo(s, '').toLowerCase().includes(search.toLowerCase()) ||
@@ -91,11 +125,11 @@ export function SalesReturns() {
     const slipHtml = `
       <div class="thermal-receipt">
         <div style="text-align:center;margin-bottom:10px">
-          <div style="font-size:16px;font-weight:bold">Al-Fateh Pharmacy</div>
+          <div style="font-size:16px;font-weight:bold">${PHARMACY_RECEIPT_NAME}</div>
           <div style="font-weight:bold;letter-spacing:2px;margin-top:2px">SALE RETURN SLIP</div>
           <div>${format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
           <div style="font-size:10px;margin-top:2px">Return No: ${getReturnNo(data)}</div>
-          <div style="font-size:10px">Orig. Receipt: ${data.originalReceiptNo || 'Unnumbered'}</div>
+          <div style="font-size:10px">${data.withoutReceipt ? 'Return without receipt' : `Orig. Receipt: ${data.originalReceiptNo || 'Unnumbered'}`}</div>
         </div>
         <div style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:6px 0;margin-bottom:6px">
           <table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:10px">
@@ -126,7 +160,8 @@ export function SalesReturns() {
           </div>
         </div>
         <div style="text-align:center;font-size:10px;margin-top:14px">Thank you for your understanding</div>
-        <div style="text-align:center;font-size:10px">Al-Fateh Pharmacy</div>
+        <div style="text-align:center;font-size:10px">${PHARMACY_RECEIPT_NAME}</div>
+        ${receiptPolicyHtml()}
       </div>
     `;
     printSlip(slipHtml);
@@ -197,6 +232,71 @@ export function SalesReturns() {
     }
   };
 
+  const handleNoReceiptSubmit = async () => {
+    if (!manualMedicine || submitting) return;
+    const quantity = Math.max(1, Math.floor(Number(manualQty) || 1));
+    const price = Math.max(0, Number(manualRefundPrice) || 0);
+    const unitsPerBox = Math.max(1, Number(manualMedicine.unitsPerBox || 1));
+    const unitsToRestore = calculateReturnStockUnits(quantity, manualSellType, unitsPerBox);
+    const totalRefund = calculateReturnRefund(quantity, price);
+    setSubmitting(true);
+    try {
+      const returnNo = await getNextPosSaleReturnNo();
+      const item = {
+        cartItemId: `no-receipt-${manualMedicine.id}-${manualSellType}`,
+        medicineId: manualMedicine.id,
+        name: manualMedicine.name,
+        batchNo: manualMedicine.batchNo || '',
+        sellType: manualSellType,
+        price,
+        returnQty: quantity,
+        unitsPerBox,
+        refundAmount: totalRefund,
+      };
+      const returnDoc = {
+        returnNo,
+        originalSaleId: '',
+        originalReceiptNo: '',
+        withoutReceipt: true,
+        items: [item],
+        totalRefund,
+        reason: manualReason.trim() || 'Return processed without original receipt',
+        date: new Date().toISOString(),
+        processedBy: auth.currentUser?.uid || '',
+      };
+      const batch = writeBatch(db);
+      const docRef = doc(collection(db, 'saleReturns'));
+      batch.set(docRef, returnDoc);
+      const movementRef = doc(collection(db, 'stockMovements'));
+      batch.set(movementRef, {
+        type: 'sale-return-without-receipt',
+        returnId: docRef.id,
+        returnNo,
+        medicineId: manualMedicine.id,
+        medicineName: manualMedicine.name,
+        batchNo: manualMedicine.batchNo || '',
+        quantity: unitsToRestore,
+        createdAt: new Date().toISOString(),
+        processedBy: auth.currentUser?.uid || '',
+      });
+      batch.update(doc(db, 'medicines', manualMedicine.id), { stock: increment(unitsToRestore) });
+      await waitForOnlineWrite(batch.commit());
+
+      const dataWithId = { ...returnDoc, id: docRef.id };
+      setShowNoReceiptReturn(false);
+      setManualMedicine(null);
+      setMedicineSearch('');
+      setManualReason('');
+      setSuccessMsg(`Receipt-less return processed — Rs. ${totalRefund.toFixed(2)} refund`);
+      setTimeout(() => setSuccessMsg(''), 5000);
+      setTimeout(() => printReturnData(dataWithId), 400);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'saleReturns');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {successMsg && (
@@ -205,7 +305,20 @@ export function SalesReturns() {
         </div>
       )}
 
-      <h1 className="text-2xl font-bold text-gray-900">Sale Returns</h1>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold text-gray-900">Sale Returns</h1>
+        <button
+          onClick={() => {
+            setShowNoReceiptReturn(true);
+            setManualMedicine(null);
+            setMedicineSearch('');
+            setManualReason('');
+          }}
+          className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-semibold hover:bg-orange-700"
+        >
+          <RotateCcw className="w-4 h-4" /> Return Without Receipt
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -270,7 +383,7 @@ export function SalesReturns() {
                       {r.date ? format(new Date(r.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
                     </p>
                     <p className="text-xs text-gray-400 font-mono">Return #{getReturnNo(r)}</p>
-                    <p className="text-xs text-gray-400">Orig. Receipt: {r.originalReceiptNo || 'Unnumbered'}</p>
+                    <p className="text-xs text-gray-400">{r.withoutReceipt ? 'Without original receipt' : `Orig. Receipt: ${r.originalReceiptNo || 'Unnumbered'}`}</p>
                     {r.reason && <p className="text-xs text-gray-500 mt-0.5 italic">"{r.reason}"</p>}
                     <p className="text-xs text-gray-500 mt-1">{r.items?.length} item(s) returned</p>
                   </div>
@@ -293,6 +406,97 @@ export function SalesReturns() {
           </div>
         </div>
       </div>
+
+      {showNoReceiptReturn && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl my-8">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Return Medicine Without Receipt</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Select the exact medicine batch. Its stock will be restored separately.</p>
+              </div>
+              <button onClick={() => setShowNoReceiptReturn(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {!manualMedicine ? (
+                <>
+                  <div className="relative">
+                    <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      autoFocus
+                      value={medicineSearch}
+                      onChange={e => setMedicineSearch(e.target.value)}
+                      placeholder="Search medicine by name, batch, category or supplier..."
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">Showing {filteredMedicines.length} of {medicines.length} active medicine records</p>
+                  <div className="max-h-80 overflow-auto divide-y divide-gray-100 border border-gray-100 rounded-lg">
+                    {filteredMedicines.map(medicine => (
+                      <button key={medicine.id} onClick={() => selectManualMedicine(medicine)} className="w-full text-left p-3 hover:bg-orange-50 flex justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-900 truncate">{medicine.name}</p>
+                          <p className="text-xs text-gray-500">{medicine.category || 'Uncategorized'} · Batch {medicine.batchNo || 'N/A'} · {medicine.supplierName || 'No supplier'}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-semibold text-gray-900">{formatCurrency(medicineBoxPrice(medicine))}/box</p>
+                          <p className="text-xs text-gray-500">Stock: {Number(medicine.stock || 0)} units</p>
+                        </div>
+                      </button>
+                    ))}
+                    {filteredMedicines.length === 0 && <div className="p-8 text-center text-sm text-gray-400">No matching medicine found.</div>}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-orange-50 border border-orange-100 rounded-lg p-4 flex justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-gray-900">{manualMedicine.name}</p>
+                      <p className="text-xs text-gray-600 mt-0.5">{manualMedicine.category || 'Uncategorized'} · Batch {manualMedicine.batchNo || 'N/A'} · {manualMedicine.supplierName || 'No supplier'}</p>
+                    </div>
+                    <button onClick={() => setManualMedicine(null)} className="text-sm font-semibold text-orange-700 hover:underline">Change</button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Return As</label>
+                      <select
+                        value={manualSellType}
+                        onChange={e => selectManualMedicine(manualMedicine, e.target.value as 'box' | 'unit')}
+                        className="w-full p-2.5 border border-gray-200 rounded-lg text-sm"
+                      >
+                        <option value="unit">Loose Unit</option>
+                        <option value="box">Box</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Quantity</label>
+                      <input type="number" min="1" step="1" value={manualQty} onChange={e => setManualQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Refund Price per {manualSellType}</label>
+                      <input type="number" min="0" step="0.01" value={manualRefundPrice} onChange={e => setManualRefundPrice(e.target.value)} className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Reason / Note</label>
+                    <input value={manualReason} onChange={e => setManualReason(e.target.value)} placeholder="Optional note for receipt-less return" className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" />
+                  </div>
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex justify-between">
+                    <span className="text-sm font-medium text-blue-800">Refund Total</span>
+                    <span className="font-bold text-blue-800">{formatCurrency(calculateReturnRefund(manualQty, Number(manualRefundPrice)))}</span>
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button onClick={() => setShowNoReceiptReturn(false)} className="px-4 py-2 text-gray-600 border border-gray-200 rounded-lg">Cancel</button>
+                    <button onClick={handleNoReceiptSubmit} disabled={submitting} className="px-4 py-2 bg-orange-600 text-white rounded-lg font-semibold disabled:opacity-50 flex items-center gap-2">
+                      <Printer className="w-4 h-4" /> {submitting ? 'Processing...' : 'Confirm Return & Print'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Process Return Modal */}
       {selectedSale && (

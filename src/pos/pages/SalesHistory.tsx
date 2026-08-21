@@ -4,6 +4,8 @@ import { printPageOrShare, downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
+import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
+import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountType } from '../lib/billDiscount';
 import {
   Search, FileText, Eye, X, Printer, Download,
   Users, Building2, LayoutList, Table2,
@@ -55,6 +57,16 @@ export function SalesHistory() {
   const [exportType,      setExportType]      = useState<ExportType>('all');
   const [exportDateFrom,  setExportDateFrom]  = useState('');
   const [exportDateTo,    setExportDateTo]    = useState('');
+
+  const openSaleEditor = (sale: any) => {
+    const type: BillDiscountType = sale.orderDiscountType === 'rs' ? 'rs' : 'pct';
+    const inferredPercentage = sale.subtotal > 0 ? (Number(sale.orderDiscount || 0) / sale.subtotal) * 100 : 0;
+    setEditingSale({
+      ...sale,
+      orderDiscountType: type,
+      orderDiscountValue: sale.orderDiscountValue ?? (type === 'rs' ? Number(sale.orderDiscount || 0) : inferredPercentage),
+    });
+  };
 
   useEffect(() => {
     const q = query(collection(db, 'sales'), orderBy('date', 'desc'));
@@ -168,7 +180,9 @@ export function SalesHistory() {
       const grossSubtotal     = editingSale.items.reduce((s: number, i: any) => s + i.quantity * i.price, 0);
       const totalItemDiscounts = editingSale.items.reduce((s: number, i: any) => s + (i.itemDiscount || 0), 0);
       const subtotalAfterItem  = editingSale.items.reduce((s: number, i: any) => s + i.total, 0);
-      const orderDiscountAmt   = subtotalAfterItem * ((editingSale.orderDiscountPct || 0) / 100);
+      const orderDiscountType: BillDiscountType = editingSale.orderDiscountType === 'rs' ? 'rs' : 'pct';
+      const orderDiscountValue = normalizeBillDiscountValue(orderDiscountType, Number(editingSale.orderDiscountValue || 0));
+      const orderDiscountAmt   = calculateBillDiscount(subtotalAfterItem, orderDiscountType, orderDiscountValue);
       const grandTotal         = Math.max(0, subtotalAfterItem - orderDiscountAmt);
       const amountPaid         = Math.min(editingSale.amountPaid ?? grandTotal, grandTotal);
       const pendingAmount      = Math.max(0, grandTotal - amountPaid);
@@ -178,6 +192,8 @@ export function SalesHistory() {
         grossSubtotal, totalItemDiscounts,
         subtotal: subtotalAfterItem,
         orderDiscount: orderDiscountAmt,
+        orderDiscountType,
+        orderDiscountValue,
         discount: orderDiscountAmt + totalItemDiscounts,
         total: grandTotal,
         amountPaid,
@@ -265,7 +281,7 @@ export function SalesHistory() {
       {selectedSale && (
         <div className="thermal-receipt hidden print:block bg-white text-black font-mono">
           <div className="text-center mb-3">
-            <h2 className="text-lg font-bold">Al-Fateh Pharmacy</h2>
+            <h2 className="text-lg font-bold">{PHARMACY_RECEIPT_NAME}</h2>
             <p>Receipt (Reprint)</p>
             <p>{selectedSale.date ? format(new Date(selectedSale.date), 'dd/MM/yyyy HH:mm') : 'N/A'}</p>
             <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(selectedSale)}</p>
@@ -295,6 +311,9 @@ export function SalesHistory() {
                 <div className="flex justify-between font-bold"><span>Pending:</span><span>{formatCurrency(selectedSale.pendingAmount)}</span></div>
               </>
             )}
+          </div>
+          <div dir="rtl" className="receipt-policy text-center mt-3 pt-2 border-t border-dashed border-black text-[10px] leading-relaxed" style={{ fontFamily: "'Noto Nastaliq Urdu','Noto Naskh Arabic','Segoe UI',Arial,sans-serif" }}>
+            {PHARMACY_RETURN_POLICY_URDU.map(line => <p key={line}>{line}</p>)}
           </div>
         </div>
       )}
@@ -443,7 +462,7 @@ export function SalesHistory() {
                       className="flex items-center gap-1 text-blue-600 text-xs font-medium">
                       <Eye className="w-3.5 h-3.5" /> View
                     </button>
-                    <button onClick={() => setEditingSale({ ...sale, orderDiscountPct: sale.subtotal > 0 ? Math.round((sale.orderDiscount || 0) / sale.subtotal * 100) : 0 })}
+                    <button onClick={() => openSaleEditor(sale)}
                       className="flex items-center gap-1 text-orange-600 text-xs font-medium">
                       <Edit2 className="w-3.5 h-3.5" /> Edit
                     </button>
@@ -496,7 +515,7 @@ export function SalesHistory() {
                           <button onClick={() => setSelectedSale(sale)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded flex items-center gap-1 text-sm font-medium">
                             <Eye className="w-4 h-4" /> View
                           </button>
-                          <button onClick={() => setEditingSale({ ...sale, orderDiscountPct: sale.subtotal > 0 ? Math.round((sale.orderDiscount || 0) / sale.subtotal * 100) : 0 })} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded flex items-center gap-1 text-sm font-medium">
+                          <button onClick={() => openSaleEditor(sale)} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded flex items-center gap-1 text-sm font-medium">
                             <Edit2 className="w-4 h-4" /> Edit
                           </button>
                         </div>
@@ -820,10 +839,17 @@ export function SalesHistory() {
                 {/* Order discount & payment */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Order Discount %</label>
-                    <input type="number" min="0" max="100" value={editingSale.orderDiscountPct || 0}
-                      onChange={e => setEditingSale((s: any) => ({ ...s, orderDiscountPct: parseFloat(e.target.value) || 0 }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Bill Discount</label>
+                    <div className="flex gap-1.5">
+                      <select value={editingSale.orderDiscountType || 'pct'}
+                        onChange={e => setEditingSale((s: any) => ({ ...s, orderDiscountType: e.target.value, orderDiscountValue: 0 }))}
+                        className="px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                        <option value="rs">Rs</option><option value="pct">%</option>
+                      </select>
+                      <input type="number" min="0" max={editingSale.orderDiscountType === 'pct' ? 100 : undefined} value={editingSale.orderDiscountValue || 0}
+                        onChange={e => setEditingSale((s: any) => ({ ...s, orderDiscountValue: parseFloat(e.target.value) || 0 }))}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Amount Paid</label>
@@ -837,7 +863,8 @@ export function SalesHistory() {
                 {(() => {
                   const sub   = (editingSale.items || []).reduce((s: number, i: any) => s + i.total, 0);
                   const gross = (editingSale.items || []).reduce((s: number, i: any) => s + i.quantity * i.price, 0);
-                  const odAmt = sub * ((editingSale.orderDiscountPct || 0) / 100);
+                  const discountType: BillDiscountType = editingSale.orderDiscountType === 'rs' ? 'rs' : 'pct';
+                  const odAmt = calculateBillDiscount(sub, discountType, Number(editingSale.orderDiscountValue || 0));
                   const total = Math.max(0, sub - odAmt);
                   const paid  = Math.min(editingSale.amountPaid ?? total, total);
                   const pend  = Math.max(0, total - paid);
@@ -845,7 +872,7 @@ export function SalesHistory() {
                     <div className="bg-orange-50 border border-orange-100 rounded-lg p-3 space-y-1 text-sm">
                       <div className="flex justify-between text-gray-600"><span>Gross Subtotal</span><span>{formatCurrency(gross)}</span></div>
                       {gross !== sub && <div className="flex justify-between text-orange-600"><span>Item Discounts</span><span>-{formatCurrency(gross - sub)}</span></div>}
-                      {odAmt > 0 && <div className="flex justify-between text-red-500"><span>Order Discount ({editingSale.orderDiscountPct}%)</span><span>-{formatCurrency(odAmt)}</span></div>}
+                      {odAmt > 0 && <div className="flex justify-between text-red-500"><span>Bill Discount ({discountType === 'pct' ? `${editingSale.orderDiscountValue}%` : 'Rs'})</span><span>-{formatCurrency(odAmt)}</span></div>}
                       <div className="flex justify-between font-bold text-gray-900 border-t border-orange-200 pt-1 mt-1"><span>New Total</span><span className="text-orange-700">{formatCurrency(total)}</span></div>
                       {pend > 0 && <div className="flex justify-between font-bold text-red-600"><span>Pending</span><span>{formatCurrency(pend)}</span></div>}
                       {pend === 0 && <div className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded">✓ Fully Paid</div>}

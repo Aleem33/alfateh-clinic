@@ -7,6 +7,7 @@ import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { printOrShare } from '../lib/nativeUtils';
 import { getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
+import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import {
   Plus, Edit2, Trash2, Search, ChevronDown, ChevronUp,
   Eye, X, Wallet, CheckCircle, Clock, CreditCard, Receipt, Printer
@@ -191,7 +192,7 @@ export function Customers() {
     const html = `
       <div style="font-family:monospace;max-width:320px;margin:0 auto;padding:8px;">
         <div style="text-align:center;margin-bottom:12px;border-bottom:2px solid #111;padding-bottom:8px;">
-          <h2 style="margin:0;font-size:16px;">AL-FATEH PHARMACY POS</h2>
+          <h2 style="margin:0;font-size:16px;">${PHARMACY_RECEIPT_NAME}</h2>
           <p style="margin:4px 0 0;font-size:13px;font-weight:700;">${cust.name}</p>
           ${cust.phone ? `<p style="margin:2px 0 0;font-size:11px;color:#555;">${cust.phone}</p>` : ''}
           <p style="margin:2px 0 0;font-size:10px;color:#888;">Printed: ${new Date().toLocaleString('en-PK')}</p>
@@ -211,6 +212,7 @@ export function Customers() {
             : `<div style="text-align:center;font-size:12px;font-weight:700;color:#16a34a;background:#dcfce7;padding:5px;border-radius:4px;margin-top:4px;">✓ ALL CLEAR</div>`
           }
         </div>
+        ${receiptPolicyHtml()}
       </div>`;
 
     printOrShare(html, `${cust.name.replace(/\s+/g,'-')}-bills.html`);

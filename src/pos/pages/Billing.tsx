@@ -13,6 +13,8 @@ import {
 import { format } from 'date-fns';
 import { groupMedicineBatches, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountType } from '../lib/billDiscount';
+import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -20,7 +22,8 @@ export function Billing() {
   const [search, setSearch]             = useState('');
   const [cart, setCart]                 = useState<any[]>([]);
   const [qtyInputs, setQtyInputs]       = useState<Record<string, string>>({});
-  const [orderDiscount, setOrderDiscount] = useState(0);
+  const [orderDiscountType, setOrderDiscountType] = useState<BillDiscountType>('rs');
+  const [orderDiscountValue, setOrderDiscountValue] = useState(0);
   const [customerType, setCustomerType] = useState<'customer' | 'hospital'>('customer');
   const [lastReceipt, setLastReceipt]   = useState<any>(null);
   const [showPrintAlert, setShowPrintAlert] = useState(false);
@@ -233,7 +236,7 @@ export function Billing() {
   const grossSubtotal        = cart.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const totalItemDiscounts   = cart.reduce((sum, item) => sum + (item.itemDiscount || 0), 0);
   const subtotalAfterItemDisc = cart.reduce((sum, item) => sum + item.total, 0);
-  const orderDiscountAmount  = subtotalAfterItemDisc * (orderDiscount / 100);
+  const orderDiscountAmount  = calculateBillDiscount(subtotalAfterItemDisc, orderDiscountType, orderDiscountValue);
   const grandTotal           = Math.max(0, subtotalAfterItemDisc - orderDiscountAmount);
   const effectiveAmountPaid  = amountPaid === '' ? grandTotal : Math.min(Number(amountPaid), grandTotal);
   const pendingAmount        = Math.max(0, grandTotal - effectiveAmountPaid);
@@ -297,7 +300,10 @@ export function Billing() {
       const saleData: any = {
         receiptNo,
         items: cart, grossSubtotal, totalItemDiscounts,
-        subtotal: subtotalAfterItemDisc, orderDiscount: orderDiscountAmount,
+        subtotal: subtotalAfterItemDisc,
+        orderDiscount: orderDiscountAmount,
+        orderDiscountType,
+        orderDiscountValue: normalizeBillDiscountValue(orderDiscountType, orderDiscountValue),
         discount: orderDiscountAmount + totalItemDiscounts, total: grandTotal,
         amountPaid: effectiveAmountPaid, pendingAmount,
         date: new Date().toISOString(), customerType,
@@ -333,7 +339,7 @@ export function Billing() {
       }
       await waitForOnlineWrite(batch.commit());
       setLastReceipt({ ...saleData, id: docRef.id });
-      setCart([]); setOrderDiscount(0); setAmountPaid('');
+      setCart([]); setOrderDiscountType('rs'); setOrderDiscountValue(0); setAmountPaid('');
       setSelectedCustomer(null); setCustomerSearch('');
       setMobileTab('medicines');
       setTimeout(handlePrint, 500);
@@ -646,17 +652,31 @@ export function Billing() {
           </div>
         )}
         <div className="flex justify-between items-center text-sm text-gray-600">
-          <span>Order Discount</span>
-          <div className="flex items-center gap-1">
-            <input type="number" min="0" max="100" value={orderDiscount || ''} placeholder="0"
-              onChange={e => setOrderDiscount(Number(e.target.value))}
-              className="w-14 p-1 text-right border border-gray-200 rounded focus:outline-none focus:border-blue-400 text-sm bg-white" />
-            <span className="text-gray-400">%</span>
+          <span>Bill Discount</span>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={orderDiscountType}
+              onChange={e => {
+                const type = e.target.value as BillDiscountType;
+                setOrderDiscountType(type);
+                setOrderDiscountValue(0);
+              }}
+              className="p-1 border border-gray-200 rounded text-xs font-semibold bg-white focus:outline-none focus:border-blue-400"
+              aria-label="Bill discount type"
+            >
+              <option value="rs">Rs</option>
+              <option value="pct">%</option>
+            </select>
+            <input type="number" min="0" max={orderDiscountType === 'pct' ? 100 : undefined}
+              step={orderDiscountType === 'pct' ? '0.1' : '1'}
+              value={orderDiscountValue || ''} placeholder="0"
+              onChange={e => setOrderDiscountValue(normalizeBillDiscountValue(orderDiscountType, Number(e.target.value)))}
+              className="w-20 p-1 text-right border border-gray-200 rounded focus:outline-none focus:border-blue-400 text-sm bg-white" />
           </div>
         </div>
         {orderDiscountAmount > 0 && (
           <div className="flex justify-between text-sm text-red-500">
-            <span>Order Discount Amount</span><span>-{formatCurrency(orderDiscountAmount)}</span>
+            <span>Bill Discount ({orderDiscountType === 'pct' ? `${normalizeBillDiscountValue('pct', orderDiscountValue)}%` : 'Rs'})</span><span>-{formatCurrency(orderDiscountAmount)}</span>
           </div>
         )}
         <div className="pt-2 border-t border-gray-200 flex justify-between items-center">
@@ -848,7 +868,7 @@ export function Billing() {
       {/* Printable Receipt */}
       <div className="thermal-receipt hidden print:block bg-white text-black font-mono">
         <div className="text-center mb-3">
-          <h2 className="text-lg font-bold">Al-Fateh Pharmacy</h2>
+          <h2 className="text-lg font-bold">{PHARMACY_RECEIPT_NAME}</h2>
           <p>Receipt</p>
           <p>{lastReceipt?.date ? format(new Date(lastReceipt.date), 'dd/MM/yyyy HH:mm') : format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
           {lastReceipt && <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(lastReceipt)}</p>}
@@ -889,7 +909,7 @@ export function Billing() {
             <div className="flex justify-between"><span>Item Discounts:</span><span>-{formatCurrency(lastReceipt?.totalItemDiscounts ?? totalItemDiscounts)}</span></div>
           )}
           {(lastReceipt?.orderDiscount ?? orderDiscountAmount) > 0 && (
-            <div className="flex justify-between"><span>Order Discount:</span><span>-{formatCurrency(lastReceipt?.orderDiscount ?? orderDiscountAmount)}</span></div>
+            <div className="flex justify-between"><span>Bill Discount:</span><span>-{formatCurrency(lastReceipt?.orderDiscount ?? orderDiscountAmount)}</span></div>
           )}
           <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-black">
             <span>Total:</span><span>{formatCurrency(lastReceipt?.total ?? grandTotal)}</span>
@@ -906,6 +926,9 @@ export function Billing() {
         <div className="text-center mt-5 text-[10px]">
           <p>Thank you for your visit!</p>
           <p>Get Well Soon</p>
+        </div>
+        <div dir="rtl" className="receipt-policy text-center mt-3 pt-2 border-t border-dashed border-black text-[10px] leading-relaxed" style={{ fontFamily: "'Noto Nastaliq Urdu','Noto Naskh Arabic','Segoe UI',Arial,sans-serif" }}>
+          {PHARMACY_RETURN_POLICY_URDU.map(line => <p key={line}>{line}</p>)}
         </div>
       </div>
 
