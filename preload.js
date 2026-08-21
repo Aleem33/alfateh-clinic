@@ -8,6 +8,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  getLanStatus: () => ipcRenderer.invoke('lan:get-status'),
+  setLanConnectivity: (online) => ipcRenderer.invoke('lan:set-connectivity', online),
+  acquireLanWriteAccess: () => ipcRenderer.invoke('lan:acquire-write'),
+  publishLanActivity: (activity) => ipcRenderer.invoke('lan:publish-activity', activity),
+  completeLanCloudSync: () => ipcRenderer.invoke('lan:complete-cloud-sync'),
   onUpdateStatus: (callback) => {
     const handler = (_event, status) => callback(status);
     ipcRenderer.on('updater:status', handler);
@@ -22,5 +27,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, maximized) => callback(maximized);
     ipcRenderer.on('window:maximized-changed', handler);
     return () => ipcRenderer.removeListener('window:maximized-changed', handler);
+  },
+  onLanStatus: (callback) => {
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('lan:status', handler);
+    return () => ipcRenderer.removeListener('lan:status', handler);
+  },
+  onLanActivity: (callback) => {
+    const handler = (_event, activity) => callback(activity);
+    ipcRenderer.on('lan:activity', handler);
+    return () => ipcRenderer.removeListener('lan:activity', handler);
   },
 });

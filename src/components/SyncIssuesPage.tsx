@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { collection, doc, onSnapshot, orderBy, query, updateDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, updateDoc } from '@/lib/firestore';
 import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { db } from '../firebase';
 import { runOfflineSyncNow } from '../lib/offlineSync';
+import { isCloudOnline } from '../lib/lanCoordinator';
 
 export function SyncIssuesPage() {
   const [issues, setIssues] = useState<any[]>([]);
@@ -40,7 +41,7 @@ export function SyncIssuesPage() {
         </div>
         <button
           onClick={runSync}
-          disabled={syncing || !navigator.onLine}
+          disabled={syncing || !isCloudOnline()}
           className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
         >
           <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />

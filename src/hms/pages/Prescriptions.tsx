@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, getDoc, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, addDoc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';

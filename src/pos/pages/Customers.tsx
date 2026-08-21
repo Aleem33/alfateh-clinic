@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
   doc, increment, query, orderBy, getDocs, where
-} from 'firebase/firestore';
+} from '@/lib/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { printOrShare } from '../lib/nativeUtils';

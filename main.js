@@ -1,8 +1,10 @@
 const { app, BrowserWindow, Menu, shell, ipcMain, screen } = require('electron');
 const path = require('path');
 const { initAutoUpdater, checkForUpdates, installUpdate } = require('./updater');
+const { createLanCoordinator } = require('./lanCoordinator');
 
 let mainWindow;
+let lanCoordinator;
 
 function getInitialWindowBounds() {
   const { workAreaSize } = screen.getPrimaryDisplay();
@@ -89,8 +91,20 @@ ipcMain.handle('window:close', (event) => {
 ipcMain.handle('window:is-maximized', (event) => {
   return BrowserWindow.fromWebContents(event.sender)?.isMaximized() || false;
 });
+ipcMain.handle('lan:get-status', () => lanCoordinator?.currentStatus());
+ipcMain.handle('lan:set-connectivity', (_event, online) => lanCoordinator?.setConnectivity(online));
+ipcMain.handle('lan:acquire-write', () => lanCoordinator?.acquireWriteAccess());
+ipcMain.handle('lan:publish-activity', (_event, activity) => lanCoordinator?.publishActivity(activity));
+ipcMain.handle('lan:complete-cloud-sync', () => lanCoordinator?.completeCloudSync());
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  lanCoordinator = createLanCoordinator({
+    userDataPath: app.getPath('userData'),
+    sendToRenderer: (channel, payload) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+    },
+  });
+  await lanCoordinator.whenConnectivityKnown();
   createWindow();
   initAutoUpdater(getMainWindow);
   app.on('activate', () => {
@@ -99,6 +113,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  lanCoordinator?.stop();
   if (process.platform !== 'darwin') app.quit();
 });
 

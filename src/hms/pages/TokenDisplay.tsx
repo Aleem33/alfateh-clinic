@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, orderBy, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, orderBy, doc, updateDoc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { today, formatDate } from '../lib/utils';
 import { Monitor, ChevronRight, Clock, Users, CheckCircle } from 'lucide-react';

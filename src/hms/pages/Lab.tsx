@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, CheckCircle, Clock, BookOpen, Printer, FileText, Upload } from 'lucide-react';
 import { queueLabReportUpload } from '../../lib/offlineSync';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
+import { isCloudOnline } from '../../lib/lanCoordinator';
 
 const CATEGORIES = ['Hematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Imaging', 'Pathology', 'Other'];
 
@@ -113,7 +114,7 @@ export function Lab() {
       if (reportPdf) {
         const path = `labReports/${showResultModal.id}/${Date.now()}-${safeFileName(reportPdf.name)}`;
         try {
-          if (!navigator.onLine) throw new Error('Offline: PDF upload queued.');
+          if (!isCloudOnline()) throw new Error('Offline: PDF upload queued.');
           const storageRef = ref(storage, path);
           await uploadBytes(storageRef, reportPdf, { contentType: 'application/pdf' });
           const url = await getDownloadURL(storageRef);

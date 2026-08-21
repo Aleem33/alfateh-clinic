@@ -19,6 +19,29 @@ export interface AppMessage {
   message: string;
 }
 
+export type LanRole = 'online' | 'ready' | 'candidate' | 'primary' | 'viewer' | 'syncing-primary' | 'sync-wait';
+
+export interface LanActivity {
+  id: string;
+  action: string;
+  collection: string;
+  recordId?: string;
+  label?: string;
+  summary?: string;
+  createdAt: string;
+  deviceName?: string;
+}
+
+export interface LanStatus {
+  deviceId: string;
+  deviceName: string;
+  online: boolean;
+  role: LanRole;
+  primary: { deviceId: string; deviceName: string } | null;
+  peers: Array<{ deviceId: string; deviceName: string; role: string; lastSeen: number }>;
+  activities: LanActivity[];
+}
+
 export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   checkForUpdates: () => Promise<{ ok: boolean; message?: string }>;
@@ -27,9 +50,16 @@ export interface ElectronAPI {
   toggleMaximizeWindow: () => Promise<boolean>;
   closeWindow: () => Promise<void>;
   isWindowMaximized: () => Promise<boolean>;
+  getLanStatus: () => Promise<LanStatus | undefined>;
+  setLanConnectivity: (online: boolean) => Promise<LanStatus | undefined>;
+  acquireLanWriteAccess: () => Promise<{ allowed: boolean; reason?: string; status?: LanStatus } | undefined>;
+  publishLanActivity: (activity: Partial<LanActivity>) => Promise<boolean | undefined>;
+  completeLanCloudSync: () => Promise<LanStatus | undefined>;
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
   onAppMessage: (callback: (message: AppMessage) => void) => () => void;
   onWindowMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
+  onLanStatus: (callback: (status: LanStatus) => void) => () => void;
+  onLanActivity: (callback: (activity: LanActivity) => void) => () => void;
 }
 
 declare global {

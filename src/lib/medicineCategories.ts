@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from '@/lib/firestore';
 import { db } from '../firebase';
 
 export const DEFAULT_MEDICINE_CATEGORIES = [

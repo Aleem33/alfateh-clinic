@@ -7,7 +7,7 @@ import {
   query,
   updateDoc,
   where,
-} from 'firebase/firestore';
+} from '@/lib/firestore';
 import { auth, db } from '../firebase';
 import {
   findDuplicateMedicine,
@@ -18,6 +18,7 @@ import {
   type MedicineRecord,
 } from './medicineIndex';
 import { getMedicineStoreSnapshot } from './medicineStore';
+import { isCloudOnline } from './lanCoordinator';
 
 export class MedicineConflictError extends Error {
   medicineId?: string;
@@ -66,7 +67,7 @@ export async function createMedicineSafely(
   const cachedDuplicate = findDuplicateMedicine(cachedCandidates, data);
   if (cachedDuplicate) throw new MedicineConflictError(cachedDuplicate);
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
+  if (typeof navigator === 'undefined' || isCloudOnline()) {
     try {
       const existing = await getDocsFromServer(query(
         collection(db, 'medicines'),

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { createNotification } from './audit';
 import { addDays, isBefore, parseISO } from 'date-fns';

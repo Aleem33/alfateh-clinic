@@ -1,4 +1,4 @@
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp } from '@/lib/firestore';
 import { db, auth } from '../../firebase';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
 

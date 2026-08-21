@@ -14,7 +14,7 @@ import {
 import {
   initializeFirestore, doc, getDoc, setDoc, updateDoc,
   increment, persistentLocalCache, persistentMultipleTabManager, runTransaction,
-} from 'firebase/firestore';
+} from '@/lib/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 import { getNextLocalNumber } from './lib/offlineIdentity';

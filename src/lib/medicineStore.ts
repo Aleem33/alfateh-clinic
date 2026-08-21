@@ -1,4 +1,4 @@
-import { collection, onSnapshot, type Unsubscribe } from 'firebase/firestore';
+import { collection, onSnapshot, type Unsubscribe } from '@/lib/firestore';
 import { db } from '../firebase';
 import { indexMedicine, partitionMedicines, type MedicineRecord } from './medicineIndex';
 

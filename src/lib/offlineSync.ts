@@ -1,8 +1,11 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where, type Unsubscribe } from 'firebase/firestore';
+import { collection, doc, getDocs, query, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
+import { completeLanCloudSync, getLanStatus, subscribeLanStatus } from './lanCoordinator';
+import { subscribeOfflineCache } from './offlineCache';
+import { GLOBAL_DATA_COLLECTIONS } from './dataSync';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -30,30 +33,17 @@ type PendingLabReport = {
 const DB_NAME = 'alfateh-offline-sync';
 const DB_VERSION = 1;
 const LAB_STORE = 'pendingLabReports';
-const PENDING_WRITE_COLLECTIONS = [
-  'patients',
-  'appointments',
-  'consultations',
-  'pharmacyOrders',
-  'labOrders',
-  'bills',
-  'medicines',
-  'sales',
-  'saleReturns',
-  'stockMovements',
-  'customers',
-];
+const PENDING_WRITE_COLLECTIONS = GLOBAL_DATA_COLLECTIONS;
 const listeners = new Set<(snapshot: SyncSnapshot) => void>();
 const pendingWriteCollections = new Set<string>();
 const device = getOfflineDevice();
-let online = typeof navigator === 'undefined' ? true : navigator.onLine;
+let online = typeof window === 'undefined' ? true : getLanStatus().online;
 let syncing = false;
 let labPendingCount = 0;
 let pendingCount = 0;
 let issueCount = 0;
 let lastError = '';
 let started = false;
-let pendingUnsubs: Unsubscribe[] = [];
 
 function currentSnapshot(): SyncSnapshot {
   return { online, syncing, pendingCount, issueCount, lastError, devicePrefix: device.prefix };
@@ -200,6 +190,7 @@ async function checkStockConflicts() {
 
 export async function runOfflineSyncNow() {
   if (!online || syncing) return;
+  if (getLanStatus().role === 'sync-wait') return;
   if (!auth.currentUser) {
     lastError = '';
     notify();
@@ -210,55 +201,50 @@ export async function runOfflineSyncNow() {
   notify();
   try {
     await processLabReportQueue();
+    await waitForPendingWrites(db);
     await checkStockConflicts();
   } catch (error: any) {
     lastError = error?.message || 'Offline sync failed.';
   } finally {
     syncing = false;
     await refreshPendingCount();
+    await completeLanCloudSync();
     notify();
   }
 }
 
 function stopPendingWriteWatchers() {
-  pendingUnsubs.forEach(unsub => unsub());
-  pendingUnsubs = [];
   pendingWriteCollections.clear();
   notify();
 }
 
 function startPendingWriteWatchers() {
-  if (pendingUnsubs.length > 0 || !auth.currentUser) return;
-  pendingUnsubs = PENDING_WRITE_COLLECTIONS.map(collectionName =>
-    onSnapshot(
-      collection(db, collectionName),
-      { includeMetadataChanges: true },
-      snap => {
-        const hasPendingWrites = snap.docs.some(document => document.metadata.hasPendingWrites);
-        if (hasPendingWrites) pendingWriteCollections.add(collectionName);
-        else pendingWriteCollections.delete(collectionName);
-        notify();
-      },
-      () => {
-        pendingWriteCollections.delete(collectionName);
-        notify();
-      },
-    )
-  );
+  // Full-cache listeners provide pending-write metadata for every module.
 }
 
 export function startOfflineSyncService() {
   if (started || typeof window === 'undefined') return;
   started = true;
 
-  const updateOnline = () => {
-    online = navigator.onLine;
+  const updateOnline = (nextOnline = navigator.onLine) => {
+    const wasOnline = online;
+    online = nextOnline;
     notify();
-    if (online) void runOfflineSyncNow();
+    if (online && !wasOnline) void runOfflineSyncNow();
   };
 
-  window.addEventListener('online', updateOnline);
-  window.addEventListener('offline', updateOnline);
+  if (!window.electronAPI) {
+    window.addEventListener('online', () => updateOnline(true));
+    window.addEventListener('offline', () => updateOnline(false));
+  }
+  subscribeLanStatus(lanStatus => updateOnline(lanStatus.online));
+  subscribeOfflineCache(cacheStatus => {
+    pendingWriteCollections.clear();
+    cacheStatus.pendingCollections
+      .filter(collectionName => PENDING_WRITE_COLLECTIONS.includes(collectionName))
+      .forEach(collectionName => pendingWriteCollections.add(collectionName));
+    notify();
+  });
   onAuthStateChanged(auth, user => {
     lastError = '';
     if (user) {

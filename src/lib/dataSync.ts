@@ -1,5 +1,6 @@
-import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from '@/lib/firestore';
 import { auth, db } from '../firebase';
+import { isCloudOnline } from './lanCoordinator';
 
 export const GLOBAL_DATA_COLLECTIONS = [
   'settings',
@@ -168,7 +169,7 @@ export async function deleteAppDataScope(scope: ResetScope, onProgress?: Progres
   if (!currentUser) {
     throw new Error('You must be logged in as an admin to reset app data.');
   }
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  if (typeof navigator !== 'undefined' && !isCloudOnline()) {
     throw new Error('Reset is blocked while offline. Connect to the internet and try again.');
   }
 

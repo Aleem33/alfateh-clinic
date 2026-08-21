@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc } from '@/lib/firestore';
 import { downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -97,6 +97,11 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
     try {
       const unitsPerBox = Math.max(1, Math.floor(toNumber(formData.unitsPerBox, 1)));
       const totalStock = (Math.floor(toNumber(formData.stockBoxes)) * unitsPerBox) + Math.floor(toNumber(formData.stockLoose));
+      const editingMedicine = editingId ? medicines.find(medicine => medicine.id === editingId) : null;
+      if (editingMedicine && Number(editingMedicine.stock || 0) > 0 && unitsPerBox !== Math.max(1, Number(editingMedicine.unitsPerBox || 1))) {
+        setFormError('Units per box cannot be changed while this batch has stock. Create a new batch for different packaging.');
+        return;
+      }
       const supplier = suppliers.find(s => s.id === formData.supplierId);
       const supplierName = supplier?.name || formData.supplierName || '';
       const data = {

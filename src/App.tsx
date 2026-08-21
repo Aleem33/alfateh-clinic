@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, logout } from './firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '@/lib/firestore';
 import { AppSelector } from './landing/AppSelector';
 import { HMSApp } from './hms/HMSApp';
 import { POSApp } from './pos/POSApp';
@@ -10,6 +10,8 @@ import { GlobalAppNotifications } from './components/GlobalAppNotifications';
 import { AppDialogProvider } from './components/AppDialog';
 import { DesktopTitleBar } from './components/DesktopTitleBar';
 import { startOfflineSyncService } from './lib/offlineSync';
+import { isCloudOnline, startLanCoordinator } from './lib/lanCoordinator';
+import { startFullOfflineCache, stopFullOfflineCache } from './lib/offlineCache';
 
 type AppMode = 'hms' | 'pos' | null;
 
@@ -25,6 +27,7 @@ export default function App() {
   const [sessionAuthed, setSessionAuthed] = useState(false);
 
   useEffect(() => {
+    startLanCoordinator();
     startOfflineSyncService();
   }, []);
 
@@ -32,6 +35,7 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setAuthError('');
       if (u) {
+        startFullOfflineCache();
         setUserEmail(u.email || '');
         try {
           const snap = await getDoc(doc(db, 'users', u.uid));
@@ -45,7 +49,7 @@ export default function App() {
             localStorage.setItem('alfateh.cachedUserRole', snap.data().role || 'cashier');
           }
         } catch {
-          if (!navigator.onLine) {
+          if (!isCloudOnline()) {
             setAuthError('Using cached login. Some cloud-only actions will sync when internet returns.');
             setUserRole(localStorage.getItem('alfateh.cachedUserRole') || 'cashier');
           } else {
@@ -54,6 +58,7 @@ export default function App() {
           }
         }
       } else {
+        stopFullOfflineCache();
         setUserRole(null);
         setUserEmail('');
         setUser(null);
@@ -71,7 +76,7 @@ export default function App() {
   const handleSelectApp = async (mode: AppMode) => {
     setSessionAuthed(false);
     setAppMode(mode);
-    if (!navigator.onLine && auth.currentUser) {
+    if (!isCloudOnline() && auth.currentUser) {
       setSessionAuthed(true);
       return;
     }

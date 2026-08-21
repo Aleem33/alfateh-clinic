@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, updateDoc, doc, increment, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, updateDoc, doc, increment, writeBatch } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
@@ -147,15 +147,26 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
     if (!selectedOrder) return;
     const toDispense = dispenseItems.filter(i => i.matchedId && i.qty > 0);
     if (!toDispense.length) { await alert('No medicines linked to stock. Please link each item.', 'Nothing to Dispense'); return; }
+    const insufficient = toDispense.find(item => {
+      const medicine = medicines.find(candidate => candidate.id === item.matchedId);
+      return !medicine || Number(item.qty || 0) > Number(medicine.stock || 0);
+    });
+    if (insufficient) {
+      const medicine = medicines.find(candidate => candidate.id === insufficient.matchedId);
+      await alert(`${medicine?.name || insufficient.name} has only ${Number(medicine?.stock || 0)} units available. Select another batch or reduce the quantity.`, 'Insufficient Stock');
+      return;
+    }
     setSaving(true);
     try {
+      const dispenseBatch = writeBatch(db);
       for (const item of toDispense) {
-        await updateDoc(doc(db, 'medicines', item.matchedId), { stock: increment(-item.qty), updatedAt: nowISO() });
+        dispenseBatch.update(doc(db, 'medicines', item.matchedId), { stock: increment(-item.qty), updatedAt: nowISO() });
       }
-      await updateDoc(doc(db, 'pharmacyOrders', selectedOrder.id), {
+      dispenseBatch.update(doc(db, 'pharmacyOrders', selectedOrder.id), {
         status: 'dispensed', dispensedAt: nowISO(),
         dispensedItems: toDispense.map(i => ({ name: i.name, matchedName: i.matchedName, batchNo: i.matchedBatchNo || '', medicineId: i.matchedId, qty: i.qty, frequency: i.frequency, duration: i.duration })),
       });
+      await dispenseBatch.commit();
       setSelectedOrder(null); setDispenseItems([]);
     } catch (e: any) { await alert('Dispense failed: ' + (e.message || 'Unknown error'), 'Dispense Failed'); }
     finally { setSaving(false); }
@@ -191,6 +202,11 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
     try {
       const unitsPerBox = Math.max(1, Math.floor(toNumber(medForm.unitsPerBox, 1)));
       const stock = Math.floor(toNumber(medForm.stockBoxes)) * unitsPerBox + Math.floor(toNumber(medForm.stockLoose));
+      const editingMedicine = editMedId ? medicines.find(medicine => medicine.id === editMedId) : null;
+      if (editingMedicine && Number(editingMedicine.stock || 0) > 0 && unitsPerBox !== Math.max(1, Number(editingMedicine.unitsPerBox || 1))) {
+        setError('Units per box cannot be changed while this batch has stock. Create a new batch for different packaging.');
+        return;
+      }
       const data = {
         name,
         nameUrdu: medForm.nameUrdu || '',
@@ -277,11 +293,6 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
         });
         editBatch.update(doc(db, 'medicines', med.id), {
           stock: increment(stockDelta),
-          unitsPerBox,
-          costPrice: costPerBox,
-          retailPrice,
-          unitPrice,
-          expiryDate: purchaseForm.expiryDate || med.expiryDate,
           updatedAt: nowISO(),
         });
         await editBatch.commit();
@@ -297,6 +308,15 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       }, medicines)) {
         setError(`Batch ${batchNo} already exists for this medicine and supplier. Select Existing Batch or enter a different batch number.`);
         return;
+      }
+      if (purchaseBatchMode === 'existing') {
+        const existingUnits = Math.max(1, Number(med.unitsPerBox || 1));
+        const existingCost = Number(med.costPrice || 0);
+        const existingRetail = Number(med.retailPrice || med.price || 0);
+        if (unitsPerBox !== existingUnits || Math.abs(costPerBox - existingCost) > 0.001 || Math.abs(retailPrice - existingRetail) > 0.001) {
+          setError('Pack size and prices are locked for an existing batch. Choose New Batch to use different packaging or prices.');
+          return;
+        }
       }
       const batchTarget = await ensureMedicinePurchaseBatch(med, {
         batchNo,
@@ -332,13 +352,6 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       if (!batchTarget.created) {
         batch.update(doc(db, 'medicines', batchTarget.medicineId), {
           stock: increment(unitsAdded),
-          unitsPerBox,
-          costPrice: costPerBox,
-          retailPrice,
-          unitPrice,
-          expiryDate: purchaseForm.expiryDate || med.expiryDate,
-          supplierId: purchaseForm.supplierId || med.supplierId || '',
-          supplierName: purchaseForm.supplierName || med.supplierName || '',
           updatedAt: nowISO(),
         });
       }

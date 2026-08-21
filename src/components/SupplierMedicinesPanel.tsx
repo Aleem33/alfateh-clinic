@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, increment, writeBatch } from 'firebase/firestore';
+import { collection, doc, increment, writeBatch } from '@/lib/firestore';
 import { CheckCircle, ChevronUp, Package, PackagePlus, Plus, X } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import {
@@ -252,6 +252,15 @@ export function SupplierMedicinesPanel({
       setError(`Batch ${batchNo} already exists for this supplier. Choose Existing Batch or enter a different batch number.`);
       return;
     }
+    if (purchaseBatchMode === 'existing') {
+      const existingUnits = Math.max(1, Number(purchasingMedicine.unitsPerBox || 1));
+      const existingCost = Number(purchasingMedicine.costPrice || 0);
+      const existingRetail = Number(purchasingMedicine.retailPrice || purchasingMedicine.price || 0);
+      if (unitsPerBox !== existingUnits || Math.abs(costPrice - existingCost) > 0.001 || Math.abs(retailPrice - existingRetail) > 0.001) {
+        setError('Pack size and prices are locked for an existing batch. Choose New Batch to use different packaging or prices.');
+        return;
+      }
+    }
 
     setSaving(true);
     setError('');
@@ -298,13 +307,6 @@ export function SupplierMedicinesPanel({
       if (!batchTarget.created) {
         batch.update(doc(db, 'medicines', batchTarget.medicineId), {
           stock: increment(totalUnitsAdded),
-          unitsPerBox,
-          costPrice,
-          retailPrice,
-          unitPrice,
-          expiryDate: purchaseForm.expiryDate || purchasingMedicine.expiryDate || '',
-          supplierId: supplier.id,
-          supplierName: supplier.name,
           updatedAt: timestamp,
         });
       }

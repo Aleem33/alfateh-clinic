@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, deleteDoc, doc } from '@/lib/firestore';
 import { db, auth } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { Stethoscope, Plus, Trash2, Search, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, onSnapshot, updateDoc, doc, writeBatch, query, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, updateDoc, doc, writeBatch, query, orderBy, limit } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { Bell, Search, Users, Pill, Briefcase, X, CheckCheck } from 'lucide-react';
 import { useGlobalSearch } from '../lib/search';

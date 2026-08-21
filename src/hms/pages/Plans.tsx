@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from '@/lib/firestore';
 import { db, auth } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { Check, Zap, Building2, Crown, Star } from 'lucide-react';

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, increment, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, doc, increment, writeBatch } from '@/lib/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Search, Truck, PackagePlus, X, ChevronDown, CheckCircle, Edit2, AlertCircle } from 'lucide-react';
@@ -128,11 +128,6 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         if (selectedMedicine) {
           batch.update(doc(db, 'medicines', selectedMedicine.id), {
             stock: increment(stockDelta),
-            unitsPerBox,
-            costPrice,
-            retailPrice: retailPriceValue ?? Number(selectedMedicine.retailPrice || selectedMedicine.price || 0),
-            unitPrice: unitPriceValue ?? Number(selectedMedicine.unitPrice || 0),
-            expiryDate: formData.expiryDate,
             updatedAt: new Date().toISOString(),
           });
         }
@@ -154,6 +149,16 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
           setFormError(`Batch ${batchNo} already exists for this medicine and supplier. Select Existing Batch or enter a different batch number.`);
           return;
         }
+        if (purchaseBatchMode === 'existing') {
+          const existingUnits = Math.max(1, Number(selectedMedicine.unitsPerBox || 1));
+          const existingCost = Number(selectedMedicine.costPrice || 0);
+          const existingRetail = Number(selectedMedicine.retailPrice || selectedMedicine.price || 0);
+          const proposedRetail = retailPriceValue ?? existingRetail;
+          if (unitsPerBox !== existingUnits || Math.abs(costPrice - existingCost) > 0.001 || Math.abs(proposedRetail - existingRetail) > 0.001) {
+            setFormError('Pack size and prices are locked for an existing batch. Choose New Batch to use different packaging or prices.');
+            return;
+          }
+        }
         const batchTarget = await ensureMedicinePurchaseBatch(selectedMedicine, {
           batchNo,
           expiryDate: formData.expiryDate || selectedMedicine.expiryDate || '',
@@ -173,13 +178,6 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         if (!batchTarget.created) {
           batch.update(doc(db, 'medicines', batchTarget.medicineId), {
             stock: increment(totalUnits),
-            unitsPerBox,
-            costPrice,
-            retailPrice: retailPriceValue ?? Number(selectedMedicine.retailPrice || selectedMedicine.price || 0),
-            unitPrice: unitPriceValue ?? Number(selectedMedicine.unitPrice || 0),
-            expiryDate: formData.expiryDate || selectedMedicine.expiryDate || '',
-            supplierId: formData.supplierId || '',
-            supplierName: medicineSupplierName,
             updatedAt: new Date().toISOString(),
           });
         }

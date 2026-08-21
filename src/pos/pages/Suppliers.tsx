@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { Plus, Edit2, Trash2, Search, X, Phone, MapPin, ChevronDown, Package } from 'lucide-react';
 import { format } from 'date-fns';
