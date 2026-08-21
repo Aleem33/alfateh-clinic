@@ -18,6 +18,14 @@ import {
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 import { getNextLocalNumber } from './lib/offlineIdentity';
+import { isCloudOnline } from './lib/lanCoordinator';
+import {
+  enrollOfflineCredential,
+  profileFromUserDocument,
+  setActiveAuthSession,
+  verifyOfflineCredential,
+  type AuthSession,
+} from './lib/offlineAuth';
 
 // ── App instances ─────────────────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
@@ -43,8 +51,49 @@ export function usernameToEmail(username: string): string {
 }
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
-export const loginWithUsername = (username: string, password: string) =>
-  signInWithEmailAndPassword(auth, usernameToEmail(username), password);
+export async function loginWithUsername(username: string, password: string): Promise<AuthSession> {
+  const normalizedUsername = username.trim().toLowerCase().replace(/\s+/g, '.');
+  if (!isCloudOnline() && window.electronAPI) {
+    const result = await verifyOfflineCredential(normalizedUsername, password);
+    if (!result.ok || !result.profile) {
+      const message = result.reason === 'not-enrolled'
+        ? 'This account has not been enabled for offline login on this computer. Sign in once while online.'
+        : result.reason === 'disabled'
+          ? 'This account is disabled and cannot be used offline.'
+          : result.reason === 'locked'
+            ? `Too many incorrect attempts. Try again in ${result.retryAfterSeconds || 30} seconds.`
+          : 'Invalid username or password.';
+      throw new Error(message);
+    }
+    const session: AuthSession = { mode: 'offline', profile: result.profile };
+    setActiveAuthSession(session);
+    return session;
+  }
+
+  const credential = await signInWithEmailAndPassword(auth, usernameToEmail(normalizedUsername), password);
+  const profileSnapshot = await getDoc(doc(db, 'users', credential.user.uid));
+  if (!profileSnapshot.exists()) {
+    await signOut(auth);
+    throw new Error('Your account has not been configured. Please contact an administrator.');
+  }
+  const profile = profileFromUserDocument(
+    credential.user.uid,
+    credential.user.email || usernameToEmail(normalizedUsername),
+    profileSnapshot.data(),
+  );
+  if (!profile.active) {
+    await signOut(auth);
+    throw new Error('This account has been disabled. Please contact an administrator.');
+  }
+  try {
+    await enrollOfflineCredential(normalizedUsername, password, profile);
+  } catch (error) {
+    console.warn('Offline login enrollment was unavailable:', error);
+  }
+  const session: AuthSession = { mode: 'online', profile };
+  setActiveAuthSession(session);
+  return session;
+}
 
 export const loginWithEmail = loginWithUsername;
 export const logout = () => signOut(auth);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { downloadOrShare } from '../lib/nativeUtils';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import { renewActiveOfflineCredential } from '../../lib/offlineAuth';
 import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database, Lock, Eye, EyeOff } from 'lucide-react';
 import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 import { auth } from '../../firebase';
@@ -53,6 +54,7 @@ export function Settings() {
       if (!user?.email) throw new Error('You are not logged in.');
       await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPass));
       await updatePassword(user, newPass);
+      await renewActiveOfflineCredential(newPass);
       setCurrentPass('');
       setNewPass('');
       setConfirmPass('');

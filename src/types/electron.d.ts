@@ -42,6 +42,25 @@ export interface LanStatus {
   activities: LanActivity[];
 }
 
+export interface OfflineAuthProfile {
+  uid: string;
+  username: string;
+  email: string;
+  name: string;
+  role: string;
+  app: string;
+  permissions: string[] | Record<string, unknown>;
+  active: boolean;
+  profileUpdatedAt: string;
+}
+
+export interface OfflineAuthResult {
+  ok: boolean;
+  reason?: 'not-enrolled' | 'invalid-credential' | 'disabled' | 'locked';
+  retryAfterSeconds?: number;
+  profile?: OfflineAuthProfile;
+}
+
 export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   checkForUpdates: () => Promise<{ ok: boolean; message?: string }>;
@@ -55,6 +74,12 @@ export interface ElectronAPI {
   acquireLanWriteAccess: () => Promise<{ allowed: boolean; reason?: string; status?: LanStatus } | undefined>;
   publishLanActivity: (activity: Partial<LanActivity>) => Promise<boolean | undefined>;
   completeLanCloudSync: () => Promise<LanStatus | undefined>;
+  isOfflineAuthAvailable: () => Promise<boolean>;
+  enrollOfflineCredential: (input: { username: string; password: string; profile: OfflineAuthProfile }) => Promise<OfflineAuthProfile>;
+  verifyOfflineCredential: (input: { username: string; password: string }) => Promise<OfflineAuthResult>;
+  getOfflineCloudCredential: (username: string) => Promise<{ username: string; password: string; uid: string } | null>;
+  updateOfflineAuthProfile: (profile: OfflineAuthProfile) => Promise<boolean>;
+  revokeOfflineCredential: (username: string) => Promise<boolean>;
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
   onAppMessage: (callback: (message: AppMessage) => void) => () => void;
   onWindowMaximizedChange: (callback: (maximized: boolean) => void) => () => void;

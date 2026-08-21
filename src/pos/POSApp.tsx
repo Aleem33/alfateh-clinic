@@ -17,11 +17,12 @@ import { SalesReturns } from './pages/SalesReturns';
 import { PurchaseReturns } from './pages/PurchaseReturns';
 import { PatientHistory } from './pages/PatientHistory';
 import { SyncIssuesPage } from '../components/SyncIssuesPage';
+import type { AuthSession } from '../lib/offlineAuth';
 
 interface Props {
   userRole: string | null;
   onSwitchApp: (mode: 'hms' | 'pos') => void;
-  onLoginSuccess: () => void;
+  onLoginSuccess: (session: AuthSession) => void;
   onBack?: () => void;
   onLogout?: () => void;
 }

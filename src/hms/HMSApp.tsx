@@ -23,12 +23,13 @@ import { Schedule } from './pages/Schedule';
 import { BedManagement } from './pages/BedManagement';
 import { useAutoNotifications } from './lib/notifications';
 import { SyncIssuesPage } from '../components/SyncIssuesPage';
+import type { AuthSession } from '../lib/offlineAuth';
 
 interface Props {
   userRole: string | null;
   userEmail: string;
   onSwitchApp: (mode: 'hms' | 'pos') => void;
-  onLoginSuccess: () => void;
+  onLoginSuccess: (session: AuthSession) => void;
   onBack?: () => void;
   onLogout?: () => void;
 }

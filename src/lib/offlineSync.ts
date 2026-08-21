@@ -6,6 +6,7 @@ import { getOfflineDevice } from './offlineIdentity';
 import { completeLanCloudSync, getLanStatus, subscribeLanStatus } from './lanCoordinator';
 import { subscribeOfflineCache } from './offlineCache';
 import { GLOBAL_DATA_COLLECTIONS } from './dataSync';
+import { isCloudAuthReady } from './offlineAuth';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -190,6 +191,7 @@ async function checkStockConflicts() {
 
 export async function runOfflineSyncNow() {
   if (!online || syncing) return;
+  if (!isCloudAuthReady()) return;
   if (getLanStatus().role === 'sync-wait') return;
   if (!auth.currentUser) {
     lastError = '';
@@ -237,6 +239,7 @@ export function startOfflineSyncService() {
     window.addEventListener('online', () => updateOnline(true));
     window.addEventListener('offline', () => updateOnline(false));
   }
+  window.addEventListener('alfateh:auth-sync-ready', () => void runOfflineSyncNow());
   subscribeLanStatus(lanStatus => updateOnline(lanStatus.online));
   subscribeOfflineCache(cacheStatus => {
     pendingWriteCollections.clear();

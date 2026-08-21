@@ -2,9 +2,10 @@ import logoUrl from '../../assets/logo';
 import React, { useState } from 'react';
 import { loginWithUsername } from '../../firebase';
 import { User, Lock, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import type { AuthSession } from '../../lib/offlineAuth';
 
 interface Props {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (session: AuthSession) => void;
   onBack?: () => void;
 }
 
@@ -20,10 +21,10 @@ export function Login({ onLoginSuccess, onBack }: Props) {
     setError('');
     setLoading(true);
     try {
-      await loginWithUsername(username, password);
-      onLoginSuccess();
-    } catch {
-      setError('Invalid username or password. Please try again.');
+      const session = await loginWithUsername(username, password);
+      onLoginSuccess(session);
+    } catch (loginError: any) {
+      setError(loginError?.message || 'Invalid username or password. Please try again.');
     } finally {
       setLoading(false);
     }

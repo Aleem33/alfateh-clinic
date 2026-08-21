@@ -1,10 +1,12 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, screen, safeStorage } = require('electron');
 const path = require('path');
 const { initAutoUpdater, checkForUpdates, installUpdate } = require('./updater');
 const { createLanCoordinator } = require('./lanCoordinator');
+const { createOfflineCredentialVault } = require('./offlineCredentialVault');
 
 let mainWindow;
 let lanCoordinator;
+let offlineCredentialVault;
 
 function getInitialWindowBounds() {
   const { workAreaSize } = screen.getPrimaryDisplay();
@@ -96,8 +98,18 @@ ipcMain.handle('lan:set-connectivity', (_event, online) => lanCoordinator?.setCo
 ipcMain.handle('lan:acquire-write', () => lanCoordinator?.acquireWriteAccess());
 ipcMain.handle('lan:publish-activity', (_event, activity) => lanCoordinator?.publishActivity(activity));
 ipcMain.handle('lan:complete-cloud-sync', () => lanCoordinator?.completeCloudSync());
+ipcMain.handle('offline-auth:available', () => offlineCredentialVault?.encryptionAvailable() || false);
+ipcMain.handle('offline-auth:enroll', (_event, input) => offlineCredentialVault?.enroll(input));
+ipcMain.handle('offline-auth:verify', (_event, input) => offlineCredentialVault?.verify(input?.username, input?.password));
+ipcMain.handle('offline-auth:get-cloud-credential', (_event, username) => offlineCredentialVault?.getCloudCredential(username));
+ipcMain.handle('offline-auth:update-profile', (_event, profile) => offlineCredentialVault?.updateProfile(profile));
+ipcMain.handle('offline-auth:revoke', (_event, username) => offlineCredentialVault?.revoke(username));
 
 app.whenReady().then(async () => {
+  offlineCredentialVault = createOfflineCredentialVault({
+    userDataPath: app.getPath('userData'),
+    safeStorage,
+  });
   lanCoordinator = createLanCoordinator({
     userDataPath: app.getPath('userData'),
     sendToRenderer: (channel, payload) => {

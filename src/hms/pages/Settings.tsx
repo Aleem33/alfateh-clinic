@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { doc, getDoc, setDoc } from '@/lib/firestore';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import { renewActiveOfflineCredential } from '../../lib/offlineAuth';
 import { db, auth, registerUser } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { Building2, Download, Upload, Trash2, AlertTriangle, UserPlus, X, Lock, Eye, EyeOff, Bot, CheckCircle, RefreshCw, Printer, FlaskConical } from 'lucide-react';
@@ -167,6 +168,7 @@ export function Settings() {
       const credential = EmailAuthProvider.credential(user.email, currentPass);
       await reauthenticateWithCredential(user, credential);
       await updatePassword(user, newPass);
+      await renewActiveOfflineCredential(newPass);
       setPassMsg('✓ Password changed successfully!');
       setCurrentPass(''); setNewPass(''); setConfirmPass('');
       setTimeout(() => setPassMsg(''), 4000);

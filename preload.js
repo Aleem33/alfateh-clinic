@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   acquireLanWriteAccess: () => ipcRenderer.invoke('lan:acquire-write'),
   publishLanActivity: (activity) => ipcRenderer.invoke('lan:publish-activity', activity),
   completeLanCloudSync: () => ipcRenderer.invoke('lan:complete-cloud-sync'),
+  isOfflineAuthAvailable: () => ipcRenderer.invoke('offline-auth:available'),
+  enrollOfflineCredential: (input) => ipcRenderer.invoke('offline-auth:enroll', input),
+  verifyOfflineCredential: (input) => ipcRenderer.invoke('offline-auth:verify', input),
+  getOfflineCloudCredential: (username) => ipcRenderer.invoke('offline-auth:get-cloud-credential', username),
+  updateOfflineAuthProfile: (profile) => ipcRenderer.invoke('offline-auth:update-profile', profile),
+  revokeOfflineCredential: (username) => ipcRenderer.invoke('offline-auth:revoke', username),
   onUpdateStatus: (callback) => {
     const handler = (_event, status) => callback(status);
     ipcRenderer.on('updater:status', handler);
