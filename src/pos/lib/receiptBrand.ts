@@ -1,4 +1,4 @@
-export const PHARMACY_RECEIPT_NAME = 'Sarwar Medical Store';
+export const PHARMACY_RECEIPT_NAME = 'Sarwar Medicine Store';
 
 export const PHARMACY_RETURN_POLICY_URDU = [
   '15 دن کے بعد ادویات تبدیل نہیں کی جائیں گی۔',

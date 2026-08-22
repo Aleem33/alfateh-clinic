@@ -223,6 +223,11 @@ service cloud.firestore {
       allow create, update: if isAdmin() || isPharmacist() || isCashier();
       allow delete: if isAdmin();
     }
+    match /heldBills/{doc} {
+      allow read: if isAuth();
+      allow create, update, delete: if isAdmin() || isCashier();
+    }
+
 
     match /posPurchases/{doc} {
       allow read: if isAuth();

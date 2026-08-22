@@ -8,6 +8,7 @@ import { formatCurrency } from '../lib/utils';
 import { printOrShare } from '../lib/nativeUtils';
 import { getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
+import { cartItemUnits } from '../lib/billingCart';
 import {
   Plus, Edit2, Trash2, Search, ChevronDown, ChevronUp,
   Eye, X, Wallet, CheckCircle, Clock, CreditCard, Receipt, Printer
@@ -158,7 +159,7 @@ export function Customers() {
       const itemLines = (sale.items || []).map((item: any) =>
         `<tr>
           <td style="padding:3px 6px;color:#555;font-size:11px;">${item.name}</td>
-          <td style="padding:3px 6px;text-align:center;font-size:11px;">${item.quantity} ${item.sellType}</td>
+          <td style="padding:3px 6px;text-align:center;font-size:11px;">${cartItemUnits(item)}</td>
           <td style="padding:3px 6px;text-align:right;font-size:11px;">Rs.${(item.total||0).toFixed(2)}</td>
         </tr>`
       ).join('');

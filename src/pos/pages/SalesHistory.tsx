@@ -6,6 +6,7 @@ import { formatCurrency } from '../lib/utils';
 import { getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
 import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
 import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountType } from '../lib/billDiscount';
+import { cartItemUnits } from '../lib/billingCart';
 import {
   Search, FileText, Eye, X, Printer, Download,
   Users, Building2, LayoutList, Table2,
@@ -295,7 +296,7 @@ export function SalesHistory() {
                 <tr key={item.cartItemId} className="border-b border-dashed border-gray-400">
                   <td className="py-1 pr-1 font-semibold">{item.name}</td>
                   <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.price)}</td>
-                  <td className="text-center py-1 whitespace-nowrap">{item.quantity}{item.sellType === 'box' ? 'B' : 'U'}</td>
+                  <td className="text-center py-1 whitespace-nowrap">{cartItemUnits(item)}</td>
                   <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.total)}</td>
                 </tr>
               ))}

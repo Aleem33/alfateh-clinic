@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare, printPageOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosReceiptNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -8,13 +8,14 @@ import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import {
   Search, Plus, Minus, Trash2, Printer, ShoppingCart, Tag,
   User, UserCheck, UserX, ChevronDown, Percent, DollarSign,
-  UserPlus, Check, X, Pill, ClipboardList, CheckCircle,
+  UserPlus, Check, X, Pill, ClipboardList, CheckCircle, PauseCircle, PlayCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { groupMedicineBatches, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountType } from '../lib/billDiscount';
 import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
+import { cartItemUnits, findCartStockProblem } from '../lib/billingCart';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -32,6 +33,12 @@ export function Billing() {
   const [showRxModal, setShowRxModal] = useState(false);
   const [rxSearch, setRxSearch] = useState('');
   const [batchSelector, setBatchSelector] = useState<any[] | null>(null);
+  const [heldBills, setHeldBills] = useState<any[]>([]);
+  const [showHeldBills, setShowHeldBills] = useState(false);
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdLabel, setHoldLabel] = useState('');
+  const [isHoldingBill, setIsHoldingBill] = useState(false);
+  const [billingNotice, setBillingNotice] = useState('');
 
   // Mobile: which tab is active
   const [mobileTab, setMobileTab] = useState<'medicines' | 'cart'>('medicines');
@@ -67,7 +74,14 @@ export function Billing() {
           .sort((a: any, b: any) => (b.createdAt > a.createdAt ? 1 : -1))
       );
     }, err => handleFirestoreError(err, OperationType.GET, 'pharmacyOrders'));
-    return () => { unsub1(); unsub2(); unsub3(); };
+    const unsub4 = onSnapshot(collection(db, 'heldBills'), snap => {
+      setHeldBills(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) =>
+          String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
+        ));
+    }, err => handleFirestoreError(err, OperationType.GET, 'heldBills'));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
   }, []);
 
   useEffect(() => {
@@ -241,6 +255,92 @@ export function Billing() {
   const effectiveAmountPaid  = amountPaid === '' ? grandTotal : Math.min(Number(amountPaid), grandTotal);
   const pendingAmount        = Math.max(0, grandTotal - effectiveAmountPaid);
 
+  const clearCurrentBill = () => {
+    setCart([]);
+    setQtyInputs({});
+    setOrderDiscountType('rs');
+    setOrderDiscountValue(0);
+    setAmountPaid('');
+    setSelectedCustomer(null);
+    setCustomerSearch('');
+    setCustomerType('customer');
+    setMobileTab('medicines');
+  };
+
+  const showNotice = (message: string) => {
+    setBillingNotice(message);
+    setTimeout(() => setBillingNotice(''), 4000);
+  };
+
+  const handleHoldBill = async () => {
+    if (cart.length === 0 || isHoldingBill) return;
+    setIsHoldingBill(true);
+    try {
+      const now = new Date().toISOString();
+      const fallbackLabel = selectedCustomer?.name || `Held bill ${format(new Date(), 'HH:mm')}`;
+      await waitForOnlineWrite(addDoc(collection(db, 'heldBills'), {
+        label: holdLabel.trim() || fallbackLabel,
+        items: cart,
+        customerType,
+        customer: selectedCustomer ? {
+          id: selectedCustomer.id,
+          name: selectedCustomer.name,
+          phone: selectedCustomer.phone || '',
+          creditBalance: Number(selectedCustomer.creditBalance || 0),
+        } : null,
+        orderDiscountType,
+        orderDiscountValue,
+        amountPaid,
+        grossSubtotal,
+        totalItemDiscounts,
+        subtotal: subtotalAfterItemDisc,
+        orderDiscount: orderDiscountAmount,
+        total: grandTotal,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: auth.currentUser?.uid || '',
+      }));
+      clearCurrentBill();
+      setHoldLabel('');
+      setShowHoldModal(false);
+      showNotice('Bill held safely. You can resume it from Held Bills.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'heldBills');
+    } finally {
+      setIsHoldingBill(false);
+    }
+  };
+
+  const handleResumeBill = async (heldBill: any) => {
+    if (cart.length > 0) {
+      setStockError('Hold or finish the current bill before resuming another bill.');
+      setTimeout(() => setStockError(''), 4500);
+      return;
+    }
+    const heldItems = Array.isArray(heldBill.items) ? heldBill.items : [];
+    setCart(heldItems);
+    setQtyInputs({});
+    setCustomerType(heldBill.customerType === 'hospital' ? 'hospital' : 'customer');
+    setOrderDiscountType(heldBill.orderDiscountType === 'pct' ? 'pct' : 'rs');
+    setOrderDiscountValue(Number(heldBill.orderDiscountValue || 0));
+    setAmountPaid(heldBill.amountPaid === '' || heldBill.amountPaid == null ? '' : Number(heldBill.amountPaid));
+    const currentCustomer = heldBill.customer?.id
+      ? customers.find(customer => customer.id === heldBill.customer.id)
+      : null;
+    setSelectedCustomer(currentCustomer || heldBill.customer || null);
+    setCustomerSearch('');
+    setShowHeldBills(false);
+    setMobileTab('cart');
+    try {
+      await waitForOnlineWrite(deleteDoc(doc(db, 'heldBills', heldBill.id)));
+      showNotice(`${heldBill.label || 'Held bill'} resumed.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `heldBills/${heldBill.id}`);
+    }
+    const stockProblem = findCartStockProblem(heldItems, medicines);
+    if (stockProblem) setStockError(stockProblem);
+  };
+
   const handlePrint = () => {
     if (window !== window.top) {
       setShowPrintAlert(true); setTimeout(() => setShowPrintAlert(false), 5000);
@@ -295,6 +395,11 @@ export function Billing() {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
+    const stockProblem = findCartStockProblem(cart, medicines);
+    if (stockProblem) {
+      setStockError(stockProblem);
+      return;
+    }
     try {
       const receiptNo = await getNextPosReceiptNo();
       const saleData: any = {
@@ -456,7 +561,19 @@ export function Billing() {
     <div className="flex-1 min-h-0 md:w-96 md:flex-none bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
       {/* Cart header */}
       <div className="p-4 border-b border-gray-100 bg-gray-50 space-y-3">
-        <h2 className="text-lg font-bold text-gray-900 hidden md:block">Current Sale</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-bold text-gray-900 hidden md:block">Current Sale</h2>
+          <div className="flex gap-2 ml-auto">
+            <button type="button" onClick={() => setShowHeldBills(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100">
+              <PlayCircle className="w-4 h-4" /> Held ({heldBills.length})
+            </button>
+            <button type="button" disabled={cart.length === 0} onClick={() => { setHoldLabel(selectedCustomer?.name || ''); setShowHoldModal(true); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-40 disabled:cursor-not-allowed">
+              <PauseCircle className="w-4 h-4" /> Hold Bill
+            </button>
+          </div>
+        </div>
 
         {/* Sale type toggle */}
         <div className="flex bg-white rounded-lg p-1 border border-gray-200">
@@ -733,6 +850,81 @@ export function Billing() {
         </div>
       )}
 
+      {billingNotice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-[60] flex items-center gap-2">
+          <CheckCircle className="w-5 h-5" />
+          <span className="font-medium">{billingNotice}</span>
+        </div>
+      )}
+
+      {showHoldModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 print:hidden">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-bold text-gray-900 text-lg">Hold Current Bill</h2>
+                <p className="text-xs text-gray-500 mt-1">The complete cart, customer, discounts, and payment state will be saved.</p>
+              </div>
+              <button type="button" onClick={() => setShowHoldModal(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <label className="block">
+                <span className="text-sm font-semibold text-gray-700">Name or note (optional)</span>
+                <input autoFocus value={holdLabel} onChange={event => setHoldLabel(event.target.value)}
+                  onKeyDown={event => { if (event.key === 'Enter') handleHoldBill(); }}
+                  placeholder="Example: Ahmed - coming back"
+                  className="mt-1.5 w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-400" />
+              </label>
+              <div className="flex justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                <span>{cart.length} item(s)</span><strong>{formatCurrency(grandTotal)}</strong>
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowHoldModal(false)} className="flex-1 py-2.5 border border-gray-200 rounded-lg font-semibold text-gray-600">Cancel</button>
+                <button type="button" onClick={handleHoldBill} disabled={isHoldingBill}
+                  className="flex-1 py-2.5 bg-orange-600 text-white rounded-lg font-bold disabled:opacity-50">
+                  {isHoldingBill ? 'Saving...' : 'Hold Bill'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHeldBills && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 print:hidden">
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-bold text-gray-900 text-lg">Held Bills</h2>
+                <p className="text-xs text-gray-500 mt-1">Held bills do not reserve stock. Stock is checked again before checkout.</p>
+              </div>
+              <button type="button" onClick={() => setShowHeldBills(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="overflow-y-auto p-4 space-y-3">
+              {heldBills.length === 0 ? (
+                <div className="py-12 text-center text-gray-400"><PauseCircle className="w-10 h-10 mx-auto mb-2 opacity-40" /><p>No held bills</p></div>
+              ) : heldBills.map(heldBill => (
+                <div key={heldBill.id} className="border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-bold text-gray-900 truncate">{heldBill.label || 'Held bill'}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {(heldBill.items || []).length} item(s)
+                      {heldBill.customer?.name ? ` - ${heldBill.customer.name}` : ''}
+                      {heldBill.createdAt ? ` - ${format(new Date(heldBill.createdAt), 'dd MMM, HH:mm')}` : ''}
+                    </p>
+                    <p className="text-sm font-semibold text-blue-700 mt-1">{formatCurrency(Number(heldBill.total || 0))}</p>
+                  </div>
+                  <button type="button" onClick={() => handleResumeBill(heldBill)}
+                    className="shrink-0 flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700">
+                    <PlayCircle className="w-4 h-4" /> Resume
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {batchSelector && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 print:hidden">
           <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
@@ -897,7 +1089,7 @@ export function Billing() {
               <tr key={item.cartItemId} className="border-b border-dashed border-gray-400">
                 <td className="py-1 pr-1 font-semibold">{item.name}</td>
                 <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.price)}</td>
-                <td className="text-center py-1 whitespace-nowrap">{item.quantity}{item.sellType === 'box' ? 'B' : 'U'}</td>
+                <td className="text-center py-1 whitespace-nowrap">{cartItemUnits(item)}</td>
                 <td className="text-right py-1 whitespace-nowrap">{formatCurrency(item.total)}</td>
               </tr>
             ))}
