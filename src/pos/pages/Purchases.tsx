@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 import { searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { ensureMedicinePurchaseBatch, findMedicinePurchaseBatch } from '../../lib/medicineOperations';
-import { calculatePurchaseQuantities, hasDuplicatePurchaseInvoiceLine } from '../lib/purchaseInvoice';
+import { calculatePurchaseQuantities, hasDuplicatePurchaseInvoiceLine, validateExistingBatchPurchase } from '../lib/purchaseInvoice';
 
 const today = () => new Date().toISOString().split('T')[0];
 const emptyPurchaseForm = () => ({
@@ -116,14 +116,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       throw new Error(`Batch ${batchNo} already exists for this medicine and supplier. Select Existing Batch or enter a different batch number.`);
     }
     if (!skipBatchValidation && purchaseBatchMode === 'existing') {
-      const existingUnits = Math.max(1, Number(selectedMedicine.unitsPerBox || 1));
-      const existingCost = Number(selectedMedicine.costPrice || 0);
-      const existingRetail = Number(selectedMedicine.retailPrice || selectedMedicine.price || 0);
-      if (quantities.unitsPerBox !== existingUnits
-        || Math.abs(quantities.costPrice - existingCost) > 0.001
-        || Math.abs(retailPrice - existingRetail) > 0.001) {
-        throw new Error('Pack size and prices are locked for an existing batch. Choose New Batch to use different packaging or prices.');
-      }
+      const validationError = validateExistingBatchPurchase({ unitsPerBox: quantities.unitsPerBox, retailPrice }, selectedMedicine);
+      if (validationError) throw new Error(validationError);
     }
 
     const line = {
@@ -207,6 +201,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       });
       batch.update(doc(db, 'medicines', line.medicineId), {
         stock: increment(stockDelta),
+        costPrice: line.costPrice,
         updatedAt: timestamp,
       });
       await batch.commit();
@@ -271,6 +266,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         if (!batchTarget.created) {
           batch.update(doc(db, 'medicines', batchTarget.medicineId), {
             stock: increment(line.totalUnits),
+            costPrice: line.costPrice,
             updatedAt: timestamp,
           });
         }
@@ -663,7 +659,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                   <p className="text-sm text-green-700 mt-1">
                     {editingPurchase ? 'Corrected purchase quantity' : purchaseBatchMode === 'new' ? 'Separate new batch stock' : 'Stock added to selected batch'}: <strong>{(parseInt(formData.boxesPurchased || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
                   </p>
-                  {!editingPurchase && <p className="text-xs mt-1 text-gray-600">{purchaseBatchMode === 'new' ? 'Existing batch prices will remain unchanged.' : 'Only the selected batch price can be updated.'}</p>}
+                  {!editingPurchase && <p className="text-xs mt-1 text-gray-600">{purchaseBatchMode === 'new' ? 'Existing batch prices will remain unchanged.' : 'The cost price will be saved on this exact batch; pack size and retail price stay unchanged.'}</p>}
                 </div>
               )}
 

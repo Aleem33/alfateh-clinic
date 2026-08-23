@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   calculatePurchaseQuantities,
   hasDuplicatePurchaseInvoiceLine,
+  validateExistingBatchPurchase,
   type PurchaseInvoiceLineIdentity,
 } from './purchaseInvoice';
 
@@ -29,5 +30,12 @@ describe('multi-medicine purchase invoices', () => {
     };
     expect(hasDuplicatePurchaseInvoiceLine([line], { ...line, medicineName: 'example 10MG', batchNo: 'b-2' })).toBe(true);
     expect(hasDuplicatePurchaseInvoiceLine([line], { ...line, batchNo: 'B-3' })).toBe(false);
+  });
+
+  it('allows cost price changes on an existing batch while protecting pack size and retail price', () => {
+    const existing = { unitsPerBox: 10, costPrice: 0, retailPrice: 500 };
+    expect(validateExistingBatchPurchase({ unitsPerBox: 10, retailPrice: 500 }, existing)).toBe('');
+    expect(validateExistingBatchPurchase({ unitsPerBox: 12, retailPrice: 500 }, existing)).toContain('Pack size');
+    expect(validateExistingBatchPurchase({ unitsPerBox: 10, retailPrice: 550 }, existing)).toContain('retail price');
   });
 });

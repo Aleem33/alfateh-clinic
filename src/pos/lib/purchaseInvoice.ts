@@ -52,3 +52,15 @@ export function hasDuplicatePurchaseInvoiceLine(
   const candidateKey = getPurchaseInvoiceLineKey(candidate);
   return lines.some(line => getPurchaseInvoiceLineKey(line) === candidateKey);
 }
+
+export function validateExistingBatchPurchase(
+  proposed: { unitsPerBox: number; retailPrice: number },
+  existing: { unitsPerBox?: number; retailPrice?: number; price?: number },
+): string {
+  const existingUnits = Math.max(1, Number(existing.unitsPerBox || 1));
+  const existingRetail = Number(existing.retailPrice || existing.price || 0);
+  if (proposed.unitsPerBox !== existingUnits || Math.abs(proposed.retailPrice - existingRetail) > 0.001) {
+    return 'Pack size and retail price are locked for an existing batch. Choose New Batch to change either one.';
+  }
+  return '';
+}
