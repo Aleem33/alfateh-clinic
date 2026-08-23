@@ -64,3 +64,19 @@ export function validateExistingBatchPurchase(
   }
   return '';
 }
+
+export function getEditedBatchSellingPriceUpdate(
+  edited: { retailPrice: number; unitPrice: number },
+  original: { retailPrice?: number; price?: number; unitPrice?: number },
+): { retailPrice?: number; price?: number; unitPrice?: number } {
+  const originalRetail = Number(original.retailPrice ?? original.price ?? 0);
+  const originalUnit = Number(original.unitPrice ?? 0);
+  const retailChanged = Math.abs(edited.retailPrice - originalRetail) > 0.001;
+  const unitChanged = Math.abs(edited.unitPrice - originalUnit) > 0.001;
+  if (!retailChanged && !unitChanged) return {};
+  return {
+    retailPrice: edited.retailPrice,
+    price: edited.retailPrice,
+    unitPrice: edited.unitPrice,
+  };
+}

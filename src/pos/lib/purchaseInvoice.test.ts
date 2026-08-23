@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   calculatePurchaseQuantities,
   hasDuplicatePurchaseInvoiceLine,
+  getEditedBatchSellingPriceUpdate,
   validateExistingBatchPurchase,
   type PurchaseInvoiceLineIdentity,
 } from './purchaseInvoice';
@@ -37,5 +38,13 @@ describe('multi-medicine purchase invoices', () => {
     expect(validateExistingBatchPurchase({ unitsPerBox: 10, retailPrice: 500 }, existing)).toBe('');
     expect(validateExistingBatchPurchase({ unitsPerBox: 12, retailPrice: 500 }, existing)).toContain('Pack size');
     expect(validateExistingBatchPurchase({ unitsPerBox: 10, retailPrice: 550 }, existing)).toContain('retail price');
+  });
+
+  it('updates billing prices only when an admin changes the edited purchase price', () => {
+    const original = { retailPrice: 500, unitPrice: 50 };
+    expect(getEditedBatchSellingPriceUpdate({ retailPrice: 500, unitPrice: 50 }, original)).toEqual({});
+    expect(getEditedBatchSellingPriceUpdate({ retailPrice: 600, unitPrice: 60 }, original)).toEqual({
+      retailPrice: 600, price: 600, unitPrice: 60,
+    });
   });
 });

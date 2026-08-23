@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 import { searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { ensureMedicinePurchaseBatch, findMedicinePurchaseBatch } from '../../lib/medicineOperations';
-import { calculatePurchaseQuantities, hasDuplicatePurchaseInvoiceLine, validateExistingBatchPurchase } from '../lib/purchaseInvoice';
+import { calculatePurchaseQuantities, getEditedBatchSellingPriceUpdate, hasDuplicatePurchaseInvoiceLine, validateExistingBatchPurchase } from '../lib/purchaseInvoice';
 
 const today = () => new Date().toISOString().split('T')[0];
 const emptyPurchaseForm = () => ({
@@ -170,6 +170,14 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     if (!canEdit) return;
     try {
       const line = buildPurchaseLine(true);
+      if (line.unitsPerBox !== Math.max(1, Number(selectedMedicine.unitsPerBox || 1))) {
+        setFormError('Units per box cannot be changed while editing an existing batch purchase.');
+        return;
+      }
+      const sellingPriceUpdate = getEditedBatchSellingPriceUpdate(line, {
+        retailPrice: editingPurchase.retailPrice ?? selectedMedicine.retailPrice ?? selectedMedicine.price ?? 0,
+        unitPrice: editingPurchase.unitPrice ?? selectedMedicine.unitPrice ?? 0,
+      });
       const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
       const stockDelta = line.totalUnits - oldUnits;
       if (Number(selectedMedicine.stock || 0) + stockDelta < 0) {
@@ -202,6 +210,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       batch.update(doc(db, 'medicines', line.medicineId), {
         stock: increment(stockDelta),
         costPrice: line.costPrice,
+        ...sellingPriceUpdate,
         updatedAt: timestamp,
       });
       await batch.commit();
