@@ -2,13 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, increment, writeBatch } from '@/lib/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
-import { Search, Truck, PackagePlus, X, ChevronDown, CheckCircle, Edit2, AlertCircle } from 'lucide-react';
+import { Search, Truck, PackagePlus, X, ChevronDown, CheckCircle, Edit2, AlertCircle, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { ensureMedicinePurchaseBatch, findMedicinePurchaseBatch } from '../../lib/medicineOperations';
+import { calculatePurchaseQuantities, hasDuplicatePurchaseInvoiceLine } from '../lib/purchaseInvoice';
 
 const today = () => new Date().toISOString().split('T')[0];
+const emptyPurchaseForm = () => ({
+  supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0',
+  unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '',
+  batchNo: '', expiryDate: '', date: today(), notes: '',
+});
+
 
 export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   const [medicines, setMedicines] = useState<any[]>([]);
@@ -21,14 +28,12 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   const [editingPurchase, setEditingPurchase] = useState<any | null>(null);
   const [purchaseBatchMode, setPurchaseBatchMode] = useState<'existing' | 'new'>('existing');
 
+  const [invoiceLines, setInvoiceLines] = useState<any[]>([]);
+  const [savingInvoice, setSavingInvoice] = useState(false);
   const [selectedMedicine, setSelectedMedicine] = useState<any>(null);
   const [medSearch, setMedSearch] = useState('');
   const [medDropdownOpen, setMedDropdownOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0',
-    unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '',
-    batchNo: '', expiryDate: '', date: today(), notes: '',
-  });
+  const [formData, setFormData] = useState(emptyPurchaseForm);
 
   useEffect(() => {
     const u1 = subscribeToMedicines(setMedicines,
@@ -64,7 +69,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       unitPrice: (med.unitPrice || (med.unitsPerBox > 0 ? (Number(med.retailPrice || med.price || 0) / med.unitsPerBox) : med.price) || 0).toString(),
       batchNo: med.batchNo || '',
       expiryDate: med.expiryDate || '',
-      supplierId: med.supplierId || '',
+      supplierId: prev.supplierId || med.supplierId || '',
     }));
   };
 
@@ -78,119 +83,207 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedMedicine) return;
-    setFormError('');
-    try {
-      const unitsPerBox  = Math.max(1, parseInt(formData.unitsPerBox || '1') || 1);
-      const boxesBought  = parseInt(formData.boxesPurchased || '0');
-      const looseBought  = parseInt(formData.looseUnitsPurchased || '0');
-      const totalUnits   = (boxesBought * unitsPerBox) + looseBought;
-      if (totalUnits <= 0) return;
-      const supplier     = suppliers.find(s => s.id === formData.supplierId);
-      const supplierName = formData.supplierId ? (supplier?.name || selectedMedicine.supplierName || 'N/A') : 'N/A';
-      const medicineSupplierName = formData.supplierId ? (supplier?.name || selectedMedicine.supplierName || '') : '';
-      const costPrice    = parseFloat(formData.costPrice || '0');
-      const costPricePerUnit = costPrice / unitsPerBox;
-      const totalCost    = totalUnits * costPricePerUnit;
-      const retailPriceValue = formData.retailPrice.trim() ? parseFloat(formData.retailPrice) : null;
-      const unitPriceValue = formData.unitPrice.trim() ? parseFloat(formData.unitPrice) : null;
-      const purchaseDoc: any = {
-        medicineId: selectedMedicine.id, medicineName: selectedMedicine.name,
-        supplierId: formData.supplierId || null, supplierName,
-        boxesPurchased: boxesBought, looseUnitsPurchased: looseBought,
-        totalUnitsAdded: totalUnits, unitsPerBox,
-        costPrice,
-        costPricePerUnit,
-        batchNo: formData.batchNo, expiryDate: formData.expiryDate,
-        notes: formData.notes, totalCost, date: formData.date || today(),
-        addedBy: auth.currentUser?.uid || 'unknown',
-        updatedAt: new Date().toISOString(),
-      };
-      if (retailPriceValue !== null && Number.isFinite(retailPriceValue)) purchaseDoc.retailPrice = retailPriceValue;
-      if (unitPriceValue !== null && Number.isFinite(unitPriceValue)) purchaseDoc.unitPrice = unitPriceValue;
+  const buildPurchaseLine = (skipBatchValidation = false) => {
+    if (!selectedMedicine) throw new Error('Select a medicine first.');
+    const quantities = calculatePurchaseQuantities(
+      formData.boxesPurchased,
+      formData.looseUnitsPurchased,
+      formData.unitsPerBox,
+      formData.costPrice,
+    );
+    if (quantities.totalUnits <= 0) throw new Error('Enter at least one box or loose unit.');
 
-      if (editingPurchase) {
-        if (!canEdit) return;
-        const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
-        const stockDelta = totalUnits - oldUnits;
-        if (selectedMedicine && Number(selectedMedicine.stock || 0) + stockDelta < 0) {
-          setFormError('This change would make the batch stock negative. Reduce the adjustment or correct current stock first.');
-          return;
-        }
-        const batch = writeBatch(db);
-        batch.update(doc(db, 'purchases', editingPurchase.id), {
-          ...purchaseDoc,
-          medicineId: editingPurchase.medicineId || selectedMedicine.id,
-          updatedBy: auth.currentUser?.uid || 'unknown',
-        });
-        if (selectedMedicine) {
-          batch.update(doc(db, 'medicines', selectedMedicine.id), {
-            stock: increment(stockDelta),
-            updatedAt: new Date().toISOString(),
-          });
-        }
-        await batch.commit();
-        setSuccessMsg(`✓ Updated purchase for "${selectedMedicine.name}"`);
-      } else {
-        const batchNo = purchaseBatchMode === 'new'
-          ? formData.batchNo.trim()
-          : (formData.batchNo.trim() || selectedMedicine.batchNo || '');
-        if (purchaseBatchMode === 'new' && !batchNo) {
-          setFormError('Enter a batch number for the new batch. Existing batches will not be changed.');
-          return;
-        }
-        if (purchaseBatchMode === 'new' && findMedicinePurchaseBatch(selectedMedicine, {
-          batchNo,
-          supplierId: formData.supplierId || '',
-          supplierName: medicineSupplierName,
-        }, medicines)) {
-          setFormError(`Batch ${batchNo} already exists for this medicine and supplier. Select Existing Batch or enter a different batch number.`);
-          return;
-        }
-        if (purchaseBatchMode === 'existing') {
-          const existingUnits = Math.max(1, Number(selectedMedicine.unitsPerBox || 1));
-          const existingCost = Number(selectedMedicine.costPrice || 0);
-          const existingRetail = Number(selectedMedicine.retailPrice || selectedMedicine.price || 0);
-          const proposedRetail = retailPriceValue ?? existingRetail;
-          if (unitsPerBox !== existingUnits || Math.abs(costPrice - existingCost) > 0.001 || Math.abs(proposedRetail - existingRetail) > 0.001) {
-            setFormError('Pack size and prices are locked for an existing batch. Choose New Batch to use different packaging or prices.');
-            return;
-          }
-        }
-        const batchTarget = await ensureMedicinePurchaseBatch(selectedMedicine, {
-          batchNo,
-          expiryDate: formData.expiryDate || selectedMedicine.expiryDate || '',
-          stock: totalUnits,
-          unitsPerBox,
-          costPrice,
-          retailPrice: retailPriceValue ?? Number(selectedMedicine.retailPrice || selectedMedicine.price || 0),
-          unitPrice: unitPriceValue ?? Number(selectedMedicine.unitPrice || 0),
-          supplierId: formData.supplierId || '',
-          supplierName: medicineSupplierName,
-        }, medicines);
-        purchaseDoc.medicineId = batchTarget.medicineId;
-        purchaseDoc.batchNo = batchNo;
-        purchaseDoc.createdAt = new Date().toISOString();
-        const batch = writeBatch(db);
-        batch.set(doc(collection(db, 'purchases')), purchaseDoc);
-        if (!batchTarget.created) {
-          batch.update(doc(db, 'medicines', batchTarget.medicineId), {
-            stock: increment(totalUnits),
-            updatedAt: new Date().toISOString(),
-          });
-        }
-        await batch.commit();
-        setSuccessMsg(`✓ Recorded ${selectedMedicine.name}, batch ${batchNo || 'N/A'} (${totalUnits} units)`);
+    const supplier = suppliers.find(item => item.id === formData.supplierId);
+    const supplierName = formData.supplierId ? (supplier?.name || selectedMedicine.supplierName || '') : '';
+    const batchNo = purchaseBatchMode === 'new'
+      ? formData.batchNo.trim()
+      : (formData.batchNo.trim() || selectedMedicine.batchNo || '');
+    const retailPrice = formData.retailPrice.trim()
+      ? Number(formData.retailPrice)
+      : Number(selectedMedicine.retailPrice || selectedMedicine.price || 0);
+    const unitPrice = formData.unitPrice.trim()
+      ? Number(formData.unitPrice)
+      : Number(selectedMedicine.unitPrice || 0);
+
+    if (!skipBatchValidation && purchaseBatchMode === 'new' && !batchNo) {
+      throw new Error('Enter a batch number for the new batch. Existing batches will not be changed.');
+    }
+    if (!skipBatchValidation && purchaseBatchMode === 'new' && findMedicinePurchaseBatch(selectedMedicine, {
+      batchNo,
+      supplierId: formData.supplierId || '',
+      supplierName,
+    }, medicines)) {
+      throw new Error(`Batch ${batchNo} already exists for this medicine and supplier. Select Existing Batch or enter a different batch number.`);
+    }
+    if (!skipBatchValidation && purchaseBatchMode === 'existing') {
+      const existingUnits = Math.max(1, Number(selectedMedicine.unitsPerBox || 1));
+      const existingCost = Number(selectedMedicine.costPrice || 0);
+      const existingRetail = Number(selectedMedicine.retailPrice || selectedMedicine.price || 0);
+      if (quantities.unitsPerBox !== existingUnits
+        || Math.abs(quantities.costPrice - existingCost) > 0.001
+        || Math.abs(retailPrice - existingRetail) > 0.001) {
+        throw new Error('Pack size and prices are locked for an existing batch. Choose New Batch to use different packaging or prices.');
       }
+    }
 
-      setIsModalOpen(false); setSelectedMedicine(null); setEditingPurchase(null); setMedSearch('');
-      setPurchaseBatchMode('existing');
-      setFormData({ supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0', unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: '', date: today(), notes: '' });
+    const line = {
+      id: doc(collection(db, 'purchases')).id,
+      medicineId: selectedMedicine.id,
+      medicineName: selectedMedicine.name,
+      sourceMedicine: selectedMedicine,
+      batchMode: purchaseBatchMode,
+      batchNo,
+      expiryDate: formData.expiryDate || selectedMedicine.expiryDate || '',
+      supplierId: formData.supplierId || '',
+      supplierName,
+      retailPrice: Number.isFinite(retailPrice) ? retailPrice : 0,
+      unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+      ...quantities,
+    };
+    if (!skipBatchValidation && hasDuplicatePurchaseInvoiceLine(invoiceLines, line)) {
+      throw new Error('This medicine batch is already in the purchase bill. Remove that line first if you need to replace it.');
+    }
+    return line;
+  };
+
+  const resetCurrentLine = () => {
+    setSelectedMedicine(null);
+    setMedSearch('');
+    setMedDropdownOpen(false);
+    setPurchaseBatchMode('existing');
+    setFormData(previous => ({
+      ...emptyPurchaseForm(),
+      supplierId: previous.supplierId,
+      date: previous.date,
+      notes: previous.notes,
+    }));
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setFormError('');
+    if (!editingPurchase) {
+      try {
+        const line = buildPurchaseLine();
+        setInvoiceLines(previous => [...previous, line]);
+        resetCurrentLine();
+      } catch (error) {
+        setFormError(error instanceof Error ? error.message : 'Unable to add this purchase line.');
+      }
+      return;
+    }
+
+    if (!canEdit) return;
+    try {
+      const line = buildPurchaseLine(true);
+      const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
+      const stockDelta = line.totalUnits - oldUnits;
+      if (Number(selectedMedicine.stock || 0) + stockDelta < 0) {
+        setFormError('This change would make the batch stock negative. Reduce the adjustment or correct current stock first.');
+        return;
+      }
+      const timestamp = new Date().toISOString();
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'purchases', editingPurchase.id), {
+        medicineId: editingPurchase.medicineId || line.medicineId,
+        medicineName: line.medicineName,
+        supplierId: line.supplierId || null,
+        supplierName: line.supplierName || 'N/A',
+        boxesPurchased: line.boxesPurchased,
+        looseUnitsPurchased: line.looseUnitsPurchased,
+        totalUnitsAdded: line.totalUnits,
+        unitsPerBox: line.unitsPerBox,
+        costPrice: line.costPrice,
+        costPricePerUnit: line.costPricePerUnit,
+        retailPrice: line.retailPrice,
+        unitPrice: line.unitPrice,
+        batchNo: line.batchNo,
+        expiryDate: line.expiryDate,
+        notes: formData.notes,
+        totalCost: line.totalCost,
+        date: formData.date || today(),
+        updatedAt: timestamp,
+        updatedBy: auth.currentUser?.uid || 'unknown',
+      });
+      batch.update(doc(db, 'medicines', line.medicineId), {
+        stock: increment(stockDelta),
+        updatedAt: timestamp,
+      });
+      await batch.commit();
+      setSuccessMsg(`Updated purchase for "${line.medicineName}"`);
+      closeModal();
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
-      setFormError(handleFirestoreError(error, editingPurchase ? OperationType.UPDATE : OperationType.CREATE, 'purchases'));
+      setFormError(handleFirestoreError(error, OperationType.UPDATE, 'purchases'));
+    }
+  };
+
+  const handleSaveInvoice = async () => {
+    if (invoiceLines.length === 0 || savingInvoice) return;
+    setSavingInvoice(true);
+    setFormError('');
+    try {
+      const timestamp = new Date().toISOString();
+      const invoiceId = doc(collection(db, 'purchases')).id;
+      const batch = writeBatch(db);
+
+      for (let index = 0; index < invoiceLines.length; index += 1) {
+        const line = invoiceLines[index];
+        const batchTarget = line.batchMode === 'existing'
+          ? { medicineId: line.medicineId, created: false }
+          : await ensureMedicinePurchaseBatch(line.sourceMedicine, {
+              batchNo: line.batchNo,
+              expiryDate: line.expiryDate,
+              stock: line.totalUnits,
+              unitsPerBox: line.unitsPerBox,
+              costPrice: line.costPrice,
+              retailPrice: line.retailPrice,
+              unitPrice: line.unitPrice,
+              supplierId: line.supplierId,
+              supplierName: line.supplierName,
+            }, medicines);
+        const purchaseRef = doc(db, 'purchases', line.id);
+        batch.set(purchaseRef, {
+          invoiceId,
+          invoiceLineNumber: index + 1,
+          invoiceLineCount: invoiceLines.length,
+          medicineId: batchTarget.medicineId,
+          medicineName: line.medicineName,
+          supplierId: line.supplierId || null,
+          supplierName: line.supplierName || 'N/A',
+          boxesPurchased: line.boxesPurchased,
+          looseUnitsPurchased: line.looseUnitsPurchased,
+          totalUnitsAdded: line.totalUnits,
+          unitsPerBox: line.unitsPerBox,
+          costPrice: line.costPrice,
+          costPricePerUnit: line.costPricePerUnit,
+          retailPrice: line.retailPrice,
+          unitPrice: line.unitPrice,
+          batchNo: line.batchNo,
+          expiryDate: line.expiryDate,
+          notes: formData.notes,
+          totalCost: line.totalCost,
+          date: formData.date || today(),
+          addedBy: auth.currentUser?.uid || 'unknown',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+        if (!batchTarget.created) {
+          batch.update(doc(db, 'medicines', batchTarget.medicineId), {
+            stock: increment(line.totalUnits),
+            updatedAt: timestamp,
+          });
+        }
+      }
+
+      await batch.commit();
+      setSuccessMsg(`Recorded purchase bill with ${invoiceLines.length} medicine${invoiceLines.length === 1 ? '' : 's'}.`);
+      closeModal();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (error) {
+      setFormError(handleFirestoreError(error, OperationType.CREATE, 'purchases'));
+    } finally {
+      setSavingInvoice(false);
     }
   };
 
@@ -239,6 +332,10 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     setPurchaseBatchMode('existing');
     setMedSearch('');
     setFormError('');
+    setMedDropdownOpen(false);
+    setInvoiceLines([]);
+    setSavingInvoice(false);
+    setFormData(emptyPurchaseForm());
   };
 
   return (
@@ -252,7 +349,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       {/* Header */}
       <div className="flex justify-between items-center gap-3">
         <h1 className="text-xl md:text-2xl font-bold text-gray-900">Purchases</h1>
-        <button onClick={() => { setEditingPurchase(null); setPurchaseBatchMode('existing'); setFormError(''); setIsModalOpen(true); }}
+        <button onClick={() => { setEditingPurchase(null); setInvoiceLines([]); setFormData(emptyPurchaseForm()); setPurchaseBatchMode('existing'); setFormError(''); setIsModalOpen(true); }}
           className="bg-blue-600 text-white px-3 py-2 md:px-4 rounded-lg flex items-center gap-2 hover:bg-blue-700 text-sm font-medium shrink-0">
           <PackagePlus className="w-4 h-4" />
           <span className="hidden sm:inline">Record Purchase</span>
@@ -364,9 +461,12 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       {/* ── Record Purchase Modal (slides up on mobile) ── */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
-          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-lg overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-3xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
             <div className="p-5 border-b border-gray-100 flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-bold text-gray-900">{editingPurchase ? 'Edit Purchase' : 'Record Purchase'}</h2>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">{editingPurchase ? 'Edit Purchase' : 'Record Supplier Bill'}</h2>
+                {!editingPurchase && <p className="text-xs text-gray-500 mt-0.5">Add every medicine from the supplier invoice, then save once.</p>}
+              </div>
               <button onClick={closeModal} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
 
@@ -379,6 +479,32 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               )}
 
               {/* Medicine search */}
+              {!editingPurchase && invoiceLines.length > 0 && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 overflow-hidden">
+                  <div className="px-3 py-2.5 flex items-center justify-between border-b border-indigo-200">
+                    <div>
+                      <p className="text-sm font-bold text-indigo-900">Purchase Bill - {invoiceLines.length} medicine{invoiceLines.length === 1 ? '' : 's'}</p>
+                      <p className="text-xs text-indigo-600">Supplier and date apply to every line.</p>
+                    </div>
+                    <strong className="text-indigo-900">{formatCurrency(invoiceLines.reduce((sum, line) => sum + line.totalCost, 0))}</strong>
+                  </div>
+                  <div className="divide-y divide-indigo-100 max-h-52 overflow-y-auto bg-white/70">
+                    {invoiceLines.map(line => (
+                      <div key={line.id} className="px-3 py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{line.medicineName}</p>
+                          <p className="text-xs text-gray-500">Batch {line.batchNo || 'N/A'} - {line.totalUnits} units - {formatCurrency(line.totalCost)}</p>
+                        </div>
+                        <button type="button" onClick={() => setInvoiceLines(previous => previous.filter(item => item.id !== line.id))}
+                          className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg" title="Remove from purchase bill">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Medicine <span className="text-red-500">*</span></label>
                 <div className="relative">
@@ -432,7 +558,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
                 <div className="relative">
                   <select value={formData.supplierId} onChange={e => setFormData({ ...formData, supplierId: e.target.value })}
-                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 appearance-none">
+                    disabled={!editingPurchase && invoiceLines.length > 0}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 appearance-none disabled:bg-gray-100 disabled:text-gray-500">
                     <option value="">— Select Supplier (optional) —</option>
                     {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
@@ -540,15 +667,30 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                 </div>
               )}
 
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={closeModal}
-                  className="flex-1 py-2.5 text-gray-700 border border-gray-200 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={!selectedMedicine}
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                  {editingPurchase ? <Edit2 className="w-4 h-4" /> : <PackagePlus className="w-4 h-4" />}
-                  {editingPurchase ? 'Save Changes' : 'Save Purchase'}
-                </button>
-              </div>
+              {editingPurchase ? (
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={closeModal} className="flex-1 py-2.5 text-gray-700 border border-gray-200 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                  <button type="submit" disabled={!selectedMedicine}
+                    className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                    <Edit2 className="w-4 h-4" /> Save Changes
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2 pt-2">
+                  <button type="submit" disabled={!selectedMedicine}
+                    className="w-full py-2.5 border-2 border-blue-600 text-blue-700 rounded-lg font-bold hover:bg-blue-50 disabled:opacity-40 flex items-center justify-center gap-2">
+                    <PackagePlus className="w-4 h-4" /> Add Medicine to Bill
+                  </button>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={closeModal} className="flex-1 py-2.5 text-gray-700 border border-gray-200 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                    <button type="button" onClick={handleSaveInvoice} disabled={invoiceLines.length === 0 || savingInvoice || Boolean(selectedMedicine)}
+                      title={selectedMedicine ? 'Add the current medicine to the bill before saving.' : 'Save all purchase lines'}
+                      className="flex-[2] py-2.5 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 disabled:opacity-40 flex items-center justify-center gap-2">
+                      <CheckCircle className="w-4 h-4" /> {savingInvoice ? 'Saving Bill...' : `Save Entire Bill (${invoiceLines.length})`}
+                    </button>
+                  </div>
+                </div>
+              )}
             </form>
           </div>
         </div>
