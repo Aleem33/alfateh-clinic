@@ -5,7 +5,7 @@ import { db, auth, handleFirestoreError, OperationType, getNextPosSaleReturnNo }
 import { formatCurrency } from '../lib/utils';
 import { getReturnNo, getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
-import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
+import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer, Trash2, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { searchMedicines } from '../../lib/medicineIndex';
@@ -34,6 +34,7 @@ export function SalesReturns() {
   const [manualQty, setManualQty] = useState(1);
   const [manualRefundPrice, setManualRefundPrice] = useState('');
   const [manualReason, setManualReason] = useState('');
+  const [manualItems, setManualItems] = useState<any[]>([]);
 
   useEffect(() => {
     const q = query(collection(db, 'sales'), orderBy('date', 'desc'));
@@ -70,6 +71,39 @@ export function SalesReturns() {
     setManualSellType(sellType);
     setManualQty(1);
     setManualRefundPrice(String(sellType === 'box' ? medicineBoxPrice(medicine) : medicineUnitPrice(medicine)));
+  };
+
+  const manualReturnTotal = manualItems.reduce((sum, item) => sum + Number(item.refundAmount || 0), 0);
+
+  const addManualReturnItem = () => {
+    if (!manualMedicine) return;
+    const quantity = Math.max(1, Math.floor(Number(manualQty) || 1));
+    const price = Math.max(0, Number(manualRefundPrice) || 0);
+    const unitsPerBox = Math.max(1, Number(manualMedicine.unitsPerBox || 1));
+    const lineId = `${manualMedicine.id}-${manualSellType}`;
+    setManualItems(prev => {
+      const existing = prev.find(item => item.cartItemId === lineId);
+      if (!existing) return [...prev, {
+        cartItemId: lineId,
+        medicineId: manualMedicine.id,
+        name: manualMedicine.name,
+        batchNo: manualMedicine.batchNo || '',
+        sellType: manualSellType,
+        price,
+        costPrice: Number(manualMedicine.costPrice || 0),
+        returnQty: quantity,
+        unitsPerBox,
+        refundAmount: calculateReturnRefund(quantity, price),
+      }];
+      const returnQty = existing.returnQty + quantity;
+      return prev.map(item => item.cartItemId === lineId
+        ? { ...item, price, returnQty, refundAmount: calculateReturnRefund(returnQty, price) }
+        : item);
+    });
+    setManualMedicine(null);
+    setMedicineSearch('');
+    setManualQty(1);
+    setManualRefundPrice('');
   };
 
   const filteredSales = sales.filter(s =>
@@ -180,6 +214,8 @@ export function SalesReturns() {
         price: i.price,
         returnQty: i.returnQty,
         unitsPerBox: i.unitsPerBox || 1,
+        batchNo: i.batchNo || '',
+        costPrice: Number(i.costPrice || 0),
         refundAmount: (i.total / i.quantity) * orderDiscountRatio * i.returnQty,
       }));
 
@@ -233,32 +269,17 @@ export function SalesReturns() {
   };
 
   const handleNoReceiptSubmit = async () => {
-    if (!manualMedicine || submitting) return;
-    const quantity = Math.max(1, Math.floor(Number(manualQty) || 1));
-    const price = Math.max(0, Number(manualRefundPrice) || 0);
-    const unitsPerBox = Math.max(1, Number(manualMedicine.unitsPerBox || 1));
-    const unitsToRestore = calculateReturnStockUnits(quantity, manualSellType, unitsPerBox);
-    const totalRefund = calculateReturnRefund(quantity, price);
+    if (manualItems.length === 0 || submitting) return;
+    const totalRefund = manualReturnTotal;
     setSubmitting(true);
     try {
       const returnNo = await getNextPosSaleReturnNo();
-      const item = {
-        cartItemId: `no-receipt-${manualMedicine.id}-${manualSellType}`,
-        medicineId: manualMedicine.id,
-        name: manualMedicine.name,
-        batchNo: manualMedicine.batchNo || '',
-        sellType: manualSellType,
-        price,
-        returnQty: quantity,
-        unitsPerBox,
-        refundAmount: totalRefund,
-      };
       const returnDoc = {
         returnNo,
         originalSaleId: '',
         originalReceiptNo: '',
         withoutReceipt: true,
-        items: [item],
+        items: manualItems,
         totalRefund,
         reason: manualReason.trim() || 'Return processed without original receipt',
         date: new Date().toISOString(),
@@ -267,27 +288,35 @@ export function SalesReturns() {
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'saleReturns'));
       batch.set(docRef, returnDoc);
-      const movementRef = doc(collection(db, 'stockMovements'));
-      batch.set(movementRef, {
-        type: 'sale-return-without-receipt',
-        returnId: docRef.id,
-        returnNo,
-        medicineId: manualMedicine.id,
-        medicineName: manualMedicine.name,
-        batchNo: manualMedicine.batchNo || '',
-        quantity: unitsToRestore,
-        createdAt: new Date().toISOString(),
-        processedBy: auth.currentUser?.uid || '',
-      });
-      batch.update(doc(db, 'medicines', manualMedicine.id), { stock: increment(unitsToRestore) });
+      const stockByMedicine = new Map<string, number>();
+      for (const item of manualItems) {
+        const unitsToRestore = calculateReturnStockUnits(item.returnQty, item.sellType, item.unitsPerBox);
+        stockByMedicine.set(item.medicineId, (stockByMedicine.get(item.medicineId) || 0) + unitsToRestore);
+        const movementRef = doc(collection(db, 'stockMovements'));
+        batch.set(movementRef, {
+          type: 'sale-return-without-receipt',
+          returnId: docRef.id,
+          returnNo,
+          medicineId: item.medicineId,
+          medicineName: item.name,
+          batchNo: item.batchNo || '',
+          quantity: unitsToRestore,
+          createdAt: new Date().toISOString(),
+          processedBy: auth.currentUser?.uid || '',
+        });
+      }
+      for (const [medicineId, unitsToRestore] of stockByMedicine) {
+        batch.update(doc(db, 'medicines', medicineId), { stock: increment(unitsToRestore) });
+      }
       await waitForOnlineWrite(batch.commit());
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setShowNoReceiptReturn(false);
       setManualMedicine(null);
+      setManualItems([]);
       setMedicineSearch('');
       setManualReason('');
-      setSuccessMsg(`Receipt-less return processed — Rs. ${totalRefund.toFixed(2)} refund`);
+      setSuccessMsg(`Receipt-less return processed — ${manualItems.length} medicine(s), Rs. ${totalRefund.toFixed(2)} refund`);
       setTimeout(() => setSuccessMsg(''), 5000);
       setTimeout(() => printReturnData(dataWithId), 400);
     } catch (error) {
@@ -311,6 +340,7 @@ export function SalesReturns() {
           onClick={() => {
             setShowNoReceiptReturn(true);
             setManualMedicine(null);
+            setManualItems([]);
             setMedicineSearch('');
             setManualReason('');
           }}
@@ -409,29 +439,43 @@ export function SalesReturns() {
 
       {showNoReceiptReturn && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl my-8">
-            <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 max-h-[92vh] flex flex-col">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center shrink-0">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">Return Medicine Without Receipt</h2>
-                <p className="text-sm text-gray-500 mt-0.5">Select the exact medicine batch. Its stock will be restored separately.</p>
+                <h2 className="text-xl font-bold text-gray-900">Return Medicines Without Receipt</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Add each exact medicine batch, then process one combined return.</p>
               </div>
               <button onClick={() => setShowNoReceiptReturn(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 overflow-y-auto">
+              {manualItems.length > 0 && (
+                <div className="border border-orange-100 rounded-lg overflow-hidden">
+                  <div className="bg-orange-50 px-3 py-2 text-sm font-bold text-orange-900">Return list ({manualItems.length})</div>
+                  <div className="divide-y divide-gray-100">
+                    {manualItems.map(item => (
+                      <div key={item.cartItemId} className="p-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm text-gray-900 truncate">{item.name}</p>
+                          <p className="text-xs text-gray-500">Batch {item.batchNo || 'N/A'} · {item.returnQty} {item.sellType === 'box' ? 'box(es)' : 'unit(s)'} @ {formatCurrency(item.price)}</p>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="font-bold text-sm">{formatCurrency(item.refundAmount)}</span>
+                          <button type="button" onClick={() => setManualItems(prev => prev.filter(line => line.cartItemId !== item.cartItemId))} className="p-1.5 text-red-500 hover:bg-red-50 rounded" title="Remove medicine"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {!manualMedicine ? (
                 <>
                   <div className="relative">
                     <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      autoFocus
-                      value={medicineSearch}
-                      onChange={e => setMedicineSearch(e.target.value)}
-                      placeholder="Search medicine by name, batch, category or supplier..."
-                      className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
+                    <input autoFocus value={medicineSearch} onChange={e => setMedicineSearch(e.target.value)} placeholder="Search another medicine by name, batch, category or supplier..." className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" />
                   </div>
                   <p className="text-xs text-gray-500">Showing {filteredMedicines.length} of {medicines.length} active medicine records</p>
-                  <div className="max-h-80 overflow-auto divide-y divide-gray-100 border border-gray-100 rounded-lg">
+                  <div className="max-h-64 overflow-auto divide-y divide-gray-100 border border-gray-100 rounded-lg">
                     {filteredMedicines.map(medicine => (
                       <button key={medicine.id} onClick={() => selectManualMedicine(medicine)} className="w-full text-left p-3 hover:bg-orange-50 flex justify-between gap-4">
                         <div className="min-w-0">
@@ -448,51 +492,29 @@ export function SalesReturns() {
                   </div>
                 </>
               ) : (
-                <>
-                  <div className="bg-orange-50 border border-orange-100 rounded-lg p-4 flex justify-between gap-3">
-                    <div>
-                      <p className="font-bold text-gray-900">{manualMedicine.name}</p>
-                      <p className="text-xs text-gray-600 mt-0.5">{manualMedicine.category || 'Uncategorized'} · Batch {manualMedicine.batchNo || 'N/A'} · {manualMedicine.supplierName || 'No supplier'}</p>
-                    </div>
+                <div className="space-y-3 border border-orange-200 rounded-lg p-4">
+                  <div className="bg-orange-50 rounded-lg p-3 flex justify-between gap-3">
+                    <div><p className="font-bold text-gray-900">{manualMedicine.name}</p><p className="text-xs text-gray-600">Batch {manualMedicine.batchNo || 'N/A'} · {manualMedicine.supplierName || 'No supplier'}</p></div>
                     <button onClick={() => setManualMedicine(null)} className="text-sm font-semibold text-orange-700 hover:underline">Change</button>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Return As</label>
-                      <select
-                        value={manualSellType}
-                        onChange={e => selectManualMedicine(manualMedicine, e.target.value as 'box' | 'unit')}
-                        className="w-full p-2.5 border border-gray-200 rounded-lg text-sm"
-                      >
-                        <option value="unit">Loose Unit</option>
-                        <option value="box">Box</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Quantity</label>
-                      <input type="number" min="1" step="1" value={manualQty} onChange={e => setManualQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Refund Price per {manualSellType}</label>
-                      <input type="number" min="0" step="0.01" value={manualRefundPrice} onChange={e => setManualRefundPrice(e.target.value)} className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" />
-                    </div>
+                    <div><label className="block text-xs font-medium text-gray-600 mb-1">Return As</label><select value={manualSellType} onChange={e => selectManualMedicine(manualMedicine, e.target.value as 'box' | 'unit')} className="w-full p-2.5 border border-gray-200 rounded-lg text-sm"><option value="unit">Loose Unit</option><option value="box">Box</option></select></div>
+                    <div><label className="block text-xs font-medium text-gray-600 mb-1">Quantity</label><input type="number" min="1" step="1" value={manualQty} onChange={e => setManualQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" /></div>
+                    <div><label className="block text-xs font-medium text-gray-600 mb-1">Refund Price per {manualSellType}</label><input type="number" min="0" step="0.01" value={manualRefundPrice} onChange={e => setManualRefundPrice(e.target.value)} className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" /></div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Reason / Note</label>
-                    <input value={manualReason} onChange={e => setManualReason(e.target.value)} placeholder="Optional note for receipt-less return" className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" />
+                  <div className="flex justify-between items-center gap-3">
+                    <span className="text-sm font-bold text-blue-800">{formatCurrency(calculateReturnRefund(manualQty, Number(manualRefundPrice)))}</span>
+                    <button type="button" onClick={addManualReturnItem} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold flex items-center gap-2"><Plus className="w-4 h-4" /> Add Medicine</button>
                   </div>
-                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex justify-between">
-                    <span className="text-sm font-medium text-blue-800">Refund Total</span>
-                    <span className="font-bold text-blue-800">{formatCurrency(calculateReturnRefund(manualQty, Number(manualRefundPrice)))}</span>
-                  </div>
-                  <div className="flex justify-end gap-3">
-                    <button onClick={() => setShowNoReceiptReturn(false)} className="px-4 py-2 text-gray-600 border border-gray-200 rounded-lg">Cancel</button>
-                    <button onClick={handleNoReceiptSubmit} disabled={submitting} className="px-4 py-2 bg-orange-600 text-white rounded-lg font-semibold disabled:opacity-50 flex items-center gap-2">
-                      <Printer className="w-4 h-4" /> {submitting ? 'Processing...' : 'Confirm Return & Print'}
-                    </button>
-                  </div>
-                </>
+                </div>
               )}
+
+              <div><label className="block text-xs font-medium text-gray-600 mb-1">Reason / Note</label><input value={manualReason} onChange={e => setManualReason(e.target.value)} placeholder="Optional note for receipt-less return" className="w-full p-2.5 border border-gray-200 rounded-lg text-sm" /></div>
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex justify-between"><span className="text-sm font-medium text-blue-800">Combined Refund Total</span><span className="font-bold text-blue-800">{formatCurrency(manualReturnTotal)}</span></div>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowNoReceiptReturn(false)} className="px-4 py-2 text-gray-600 border border-gray-200 rounded-lg">Cancel</button>
+                <button onClick={handleNoReceiptSubmit} disabled={submitting || manualItems.length === 0} className="px-4 py-2 bg-orange-600 text-white rounded-lg font-semibold disabled:opacity-50 flex items-center gap-2"><Printer className="w-4 h-4" /> {submitting ? 'Processing...' : 'Confirm All & Print'}</button>
+              </div>
             </div>
           </div>
         </div>

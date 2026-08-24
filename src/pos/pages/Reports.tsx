@@ -10,6 +10,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Calendar, X, TrendingUp, TrendingDown, DollarSign, ShoppingCart, AlertTriangle, Clock } from 'lucide-react';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { calculateNetSalesProfit } from '../lib/saleReturn';
 
 type PeriodFilter = 'daily' | 'weekly' | 'monthly' | 'custom' | 'all';
 
@@ -17,6 +18,7 @@ export function Reports() {
   const [sales, setSales]         = useState<any[]>([]);
   const [medicines, setMedicines] = useState<any[]>([]);
   const [expenses, setExpenses]   = useState<any[]>([]);
+  const [returns, setReturns]     = useState<any[]>([]);
 
   const [period, setPeriod]     = useState<PeriodFilter>('all');
   const [dateFrom, setDateFrom] = useState('');
@@ -27,7 +29,8 @@ export function Reports() {
     const u1 = onSnapshot(collection(db, 'sales'),    s => setSales(s.docs.map(d => ({ id: d.id, ...d.data() }))),    e => handleFirestoreError(e, OperationType.GET, 'sales'));
     const u2 = subscribeToMedicines(setMedicines, e => handleFirestoreError(e, OperationType.GET, 'medicines'));
     const u3 = onSnapshot(collection(db, 'expenses'), s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => handleFirestoreError(e, OperationType.GET, 'expenses'));
-    return () => { u1(); u2(); u3(); };
+    const u4 = onSnapshot(collection(db, 'saleReturns'), s => setReturns(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => handleFirestoreError(e, OperationType.GET, 'saleReturns'));
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const getDateRange = (): { start: Date; end: Date } | null => {
@@ -51,21 +54,27 @@ export function Reports() {
     ? expenses.filter(e => { const d = e.date ? new Date(e.date) : null; return d ? isWithinInterval(d, dateRange) : false; })
     : expenses;
 
-  const totalRevenue  = filteredSales.reduce((sum, s) => sum + (s.total || 0), 0);
-  const totalExpenses = filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+  const filteredReturns = dateRange
+    ? returns.filter(entry => { const d = entry.date ? new Date(entry.date) : null; return d ? isWithinInterval(d, dateRange) : false; })
+    : returns;
 
-  let totalCost = 0;
+  const grossRevenue = filteredSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+  const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+  let grossCost = 0;
   filteredSales.forEach(sale => {
     sale.items?.forEach((item: any) => {
-      const costPrice  = item.costPrice   || 0;
-      const unitsPerBox = item.unitsPerBox || 1;
+      const costPrice = Number(item.costPrice || 0);
+      const unitsPerBox = Math.max(1, Number(item.unitsPerBox || 1));
       const costPerUnit = costPrice / unitsPerBox;
-      const unitsSold   = item.quantity * (item.sellType === 'box' ? unitsPerBox : 1);
-      totalCost += costPerUnit * unitsSold;
+      const unitsSold = Number(item.quantity || 0) * (item.sellType === 'box' ? unitsPerBox : 1);
+      grossCost += costPerUnit * unitsSold;
     });
   });
 
-  const totalProfit = totalRevenue - totalCost - totalExpenses;
+  const financials = calculateNetSalesProfit(grossRevenue, grossCost, filteredReturns, totalExpenses);
+  const totalRevenue = financials.netRevenue;
+  const totalProfit = financials.netProfit;
 
   const nextMonth         = addDays(new Date(), 30);
   const expiringMedicines = medicines.filter(m => m.expiryDate && isBefore(new Date(m.expiryDate), nextMonth));
@@ -73,14 +82,27 @@ export function Reports() {
 
   const customerSales = filteredSales.filter(s => s.customerType === 'customer' || !s.customerType);
   const hospitalSales = filteredSales.filter(s => s.customerType === 'hospital');
-  const customerTotal = customerSales.reduce((sum, s) => sum + (s.total || 0), 0);
-  const hospitalTotal = hospitalSales.reduce((sum, s) => sum + (s.total || 0), 0);
+  const salesById = new Map(sales.map(sale => [sale.id, sale]));
+  const customerRefunds = filteredReturns.reduce((sum, entry) => {
+    const originalSale = salesById.get(entry.originalSaleId);
+    return sum + (originalSale?.customerType === 'hospital' ? 0 : Number(entry.totalRefund || 0));
+  }, 0);
+  const hospitalRefunds = filteredReturns.reduce((sum, entry) => {
+    const originalSale = salesById.get(entry.originalSaleId);
+    return sum + (originalSale?.customerType === 'hospital' ? Number(entry.totalRefund || 0) : 0);
+  }, 0);
+  const customerTotal = customerSales.reduce((sum, s) => sum + Number(s.total || 0), 0) - customerRefunds;
+  const hospitalTotal = hospitalSales.reduce((sum, s) => sum + Number(s.total || 0), 0) - hospitalRefunds;
 
-  const salesByDate = filteredSales.reduce((acc: any, sale) => {
+  const salesByDate = filteredSales.reduce((acc: Record<string, number>, sale) => {
     const date = sale.date ? format(new Date(sale.date), 'MMM dd') : 'Unknown';
-    acc[date] = (acc[date] || 0) + (sale.total || 0);
+    acc[date] = (acc[date] || 0) + Number(sale.total || 0);
     return acc;
   }, {});
+  filteredReturns.forEach(entry => {
+    const date = entry.date ? format(new Date(entry.date), 'MMM dd') : 'Unknown';
+    salesByDate[date] = (salesByDate[date] || 0) - Number(entry.totalRefund || 0);
+  });
   const chartData = Object.keys(salesByDate).map(date => ({ date, total: salesByDate[date] }));
 
   const periodLabels: Record<PeriodFilter, string> = {

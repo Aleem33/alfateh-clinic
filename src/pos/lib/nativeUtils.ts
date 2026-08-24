@@ -15,7 +15,9 @@ const SLIP_STYLE = `
     max-width: 74mm !important;
     padding: 0 !important;
     overflow: visible !important;
+    font-weight: 700 !important;
   }
+  .thermal-receipt * { font-weight: inherit !important; }
   .thermal-receipt table { width: 100%; table-layout: fixed; border-collapse: collapse; }
   .thermal-receipt th, .thermal-receipt td { overflow-wrap: anywhere; vertical-align: top; }
   .receipt-policy { font-family: "Noto Nastaliq Urdu", "Noto Naskh Arabic", "Segoe UI", Arial, sans-serif; direction: rtl; unicode-bidi: embed; }

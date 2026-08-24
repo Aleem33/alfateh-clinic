@@ -16,6 +16,8 @@ export function Dashboard() {
     totalStockValue: 0,
   });
   const [salesData, setSalesData] = useState<any[]>([]);
+  const [sales, setSales] = useState<any[]>([]);
+  const [saleReturns, setSaleReturns] = useState<any[]>([]);
   const [expiringMedicines, setExpiringMedicines] = useState<any[]>([]);
   const [showExpiryList, setShowExpiryList] = useState(false);
 
@@ -46,29 +48,41 @@ export function Dashboard() {
       setExpiringMedicines(expiring.sort((a, b) => String(a.expiryDate).localeCompare(String(b.expiryDate))));
     }, (error) => handleFirestoreError(error, OperationType.GET, 'medicines'));
 
-    const unsubSales = onSnapshot(collection(db, 'sales'), (snapshot) => {
-      let todayTotal = 0;
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const unsubSales = onSnapshot(collection(db, 'sales'), snapshot => {
+      setSales(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() })));
+    }, error => handleFirestoreError(error, OperationType.GET, 'sales'));
+    const unsubReturns = onSnapshot(collection(db, 'saleReturns'), snapshot => {
+      setSaleReturns(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() })));
+    }, error => handleFirestoreError(error, OperationType.GET, 'saleReturns'));
 
-      const last7Days = Array.from({ length: 7 }).map((_, i) => {
-        const d = subDays(new Date(), i);
-        return { date: format(d, 'MMM dd'), fullDate: format(d, 'yyyy-MM-dd'), total: 0 };
-      }).reverse();
-
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        const saleDateStr = data.date ? data.date.split('T')[0] : '';
-        if (saleDateStr === todayStr) todayTotal += data.total || 0;
-        const dayMatch = last7Days.find(d => d.fullDate === saleDateStr);
-        if (dayMatch) dayMatch.total += data.total || 0;
-      });
-
-      setStats(prev => ({ ...prev, todaySales: todayTotal }));
-      setSalesData(last7Days);
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'sales'));
-
-    return () => { unsubMedicines(); unsubSales(); };
+    return () => { unsubMedicines(); unsubSales(); unsubReturns(); };
   }, []);
+
+  useEffect(() => {
+    let todayTotal = 0;
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const last7Days = Array.from({ length: 7 }).map((_, i) => {
+      const d = subDays(new Date(), i);
+      return { date: format(d, 'MMM dd'), fullDate: format(d, 'yyyy-MM-dd'), total: 0 };
+    }).reverse();
+
+    sales.forEach(data => {
+      const saleDateStr = data.date ? data.date.split('T')[0] : '';
+      if (saleDateStr === todayStr) todayTotal += Number(data.total || 0);
+      const dayMatch = last7Days.find(d => d.fullDate === saleDateStr);
+      if (dayMatch) dayMatch.total += Number(data.total || 0);
+    });
+    saleReturns.forEach(data => {
+      const returnDateStr = data.date ? data.date.split('T')[0] : '';
+      if (returnDateStr === todayStr) todayTotal -= Number(data.totalRefund || 0);
+      const dayMatch = last7Days.find(d => d.fullDate === returnDateStr);
+      if (dayMatch) dayMatch.total -= Number(data.totalRefund || 0);
+    });
+
+    setStats(prev => ({ ...prev, todaySales: todayTotal }));
+    setSalesData(last7Days);
+  }, [sales, saleReturns]);
+
 
   const statCards = [
     {

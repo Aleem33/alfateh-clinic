@@ -67,8 +67,12 @@
     font-family: "Courier New", monospace !important;
     font-size: 11px !important;
     line-height: 1.25 !important;
+    font-weight: 700 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+  .thermal-receipt * {
+    font-weight: inherit !important;
   }
   .thermal-receipt table {
     width: 100% !important;
