@@ -72,3 +72,26 @@ export function aggregateSaleStockAdjustments(items: Array<{ medicineId?: string
   }
   return [...totals].map(([medicineId, units]) => ({ medicineId, units }));
 }
+
+export type PendingPosSaleReplayAdapter = {
+  saleExists: (saleId: string) => Promise<boolean>;
+  replay: (record: PendingPosSale) => Promise<void>;
+  remove: (saleId: string) => Promise<void>;
+};
+
+export async function replayPendingPosSaleRecords(
+  records: PendingPosSale[],
+  adapter: PendingPosSaleReplayAdapter,
+) {
+  for (const record of records) {
+    if (await adapter.saleExists(record.saleId)) {
+      await adapter.remove(record.saleId);
+      continue;
+    }
+    await adapter.replay(record);
+    if (!(await adapter.saleExists(record.saleId))) {
+      throw new Error(`Offline sale ${record.saleId} could not be confirmed after replay.`);
+    }
+    await adapter.remove(record.saleId);
+  }
+}

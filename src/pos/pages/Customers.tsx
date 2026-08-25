@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, increment, query, orderBy, getDocs, where
+  doc, increment, query, orderBy, getDocs, where, writeBatch
 } from '@/lib/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -71,11 +71,13 @@ export function Customers() {
     if (amount > maxPayable) return;
     setPaymentLoading(true);
     try {
-      await addDoc(collection(db, 'customerPayments'), {
+      const batch = writeBatch(db);
+      const paymentRef = doc(collection(db, 'customerPayments'));
+      batch.set(paymentRef, {
         customerId: paymentModal.id, customerName: paymentModal.name,
         amount, note: paymentNote || '', date: new Date().toISOString(),
       });
-      await updateDoc(doc(db, 'customers', paymentModal.id), { creditBalance: increment(-amount) });
+      batch.update(doc(db, 'customers', paymentModal.id), { creditBalance: increment(-amount) });
 
       // Clear pendingAmount on sales for this customer, oldest-due-first
       let remaining = amount;
@@ -88,20 +90,22 @@ export function Customers() {
         const due = sale.pendingAmount || 0;
         if (remaining >= due) {
           // This sale is fully cleared
-          await updateDoc(doc(db, 'sales', sale.id), {
+          batch.update(doc(db, 'sales', sale.id), {
             pendingAmount: 0,
             amountPaid: sale.total,
           });
           remaining -= due;
         } else {
           // Partially cleared
-          await updateDoc(doc(db, 'sales', sale.id), {
+          batch.update(doc(db, 'sales', sale.id), {
             pendingAmount: due - remaining,
             amountPaid: (sale.amountPaid || 0) + remaining,
           });
           remaining = 0;
         }
       }
+
+      await batch.commit();
 
       const remainingBalance = maxPayable - amount;
       setPaymentModal(null); setPaymentAmount(''); setPaymentNote('');

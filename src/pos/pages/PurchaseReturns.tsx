@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment } from '@/lib/firestore';
+import { collection, onSnapshot, doc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosPurchaseReturnNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -165,10 +165,13 @@ export function PurchaseReturns() {
         unitsPerBox,
       };
 
-      const docRef = await addDoc(collection(db, 'purchaseReturns'), returnDoc);
-      await updateDoc(doc(db, 'medicines', selectedPurchase.medicineId), {
+      const batch = writeBatch(db);
+      const docRef = doc(collection(db, 'purchaseReturns'));
+      batch.set(docRef, returnDoc);
+      batch.update(doc(db, 'medicines', selectedPurchase.medicineId), {
         stock: increment(-totalUnitsToReturn),
       });
+      await batch.commit();
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setSelectedPurchase(null);

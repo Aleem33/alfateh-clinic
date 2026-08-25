@@ -7,7 +7,7 @@ import { completeLanCloudSync, getLanStatus, subscribeLanStatus } from './lanCoo
 import { subscribeOfflineCache } from './offlineCache';
 import { GLOBAL_DATA_COLLECTIONS } from './dataSync';
 import { isCloudAuthReady } from './offlineAuth';
-import { countPendingPosSales, listPendingPosSales, removePendingPosSale } from '../pos/lib/offlineSalesOutbox';
+import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -175,35 +175,28 @@ async function processLabReportQueue() {
 
 async function replayPendingPosSales() {
   const records = await listPendingPosSales();
-  for (const record of records) {
-    const saleRef = doc(db, 'sales', record.saleId);
-    const existing = await getDocFromServer(saleRef);
-    if (existing.exists()) {
-      await removePendingPosSale(record.saleId);
-      continue;
-    }
-
-    const batch = writeBatch(db);
-    batch.set(saleRef, record.saleData);
-    record.movements.forEach(movement => {
-      batch.set(doc(db, 'stockMovements', movement.id), movement.data);
-    });
-    record.stockAdjustments.forEach(adjustment => {
-      batch.update(doc(db, 'medicines', adjustment.medicineId), {
-        stock: increment(-adjustment.units),
+  await replayPendingPosSaleRecords(records, {
+    saleExists: async saleId => (await getDocFromServer(doc(db, 'sales', saleId))).exists(),
+    replay: async record => {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'sales', record.saleId), record.saleData);
+      record.movements.forEach(movement => {
+        batch.set(doc(db, 'stockMovements', movement.id), movement.data);
       });
-    });
-    if (record.customerAdjustment && record.customerAdjustment.pendingAmount > 0) {
-      batch.update(doc(db, 'customers', record.customerAdjustment.customerId), {
-        creditBalance: increment(record.customerAdjustment.pendingAmount),
+      record.stockAdjustments.forEach(adjustment => {
+        batch.update(doc(db, 'medicines', adjustment.medicineId), {
+          stock: increment(-adjustment.units),
+        });
       });
-    }
-    await batch.commit();
-
-    const confirmed = await getDocFromServer(saleRef);
-    if (!confirmed.exists()) throw new Error(`Offline sale ${record.saleId} could not be confirmed after replay.`);
-    await removePendingPosSale(record.saleId);
-  }
+      if (record.customerAdjustment && record.customerAdjustment.pendingAmount > 0) {
+        batch.update(doc(db, 'customers', record.customerAdjustment.customerId), {
+          creditBalance: increment(record.customerAdjustment.pendingAmount),
+        });
+      }
+      await batch.commit();
+    },
+    remove: removePendingPosSale,
+  });
 }
 
 async function checkStockConflicts() {
