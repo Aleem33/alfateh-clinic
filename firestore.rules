@@ -103,6 +103,10 @@ service cloud.firestore {
           'restoredAt',
           'restoredBy'
         ])
+      ) || (
+        isCashier() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock']) &&
+        request.resource.data.stock is number
       );
       allow delete: if isAdmin();
     }

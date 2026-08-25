@@ -16,6 +16,8 @@ import { subscribeToMedicines } from '../../lib/medicineStore';
 import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountType } from '../lib/billDiscount';
 import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
 import { cartItemUnits, findCartStockProblem } from '../lib/billingCart';
+import { aggregateSaleStockAdjustments, queuePendingPosSale, removePendingPosSale } from '../lib/offlineSalesOutbox';
+import { isCloudOnline } from '../../lib/lanCoordinator';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -421,11 +423,13 @@ export function Billing() {
       }
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'sales'));
+      const stockAdjustments = aggregateSaleStockAdjustments(cart);
+      const movements: Array<{ id: string; data: Record<string, any> }> = [];
       batch.set(docRef, saleData);
       for (const item of cart) {
         const unitsToDeduct = item.quantity * (item.sellType === 'box' ? item.unitsPerBox : 1);
         const movementRef = doc(collection(db, 'stockMovements'));
-        batch.set(movementRef, {
+        const movementData = {
           type: 'sale',
           saleId: docRef.id,
           receiptNo,
@@ -436,13 +440,30 @@ export function Billing() {
           deviceReceiptNo: receiptNo,
           createdAt: new Date().toISOString(),
           cashierId: auth.currentUser?.uid || '',
-        });
-        batch.update(doc(db, 'medicines', item.medicineId), { stock: increment(-unitsToDeduct) });
+        };
+        movements.push({ id: movementRef.id, data: movementData });
+        batch.set(movementRef, movementData);
       }
+      stockAdjustments.forEach(adjustment => {
+        batch.update(doc(db, 'medicines', adjustment.medicineId), {
+          stock: increment(-adjustment.units),
+        });
+      });
       if (selectedCustomer && pendingAmount > 0) {
         batch.update(doc(db, 'customers', selectedCustomer.id), { creditBalance: increment(pendingAmount) });
       }
+      await queuePendingPosSale({
+        saleId: docRef.id,
+        saleData,
+        movements,
+        stockAdjustments,
+        ...(selectedCustomer && pendingAmount > 0
+          ? { customerAdjustment: { customerId: selectedCustomer.id, pendingAmount } }
+          : {}),
+        createdAt: new Date().toISOString(),
+      });
       await waitForOnlineWrite(batch.commit());
+      if (isCloudOnline()) await removePendingPosSale(docRef.id);
       setLastReceipt({ ...saleData, id: docRef.id });
       setCart([]); setOrderDiscountType('rs'); setOrderDiscountValue(0); setAmountPaid('');
       setSelectedCustomer(null); setCustomerSearch('');

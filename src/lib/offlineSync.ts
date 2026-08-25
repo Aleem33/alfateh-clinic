@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocs, query, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
+import { collection, doc, getDocFromServer, getDocs, increment, query, setDoc, updateDoc, waitForPendingWrites, where, writeBatch } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
@@ -7,6 +7,7 @@ import { completeLanCloudSync, getLanStatus, subscribeLanStatus } from './lanCoo
 import { subscribeOfflineCache } from './offlineCache';
 import { GLOBAL_DATA_COLLECTIONS } from './dataSync';
 import { isCloudAuthReady } from './offlineAuth';
+import { countPendingPosSales, listPendingPosSales, removePendingPosSale } from '../pos/lib/offlineSalesOutbox';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -41,6 +42,7 @@ const device = getOfflineDevice();
 let online = typeof window === 'undefined' ? true : getLanStatus().online;
 let syncing = false;
 let labPendingCount = 0;
+let posSalePendingCount = 0;
 let pendingCount = 0;
 let issueCount = 0;
 let lastError = '';
@@ -51,7 +53,7 @@ function currentSnapshot(): SyncSnapshot {
 }
 
 function recomputePendingCount() {
-  pendingCount = labPendingCount + pendingWriteCollections.size;
+  pendingCount = labPendingCount + posSalePendingCount + pendingWriteCollections.size;
 }
 
 function notify() {
@@ -93,8 +95,10 @@ async function refreshPendingCount() {
   try {
     const records = await withStore<PendingLabReport[]>('readonly', store => store.getAll());
     labPendingCount = records.length;
+    posSalePendingCount = await countPendingPosSales();
   } catch {
     labPendingCount = 0;
+    posSalePendingCount = 0;
   }
   notify();
 }
@@ -169,6 +173,39 @@ async function processLabReportQueue() {
   if (errors.length > 0) throw new Error(errors[0]);
 }
 
+async function replayPendingPosSales() {
+  const records = await listPendingPosSales();
+  for (const record of records) {
+    const saleRef = doc(db, 'sales', record.saleId);
+    const existing = await getDocFromServer(saleRef);
+    if (existing.exists()) {
+      await removePendingPosSale(record.saleId);
+      continue;
+    }
+
+    const batch = writeBatch(db);
+    batch.set(saleRef, record.saleData);
+    record.movements.forEach(movement => {
+      batch.set(doc(db, 'stockMovements', movement.id), movement.data);
+    });
+    record.stockAdjustments.forEach(adjustment => {
+      batch.update(doc(db, 'medicines', adjustment.medicineId), {
+        stock: increment(-adjustment.units),
+      });
+    });
+    if (record.customerAdjustment && record.customerAdjustment.pendingAmount > 0) {
+      batch.update(doc(db, 'customers', record.customerAdjustment.customerId), {
+        creditBalance: increment(record.customerAdjustment.pendingAmount),
+      });
+    }
+    await batch.commit();
+
+    const confirmed = await getDocFromServer(saleRef);
+    if (!confirmed.exists()) throw new Error(`Offline sale ${record.saleId} could not be confirmed after replay.`);
+    await removePendingPosSale(record.saleId);
+  }
+}
+
 async function checkStockConflicts() {
   const medicines = await getDocs(query(collection(db, 'medicines'), where('stock', '<', 0)));
   issueCount = medicines.size;
@@ -203,7 +240,12 @@ export async function runOfflineSyncNow() {
   notify();
   try {
     await processLabReportQueue();
-    await waitForPendingWrites(db);
+    try {
+      await waitForPendingWrites(db);
+    } catch (error) {
+      console.warn('A queued Firestore write was rejected; durable sales will be replayed:', error);
+    }
+    await replayPendingPosSales();
     await checkStockConflicts();
   } catch (error: any) {
     lastError = error?.message || 'Offline sync failed.';
@@ -240,6 +282,7 @@ export function startOfflineSyncService() {
     window.addEventListener('offline', () => updateOnline(false));
   }
   window.addEventListener('alfateh:auth-sync-ready', () => void runOfflineSyncNow());
+  window.addEventListener('alfateh:pos-outbox-changed', () => void refreshPendingCount());
   subscribeLanStatus(lanStatus => updateOnline(lanStatus.online));
   subscribeOfflineCache(cacheStatus => {
     pendingWriteCollections.clear();
