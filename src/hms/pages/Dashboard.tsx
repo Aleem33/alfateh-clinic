@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, limit } from '@/lib/firestore';
 import { db } from '../../firebase';
-import { formatCurrency, today } from '../lib/utils';
+import { formatCurrency } from '../lib/utils';
 import { Users, CalendarDays, BedDouble, FlaskConical, DollarSign, AlertTriangle, Clock, TrendingUp, Plus, UserPlus, ArrowRight, ShoppingCart, Package } from 'lucide-react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { format, subDays } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { clinicDateKey } from '../../lib/clinicDate';
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -20,12 +21,12 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const todayStr = today();
+    const todayStr = clinicDateKey(new Date());
     const u1 = onSnapshot(collection(db, 'appointments'), snap =>
       setStats(p => ({ ...p, todayAppointments: snap.docs.filter(d => d.data().date === todayStr).length }))
     );
     const u2 = onSnapshot(collection(db, 'patients'), snap =>
-      setStats(p => ({ ...p, newPatientsToday: snap.docs.filter(d => (d.data().createdAt || '').startsWith(todayStr)).length, totalPatients: snap.size }))
+      setStats(p => ({ ...p, newPatientsToday: snap.docs.filter(d => clinicDateKey(d.data().createdAt) === todayStr).length, totalPatients: snap.size }))
     );
     const u3 = onSnapshot(collection(db, 'admissions'), snap =>
       setStats(p => ({ ...p, ipdCount: snap.docs.filter(d => d.data().status === 'admitted').length }))
@@ -45,14 +46,14 @@ export function Dashboard() {
     });
     const u6 = onSnapshot(collection(db, 'bills'), snap => {
       const bills = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-      const todayRev = bills.filter(b => (b.date || '').startsWith(todayStr)).reduce((s, b) => s + (b.paid || 0), 0);
+      const todayRev = bills.filter(b => clinicDateKey(b.date) === todayStr).reduce((s, b) => s + (b.paid || 0), 0);
       setStats(p => ({ ...p, todayRevenue: todayRev }));
       const days = Array.from({ length: 7 }, (_, i) => {
         const d = subDays(new Date(), 6 - i);
-        return { date: format(d, 'EEE'), fullDate: format(d, 'yyyy-MM-dd'), opd: 0, pos: 0 };
+        return { date: format(d, 'EEE'), fullDate: clinicDateKey(d), opd: 0, pos: 0 };
       });
       bills.forEach(b => {
-        const bd = (b.date || '').split('T')[0];
+        const bd = clinicDateKey(b.date);
         const day = days.find(d => d.fullDate === bd);
         if (day) day.opd += b.total || 0;
       });
@@ -61,12 +62,12 @@ export function Dashboard() {
     });
     const u7 = onSnapshot(collection(db, 'sales'), snap => {
       const sales = snap.docs.map(d => d.data()) as any[];
-      const todayPos = sales.filter(s => (s.date || '').startsWith(todayStr)).reduce((s, p) => s + (p.total || 0), 0);
+      const todayPos = sales.filter(s => clinicDateKey(s.date) === todayStr).reduce((s, p) => s + (p.total || 0), 0);
       setStats(p => ({ ...p, todayPosRevenue: todayPos }));
       setChartData(prev => {
         const updated = [...prev];
         sales.forEach(s => {
-          const sd = (s.date || '').split('T')[0];
+          const sd = clinicDateKey(s.date);
           const day = updated.find(d => d.fullDate === sd);
           if (day) day.pos += s.total || 0;
         });

@@ -6,6 +6,7 @@ import { DollarSign, AlertTriangle, Package, Clock, ShoppingCart, X } from 'luci
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subDays, isBefore, addDays } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { clinicDateKey } from '../../lib/clinicDate';
 
 export function Dashboard() {
   const [stats, setStats] = useState({
@@ -60,20 +61,20 @@ export function Dashboard() {
 
   useEffect(() => {
     let todayTotal = 0;
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayStr = clinicDateKey(new Date());
     const last7Days = Array.from({ length: 7 }).map((_, i) => {
       const d = subDays(new Date(), i);
-      return { date: format(d, 'MMM dd'), fullDate: format(d, 'yyyy-MM-dd'), total: 0 };
+      return { date: format(d, 'MMM dd'), fullDate: clinicDateKey(d), total: 0 };
     }).reverse();
 
     sales.forEach(data => {
-      const saleDateStr = data.date ? data.date.split('T')[0] : '';
+      const saleDateStr = clinicDateKey(data.date);
       if (saleDateStr === todayStr) todayTotal += Number(data.total || 0);
       const dayMatch = last7Days.find(d => d.fullDate === saleDateStr);
       if (dayMatch) dayMatch.total += Number(data.total || 0);
     });
     saleReturns.forEach(data => {
-      const returnDateStr = data.date ? data.date.split('T')[0] : '';
+      const returnDateStr = clinicDateKey(data.date);
       if (returnDateStr === todayStr) todayTotal -= Number(data.totalRefund || 0);
       const dayMatch = last7Days.find(d => d.fullDate === returnDateStr);
       if (dayMatch) dayMatch.total -= Number(data.totalRefund || 0);
