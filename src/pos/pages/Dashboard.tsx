@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot } from '@/lib/firestore';
-import { db, handleFirestoreError, OperationType } from '../../firebase';
+import { handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { DollarSign, AlertTriangle, Package, Clock, ShoppingCart, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -8,6 +7,7 @@ import { format, subDays, isBefore, addDays } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
+import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 
 export function Dashboard() {
   const todayStr = useClinicTodayKey();
@@ -51,12 +51,8 @@ export function Dashboard() {
       setExpiringMedicines(expiring.sort((a, b) => String(a.expiryDate).localeCompare(String(b.expiryDate))));
     }, (error) => handleFirestoreError(error, OperationType.GET, 'medicines'));
 
-    const unsubSales = onSnapshot(collection(db, 'sales'), snapshot => {
-      setSales(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() })));
-    }, error => handleFirestoreError(error, OperationType.GET, 'sales'));
-    const unsubReturns = onSnapshot(collection(db, 'saleReturns'), snapshot => {
-      setSaleReturns(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() })));
-    }, error => handleFirestoreError(error, OperationType.GET, 'saleReturns'));
+    const unsubSales = subscribeToSales(setSales, error => handleFirestoreError(error, OperationType.GET, 'sales'));
+    const unsubReturns = subscribeToSaleReturns(setSaleReturns, error => handleFirestoreError(error, OperationType.GET, 'saleReturns'));
 
     return () => { unsubMedicines(); unsubSales(); unsubReturns(); };
   }, []);

@@ -3,18 +3,22 @@ import { collection, onSnapshot } from '@/lib/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import {
-  format, isBefore, addDays, startOfDay, endOfDay,
+  format, isBefore, addDays,
   startOfWeek, endOfWeek, startOfMonth, endOfMonth,
-  parseISO, isWithinInterval,
+  parseISO,
 } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Calendar, X, TrendingUp, TrendingDown, DollarSign, ShoppingCart, AlertTriangle, Clock } from 'lucide-react';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { calculateNetSalesProfit } from '../lib/saleReturn';
+import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
+import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
+import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 
 type PeriodFilter = 'daily' | 'weekly' | 'monthly' | 'custom' | 'all';
 
 export function Reports() {
+  const todayKey = useClinicTodayKey();
   const [sales, setSales]         = useState<any[]>([]);
   const [medicines, setMedicines] = useState<any[]>([]);
   const [expenses, setExpenses]   = useState<any[]>([]);
@@ -26,36 +30,36 @@ export function Reports() {
   const [showCustom, setShowCustom] = useState(false);
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'sales'),    s => setSales(s.docs.map(d => ({ id: d.id, ...d.data() }))),    e => handleFirestoreError(e, OperationType.GET, 'sales'));
+    const u1 = subscribeToSales(setSales, e => handleFirestoreError(e, OperationType.GET, 'sales'));
     const u2 = subscribeToMedicines(setMedicines, e => handleFirestoreError(e, OperationType.GET, 'medicines'));
     const u3 = onSnapshot(collection(db, 'expenses'), s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => handleFirestoreError(e, OperationType.GET, 'expenses'));
-    const u4 = onSnapshot(collection(db, 'saleReturns'), s => setReturns(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => handleFirestoreError(e, OperationType.GET, 'saleReturns'));
+    const u4 = subscribeToSaleReturns(setReturns, e => handleFirestoreError(e, OperationType.GET, 'saleReturns'));
     return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
-  const getDateRange = (): { start: Date; end: Date } | null => {
+  const getDateRange = (): { start: string; end: string } | null => {
     const now = new Date();
-    if (period === 'daily')   return { start: startOfDay(now), end: endOfDay(now) };
-    if (period === 'weekly')  return { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) };
-    if (period === 'monthly') return { start: startOfMonth(now), end: endOfMonth(now) };
-    if (period === 'custom' && dateFrom && dateTo)  return { start: startOfDay(parseISO(dateFrom)), end: endOfDay(parseISO(dateTo)) };
-    if (period === 'custom' && dateFrom) return { start: startOfDay(parseISO(dateFrom)), end: endOfDay(now) };
-    if (period === 'custom' && dateTo)   return { start: new Date(0), end: endOfDay(parseISO(dateTo)) };
+    if (period === 'daily')   return { start: todayKey, end: todayKey };
+    if (period === 'weekly')  return { start: clinicDateKey(startOfWeek(now, { weekStartsOn: 1 })), end: clinicDateKey(endOfWeek(now, { weekStartsOn: 1 })) };
+    if (period === 'monthly') return { start: clinicDateKey(startOfMonth(now)), end: clinicDateKey(endOfMonth(now)) };
+    if (period === 'custom' && dateFrom && dateTo) return { start: dateFrom, end: dateTo };
+    if (period === 'custom' && dateFrom) return { start: dateFrom, end: todayKey };
+    if (period === 'custom' && dateTo) return { start: '0001-01-01', end: dateTo };
     return null;
   };
 
   const dateRange = getDateRange();
 
   const filteredSales = dateRange
-    ? sales.filter(s => { const d = s.date ? new Date(s.date) : null; return d ? isWithinInterval(d, dateRange) : false; })
+    ? sales.filter(s => { const key = recordClinicDateKey(s); return key >= dateRange.start && key <= dateRange.end; })
     : sales;
 
   const filteredExpenses = dateRange
-    ? expenses.filter(e => { const d = e.date ? new Date(e.date) : null; return d ? isWithinInterval(d, dateRange) : false; })
+    ? expenses.filter(e => { const key = clinicDateKey(e.date); return key >= dateRange.start && key <= dateRange.end; })
     : expenses;
 
   const filteredReturns = dateRange
-    ? returns.filter(entry => { const d = entry.date ? new Date(entry.date) : null; return d ? isWithinInterval(d, dateRange) : false; })
+    ? returns.filter(entry => { const key = recordClinicDateKey(entry); return key >= dateRange.start && key <= dateRange.end; })
     : returns;
 
   const grossRevenue = filteredSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
@@ -95,12 +99,14 @@ export function Reports() {
   const hospitalTotal = hospitalSales.reduce((sum, s) => sum + Number(s.total || 0), 0) - hospitalRefunds;
 
   const salesByDate = filteredSales.reduce((acc: Record<string, number>, sale) => {
-    const date = sale.date ? format(new Date(sale.date), 'MMM dd') : 'Unknown';
+    const key = recordClinicDateKey(sale);
+    const date = key ? format(parseISO(key), 'MMM dd') : 'Unknown';
     acc[date] = (acc[date] || 0) + Number(sale.total || 0);
     return acc;
   }, {});
   filteredReturns.forEach(entry => {
-    const date = entry.date ? format(new Date(entry.date), 'MMM dd') : 'Unknown';
+    const key = recordClinicDateKey(entry);
+    const date = key ? format(parseISO(key), 'MMM dd') : 'Unknown';
     salesByDate[date] = (salesByDate[date] || 0) - Number(entry.totalRefund || 0);
   });
   const chartData = Object.keys(salesByDate).map(date => ({ date, total: salesByDate[date] }));

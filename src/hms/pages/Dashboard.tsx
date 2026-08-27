@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
+import { subscribeToSales } from '../../lib/salesStore';
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -61,8 +62,7 @@ export function Dashboard() {
       setChartData(days);
       setLoading(false);
     });
-    const u7 = onSnapshot(collection(db, 'sales'), snap => {
-      const sales = snap.docs.map(d => d.data()) as any[];
+    const u7 = subscribeToSales(sales => {
       const todayPos = sales.filter(s => recordClinicDateKey(s) === todayStr).reduce((s, p) => s + (p.total || 0), 0);
       setStats(p => ({ ...p, todayPosRevenue: todayPos }));
       setChartData(prev => {

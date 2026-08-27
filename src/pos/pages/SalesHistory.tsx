@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc } from '@/lib/firestore';
+import { doc, updateDoc } from '@/lib/firestore';
 import { printPageOrShare, downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { recordClinicDateKey } from '../../lib/clinicDate';
+import { subscribeToSales } from '../../lib/salesStore';
 
 type ExportType = 'all' | 'customer' | 'hospital';
 type ViewMode   = 'summary' | 'excel';
@@ -84,10 +85,7 @@ export function SalesHistory() {
   };
 
   useEffect(() => {
-    const q = query(collection(db, 'sales'), orderBy('date', 'desc'));
-    const unsub = onSnapshot(q, snap => {
-      setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'sales'));
+    const unsub = subscribeToSales(setSales, err => handleFirestoreError(err, OperationType.GET, 'sales'));
     return () => unsub();
   }, []);
 

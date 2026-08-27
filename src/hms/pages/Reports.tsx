@@ -6,6 +6,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { format, subDays, subMonths, startOfMonth, endOfMonth, differenceInDays, parseISO } from 'date-fns';
 import { Download, TrendingUp, AlertCircle, DollarSign, Activity, FileText, Search, CalendarDays } from 'lucide-react';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { subscribeToSales } from '../../lib/salesStore';
+import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 
 function exportCSV(filename: string, rows: any[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
@@ -61,7 +63,7 @@ export function Reports() {
       onSnapshot(collection(db, 'labOrders'),      s => setLabOrders(s.docs.map(d => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'expenses'),       s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })))),
       subscribeToMedicines(setMedicines),
-      onSnapshot(collection(db, 'sales'),          s => setPosSales(s.docs.map(d => ({ id: d.id, ...d.data() })))),
+      subscribeToSales(setPosSales),
     ];
     return () => u.forEach(f => f());
   }, []);
@@ -80,10 +82,10 @@ export function Reports() {
   const days = period === '7d' ? 7 : period === '30d' ? 30 : 90;
   const revenueChart = Array.from({ length: Math.min(days, 30) }).map((_, i) => {
     const d = subDays(new Date(), (Math.min(days, 30) - 1) - i);
-    const dateStr = format(d, 'yyyy-MM-dd');
-    const opd     = bills.filter(b => (b.date || '').startsWith(dateStr)).reduce((s, b) => s + (b.total || 0), 0);
-    const pos     = posSales.filter(p => (p.date || '').startsWith(dateStr)).reduce((s, p) => s + (p.total || 0), 0);
-    const exp     = expenses.filter(e => (e.date || '').startsWith(dateStr)).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    const dateStr = clinicDateKey(d);
+    const opd     = bills.filter(b => clinicDateKey(b.date) === dateStr).reduce((s, b) => s + (b.total || 0), 0);
+    const pos     = posSales.filter(p => recordClinicDateKey(p) === dateStr).reduce((s, p) => s + (p.total || 0), 0);
+    const exp     = expenses.filter(e => clinicDateKey(e.date) === dateStr).reduce((s, e) => s + (Number(e.amount) || 0), 0);
     return { date: format(d, 'MMM dd'), opd, pos, total: opd + pos, expenses: exp };
   });
 
@@ -93,7 +95,7 @@ export function Reports() {
     const start = format(startOfMonth(d), 'yyyy-MM-dd');
     const end   = format(endOfMonth(d), 'yyyy-MM-dd');
     const opd   = bills.filter(b => b.date >= start && b.date <= end).reduce((s, b) => s + (b.total || 0), 0);
-    const pos   = posSales.filter(p => p.date >= start && p.date <= end).reduce((s, p) => s + (p.total || 0), 0);
+    const pos   = posSales.filter(p => { const key = recordClinicDateKey(p); return key >= start && key <= end; }).reduce((s, p) => s + (p.total || 0), 0);
     const exp   = expenses.filter(e => e.date >= start && e.date <= end).reduce((s, e) => s + (Number(e.amount) || 0), 0);
     const revenue = opd + pos;
     return { month: format(d, 'MMM yy'), revenue, expenses: exp, profit: revenue - exp };
@@ -149,7 +151,7 @@ export function Reports() {
     pos: {
       label: 'Pharmacy Sales',
       headers: ['Receipt No', 'Customer', 'Type', 'Date', 'Items', 'Subtotal', 'Discount', 'Total', 'Paid', 'Pending'],
-      rows: posSales.map(s => [s.receiptNo || s.saleId || s.id, s.customerName || 'Walk-in', s.customerType || 'customer', s.date?.split('T')[0], s.items?.length || 0, s.subtotal || 0, s.discount || 0, s.total || 0, s.amountPaid || 0, s.pendingAmount || 0]),
+      rows: posSales.map(s => [s.receiptNo || s.saleId || s.id, s.customerName || 'Walk-in', s.customerType || 'customer', recordClinicDateKey(s), s.items?.length || 0, s.subtotal || 0, s.discount || 0, s.total || 0, s.amountPaid || 0, s.pendingAmount || 0]),
       dateIndex: 3,
       moneyIndexes: [5, 6, 7, 8, 9],
     },

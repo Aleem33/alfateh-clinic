@@ -14,6 +14,7 @@ import {
   Eye, X, Wallet, CheckCircle, Clock, CreditCard, Receipt, Printer
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { subscribeToSales } from '../../lib/salesStore';
 
 export function Customers() {
   const [customers, setCustomers]       = useState<any[]>([]);
@@ -38,9 +39,7 @@ export function Customers() {
     const unsub1 = onSnapshot(collection(db, 'customers'), snap => {
       setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, err => handleFirestoreError(err, OperationType.GET, 'customers'));
-    const unsub2 = onSnapshot(collection(db, 'sales'), snap => {
-      setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'sales'));
+    const unsub2 = subscribeToSales(setSales, err => handleFirestoreError(err, OperationType.GET, 'sales'));
     const unsub3 = onSnapshot(
       query(collection(db, 'customerPayments'), orderBy('date', 'desc')),
       snap => setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() }))),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
+import { collection, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosSaleReturnNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -12,6 +12,7 @@ import { searchMedicines } from '../../lib/medicineIndex';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { calculateReturnRefund, calculateReturnStockUnits } from '../lib/saleReturn';
 import { clinicDateKey } from '../../lib/clinicDate';
+import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 
 // ── Print via hidden iframe so main page layout is unaffected ────────────────
 function printSlip(slipHtml: string) {
@@ -38,15 +39,12 @@ export function SalesReturns() {
   const [manualItems, setManualItems] = useState<any[]>([]);
 
   useEffect(() => {
-    const q = query(collection(db, 'sales'), orderBy('date', 'desc'));
-    const unsubSales = onSnapshot(q, (snap) => {
-      setSales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsubSales = subscribeToSales(records => {
+      setSales([...records].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
     }, (e) => handleFirestoreError(e, OperationType.GET, 'sales'));
 
-    const unsubReturns = onSnapshot(collection(db, 'saleReturns'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      list.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setReturns(list);
+    const unsubReturns = subscribeToSaleReturns(records => {
+      setReturns([...records].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
     }, (e) => handleFirestoreError(e, OperationType.GET, 'saleReturns'));
 
     const unsubMedicines = subscribeToMedicines(
