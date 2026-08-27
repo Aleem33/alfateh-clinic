@@ -11,6 +11,7 @@ import { subscribeToMedicines } from '../../lib/medicineStore';
 import { searchMedicines } from '../../lib/medicineIndex';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { calculateReturnRefund, calculateReturnStockUnits } from '../lib/saleReturn';
+import { clinicDateKey } from '../../lib/clinicDate';
 
 // ── Print via hidden iframe so main page layout is unaffected ────────────────
 function printSlip(slipHtml: string) {
@@ -206,6 +207,7 @@ export function SalesReturns() {
     setSubmitting(true);
     try {
       const returnNo = await getNextPosSaleReturnNo();
+      const returnTimestamp = new Date().toISOString();
       const itemsToReturn = returnItems.filter(i => i.returnQty > 0).map(i => ({
         cartItemId: i.cartItemId,
         medicineId: i.medicineId,
@@ -227,7 +229,8 @@ export function SalesReturns() {
         items: itemsToReturn,
         totalRefund: returnTotal,
         reason: returnReason,
-        date: new Date().toISOString(),
+        date: returnTimestamp,
+        businessDate: clinicDateKey(returnTimestamp),
         processedBy: auth.currentUser?.uid,
       };
 
@@ -274,6 +277,7 @@ export function SalesReturns() {
     setSubmitting(true);
     try {
       const returnNo = await getNextPosSaleReturnNo();
+      const returnTimestamp = new Date().toISOString();
       const returnDoc = {
         returnNo,
         originalSaleId: '',
@@ -282,7 +286,8 @@ export function SalesReturns() {
         items: manualItems,
         totalRefund,
         reason: manualReason.trim() || 'Return processed without original receipt',
-        date: new Date().toISOString(),
+        date: returnTimestamp,
+        businessDate: clinicDateKey(returnTimestamp),
         processedBy: auth.currentUser?.uid || '',
       };
       const batch = writeBatch(db);

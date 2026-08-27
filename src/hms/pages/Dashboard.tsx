@@ -7,10 +7,12 @@ import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Ba
 import { format, subDays } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { subscribeToMedicines } from '../../lib/medicineStore';
-import { clinicDateKey } from '../../lib/clinicDate';
+import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
+import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const todayStr = useClinicTodayKey();
   const [stats, setStats] = useState({
     todayAppointments: 0, newPatientsToday: 0, ipdCount: 0, pendingLab: 0,
     todayRevenue: 0, todayPosRevenue: 0, lowStock: 0, expiringMeds: 0, totalPatients: 0,
@@ -21,7 +23,6 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const todayStr = clinicDateKey(new Date());
     const u1 = onSnapshot(collection(db, 'appointments'), snap =>
       setStats(p => ({ ...p, todayAppointments: snap.docs.filter(d => d.data().date === todayStr).length }))
     );
@@ -62,12 +63,12 @@ export function Dashboard() {
     });
     const u7 = onSnapshot(collection(db, 'sales'), snap => {
       const sales = snap.docs.map(d => d.data()) as any[];
-      const todayPos = sales.filter(s => clinicDateKey(s.date) === todayStr).reduce((s, p) => s + (p.total || 0), 0);
+      const todayPos = sales.filter(s => recordClinicDateKey(s) === todayStr).reduce((s, p) => s + (p.total || 0), 0);
       setStats(p => ({ ...p, todayPosRevenue: todayPos }));
       setChartData(prev => {
         const updated = [...prev];
         sales.forEach(s => {
-          const sd = clinicDateKey(s.date);
+          const sd = recordClinicDateKey(s);
           const day = updated.find(d => d.fullDate === sd);
           if (day) day.pos += s.total || 0;
         });
@@ -78,7 +79,7 @@ export function Dashboard() {
       snap => setRecentActivity(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); };
-  }, []);
+  }, [todayStr]);
 
   const statCards = [
     { label: "Today's Appointments",  value: stats.todayAppointments,                    icon: CalendarDays, color: 'blue',   path: '/appointments' },

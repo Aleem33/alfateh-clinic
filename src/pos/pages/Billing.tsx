@@ -18,6 +18,7 @@ import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/recei
 import { cartItemUnits, findCartStockProblem } from '../lib/billingCart';
 import { aggregateSaleStockAdjustments, queuePendingPosSale, removePendingPosSale } from '../lib/offlineSalesOutbox';
 import { isCloudOnline } from '../../lib/lanCoordinator';
+import { clinicDateKey } from '../../lib/clinicDate';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -404,6 +405,7 @@ export function Billing() {
     }
     try {
       const receiptNo = await getNextPosReceiptNo();
+      const saleTimestamp = new Date().toISOString();
       const saleData: any = {
         receiptNo,
         items: cart, grossSubtotal, totalItemDiscounts,
@@ -413,7 +415,9 @@ export function Billing() {
         orderDiscountValue: normalizeBillDiscountValue(orderDiscountType, orderDiscountValue),
         discount: orderDiscountAmount + totalItemDiscounts, total: grandTotal,
         amountPaid: effectiveAmountPaid, pendingAmount,
-        date: new Date().toISOString(), customerType,
+        date: saleTimestamp,
+        businessDate: clinicDateKey(saleTimestamp),
+        customerType,
         cashierId: auth.currentUser?.uid,
       };
       if (selectedCustomer) {
@@ -460,7 +464,7 @@ export function Billing() {
         ...(selectedCustomer && pendingAmount > 0
           ? { customerAdjustment: { customerId: selectedCustomer.id, pendingAmount } }
           : {}),
-        createdAt: new Date().toISOString(),
+        createdAt: saleTimestamp,
       });
       await waitForOnlineWrite(batch.commit());
       if (isCloudOnline()) await removePendingPosSale(docRef.id);

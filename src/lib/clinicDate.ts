@@ -20,3 +20,16 @@ export function clinicDateKey(value: string | number | Date): string {
 export function isOnClinicDate(value: string | number | Date | null | undefined, dateKey: string): boolean {
   return value != null && clinicDateKey(value) === dateKey;
 }
+
+type DatedRecord = {
+  businessDate?: unknown;
+  date?: unknown;
+};
+
+export function recordClinicDateKey(record: DatedRecord | null | undefined): string {
+  if (!record) return '';
+  const businessDate = typeof record.businessDate === 'string' ? record.businessDate.trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return businessDate;
+  if (typeof record.date !== 'string' && typeof record.date !== 'number' && !(record.date instanceof Date)) return '';
+  return clinicDateKey(record.date);
+}
