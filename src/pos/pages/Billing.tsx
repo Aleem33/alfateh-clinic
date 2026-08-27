@@ -18,7 +18,8 @@ import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/recei
 import { cartItemUnits, findCartStockProblem } from '../lib/billingCart';
 import { aggregateSaleStockAdjustments, queuePendingPosSale, removePendingPosSale } from '../lib/offlineSalesOutbox';
 import { isCloudOnline } from '../../lib/lanCoordinator';
-import { clinicDateKey } from '../../lib/clinicDate';
+import { clinicDateKey, clinicTimeLabel, recordClinicDateTimeLabel } from '../../lib/clinicDate';
+import { getTrustedClockReading, trustedNow, trustedNowISO } from '../../lib/trustedClock';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -125,7 +126,7 @@ export function Billing() {
     try {
       const docRef = await addDoc(collection(db, 'customers'), {
         name: newCustName.trim(), phone: newCustPhone.trim(),
-        creditBalance: 0, createdAt: new Date().toISOString(),
+        creditBalance: 0, createdAt: trustedNowISO(),
       });
       setSelectedCustomer({ id: docRef.id, name: newCustName.trim(), phone: newCustPhone.trim(), creditBalance: 0 });
       setShowCreateForm(false); setNewCustName(''); setNewCustPhone('');
@@ -279,8 +280,8 @@ export function Billing() {
     if (cart.length === 0 || isHoldingBill) return;
     setIsHoldingBill(true);
     try {
-      const now = new Date().toISOString();
-      const fallbackLabel = selectedCustomer?.name || `Held bill ${format(new Date(), 'HH:mm')}`;
+      const now = trustedNowISO();
+      const fallbackLabel = selectedCustomer?.name || `Held bill ${clinicTimeLabel(trustedNow())}`;
       await waitForOnlineWrite(addDoc(collection(db, 'heldBills'), {
         label: holdLabel.trim() || fallbackLabel,
         items: cart,
@@ -391,7 +392,7 @@ export function Billing() {
     setMobileTab('cart');
     updateDoc(doc(db, 'pharmacyOrders', order.id), {
       status: 'dispensed',
-      dispensedAt: new Date().toISOString(),
+      dispensedAt: trustedNowISO(),
       dispensedBy: auth.currentUser?.uid || '',
     }).catch(error => handleFirestoreError(error, OperationType.UPDATE, `pharmacyOrders/${order.id}`));
   };
@@ -405,7 +406,8 @@ export function Billing() {
     }
     try {
       const receiptNo = await getNextPosReceiptNo();
-      const saleTimestamp = new Date().toISOString();
+      const saleClock = await getTrustedClockReading();
+      const saleTimestamp = saleClock.nowIso;
       const saleData: any = {
         receiptNo,
         items: cart, grossSubtotal, totalItemDiscounts,
@@ -416,7 +418,9 @@ export function Billing() {
         discount: orderDiscountAmount + totalItemDiscounts, total: grandTotal,
         amountPaid: effectiveAmountPaid, pendingAmount,
         date: saleTimestamp,
+        trustedDate: saleTimestamp,
         businessDate: clinicDateKey(saleTimestamp),
+        timeSource: saleClock.source,
         customerType,
         cashierId: auth.currentUser?.uid,
       };
@@ -442,7 +446,7 @@ export function Billing() {
           batchNo: item.batchNo || '',
           quantity: -unitsToDeduct,
           deviceReceiptNo: receiptNo,
-          createdAt: new Date().toISOString(),
+          createdAt: saleTimestamp,
           cashierId: auth.currentUser?.uid || '',
         };
         movements.push({ id: movementRef.id, data: movementData });
@@ -935,7 +939,7 @@ export function Billing() {
                     <p className="text-xs text-gray-500 mt-1">
                       {(heldBill.items || []).length} item(s)
                       {heldBill.customer?.name ? ` - ${heldBill.customer.name}` : ''}
-                      {heldBill.createdAt ? ` - ${format(new Date(heldBill.createdAt), 'dd MMM, HH:mm')}` : ''}
+                      {heldBill.createdAt ? ` - ${recordClinicDateTimeLabel({ date: heldBill.createdAt })}` : ''}
                     </p>
                     <p className="text-sm font-semibold text-blue-700 mt-1">{formatCurrency(Number(heldBill.total || 0))}</p>
                   </div>
@@ -1087,7 +1091,7 @@ export function Billing() {
         <div className="text-center mb-3">
           <h2 className="text-lg font-bold">{PHARMACY_RECEIPT_NAME}</h2>
           <p>Receipt</p>
-          <p>{lastReceipt?.date ? format(new Date(lastReceipt.date), 'dd/MM/yyyy HH:mm') : format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
+          <p>{recordClinicDateTimeLabel(lastReceipt || { date: trustedNowISO() })}</p>
           {lastReceipt && <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(lastReceipt)}</p>}
           <p className="text-xs mt-1 uppercase font-bold border border-black inline-block px-2 py-0.5">
             {lastReceipt?.customerType || customerType}

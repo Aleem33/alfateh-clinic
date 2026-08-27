@@ -1,24 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, limit } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Users, CalendarDays, BedDouble, FlaskConical, DollarSign, AlertTriangle, Clock, TrendingUp, Plus, UserPlus, ArrowRight, ShoppingCart, Package } from 'lucide-react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { format, subDays } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO, subDays } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
-import { subscribeToSales } from '../../lib/salesStore';
+import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
+import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../../pos/lib/salesFinancials';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const todayStr = useClinicTodayKey();
   const [stats, setStats] = useState({
     todayAppointments: 0, newPatientsToday: 0, ipdCount: 0, pendingLab: 0,
-    todayRevenue: 0, todayPosRevenue: 0, lowStock: 0, expiringMeds: 0, totalPatients: 0,
+    lowStock: 0, expiringMeds: 0, totalPatients: 0,
   });
-  const [chartData, setChartData]       = useState<any[]>([]);
+  const [bills, setBills] = useState<any[]>([]);
+  const [posSales, setPosSales] = useState<any[]>([]);
+  const [posReturns, setPosReturns] = useState<any[]>([]);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [lowStockItems, setLowStockItems]   = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,53 +43,52 @@ export function Dashboard() {
       const lowStock = meds.filter(m => (m.stock || 0) <= (m.reorderLevel || (m.unitsPerBox || 1) * 2));
       const expiring = meds.filter(m => {
         if (!m.expiryDate) return false;
-        const days = Math.ceil((new Date(m.expiryDate).getTime() - Date.now()) / 86400000);
+        const days = differenceInCalendarDays(parseISO(String(m.expiryDate).slice(0, 10)), parseISO(todayStr));
         return days <= 30 && days >= 0;
       });
       setLowStockItems(lowStock.slice(0, 5));
       setStats(p => ({ ...p, lowStock: lowStock.length, expiringMeds: expiring.length }));
     });
     const u6 = onSnapshot(collection(db, 'bills'), snap => {
-      const bills = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-      const todayRev = bills.filter(b => clinicDateKey(b.date) === todayStr).reduce((s, b) => s + (b.paid || 0), 0);
-      setStats(p => ({ ...p, todayRevenue: todayRev }));
-      const days = Array.from({ length: 7 }, (_, i) => {
-        const d = subDays(new Date(), 6 - i);
-        return { date: format(d, 'EEE'), fullDate: clinicDateKey(d), opd: 0, pos: 0 };
-      });
-      bills.forEach(b => {
-        const bd = clinicDateKey(b.date);
-        const day = days.find(d => d.fullDate === bd);
-        if (day) day.opd += b.total || 0;
-      });
-      setChartData(days);
+      setBills(snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]);
       setLoading(false);
     });
-    const u7 = subscribeToSales(sales => {
-      const todayPos = sales.filter(s => recordClinicDateKey(s) === todayStr).reduce((s, p) => s + (p.total || 0), 0);
-      setStats(p => ({ ...p, todayPosRevenue: todayPos }));
-      setChartData(prev => {
-        const updated = [...prev];
-        sales.forEach(s => {
-          const sd = recordClinicDateKey(s);
-          const day = updated.find(d => d.fullDate === sd);
-          if (day) day.pos += s.total || 0;
-        });
-        return updated;
-      });
-    });
+    const u7 = subscribeToSales(setPosSales);
     const u8 = onSnapshot(query(collection(db, 'auditLogs'), orderBy('createdAt', 'desc'), limit(8)),
       snap => setRecentActivity(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); };
+    const u9 = subscribeToSaleReturns(setPosReturns);
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); };
   }, [todayStr]);
+
+  const activeBills = bills.filter(bill => bill.paymentStatus !== 'cancelled' && bill.paymentStatus !== 'no-show');
+  const todayRevenue = sumFinancialValues(
+    activeBills.filter(bill => clinicDateKey(bill.date) === todayStr),
+    bill => bill.total,
+  );
+  const todayPosRevenue = summarizeSalesFinancials(
+    posSales.filter(sale => recordClinicDateKey(sale) === todayStr),
+    posReturns.filter(entry => recordClinicDateKey(entry) === todayStr),
+  ).netRevenue;
+  const chartData = useMemo(() => {
+    const dailyPosRevenue = netSalesByDate(posSales, posReturns, recordClinicDateKey);
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = subDays(parseISO(todayStr), 6 - i);
+      const fullDate = clinicDateKey(date);
+      const opd = sumFinancialValues(
+        activeBills.filter(bill => clinicDateKey(bill.date) === fullDate),
+        bill => bill.total,
+      );
+      return { date: format(date, 'EEE'), fullDate, opd, pos: dailyPosRevenue.get(fullDate) || 0 };
+    });
+  }, [activeBills, posReturns, posSales, todayStr]);
 
   const statCards = [
     { label: "Today's Appointments",  value: stats.todayAppointments,                    icon: CalendarDays, color: 'blue',   path: '/appointments' },
     { label: 'Total Patients',        value: stats.totalPatients,                         icon: Users,        color: 'violet', path: '/patients' },
     { label: 'Active IPD',            value: stats.ipdCount,                              icon: BedDouble,    color: 'emerald',path: '/ipd' },
-    { label: "OPD Revenue Today",     value: formatCurrency(stats.todayRevenue),          icon: DollarSign,   color: 'green',  path: '/billing' },
-    { label: "POS Revenue Today",     value: formatCurrency(stats.todayPosRevenue),       icon: ShoppingCart, color: 'teal',   path: '/billing' },
+    { label: "OPD Revenue Today",     value: formatCurrency(todayRevenue),                icon: DollarSign,   color: 'green',  path: '/billing' },
+    { label: "POS Revenue Today",     value: formatCurrency(todayPosRevenue),             icon: ShoppingCart, color: 'teal',   path: '/billing' },
     { label: 'Pending Lab Tests',     value: stats.pendingLab,                            icon: FlaskConical, color: 'orange', path: '/lab' },
     { label: 'Low Stock Medicines',   value: stats.lowStock,                              icon: AlertTriangle,color: 'red',    path: '/pharmacy' },
     { label: 'Expiring (30 days)',    value: stats.expiringMeds,                          icon: Package,      color: 'pink',   path: '/reports' },
@@ -110,7 +112,7 @@ export function Dashboard() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-sm text-gray-500">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+          <p className="text-sm text-gray-500">{format(parseISO(todayStr), 'EEEE, MMMM d, yyyy')}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => navigate('/token')}
@@ -173,8 +175,8 @@ export function Dashboard() {
             <div>
               <h2 className="font-semibold text-gray-900">Revenue - Last 7 Days (OPD + POS)</h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                OPD: <strong className="text-blue-600">{formatCurrency(stats.todayRevenue)}</strong>
-                &nbsp;/&nbsp; POS: <strong className="text-teal-600">{formatCurrency(stats.todayPosRevenue)}</strong>
+                OPD: <strong className="text-blue-600">{formatCurrency(todayRevenue)}</strong>
+                &nbsp;/&nbsp; POS: <strong className="text-teal-600">{formatCurrency(todayPosRevenue)}</strong>
               </p>
             </div>
             <TrendingUp className="w-5 h-5 text-blue-400" />

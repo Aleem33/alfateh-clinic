@@ -62,7 +62,7 @@ export function Lab() {
       await addDoc(collection(db, 'labOrders'), {
         patientId: orderForm.patientId, patientName: orderForm.patientName, patientMRN: orderForm.patientMRN,
         doctorName: orderForm.doctorName, tests, status: 'pending',
-        date: new Date().toISOString(), createdAt: nowISO(),
+        date: nowISO(), createdAt: nowISO(),
       });
       setShowOrderModal(false);
       setOrderForm({ patientId: '', patientName: '', patientMRN: '', doctorName: '', selectedTests: [] });

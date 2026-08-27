@@ -8,8 +8,10 @@ import { searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { ensureMedicinePurchaseBatch, findMedicinePurchaseBatch } from '../../lib/medicineOperations';
 import { calculatePurchaseQuantities, getEditedBatchSellingPriceUpdate, hasDuplicatePurchaseInvoiceLine, validateExistingBatchPurchase } from '../lib/purchaseInvoice';
+import { clinicDateKey } from '../../lib/clinicDate';
+import { getTrustedClockReading, trustedNow } from '../../lib/trustedClock';
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => clinicDateKey(trustedNow());
 const emptyPurchaseForm = () => ({
   supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0',
   unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '',
@@ -184,7 +186,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         setFormError('This change would make the batch stock negative. Reduce the adjustment or correct current stock first.');
         return;
       }
-      const timestamp = new Date().toISOString();
+      const timestamp = (await getTrustedClockReading()).nowIso;
       const batch = writeBatch(db);
       batch.update(doc(db, 'purchases', editingPurchase.id), {
         medicineId: editingPurchase.medicineId || line.medicineId,
@@ -227,7 +229,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     setSavingInvoice(true);
     setFormError('');
     try {
-      const timestamp = new Date().toISOString();
+      const timestamp = (await getTrustedClockReading()).nowIso;
       const invoiceId = doc(collection(db, 'purchases')).id;
       const batch = writeBatch(db);
 

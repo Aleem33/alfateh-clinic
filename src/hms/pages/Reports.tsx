@@ -6,8 +6,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { format, subDays, subMonths, startOfMonth, endOfMonth, differenceInDays, parseISO } from 'date-fns';
 import { Download, TrendingUp, AlertCircle, DollarSign, Activity, FileText, Search, CalendarDays } from 'lucide-react';
 import { subscribeToMedicines } from '../../lib/medicineStore';
-import { subscribeToSales } from '../../lib/salesStore';
+import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
+import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
+import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../../pos/lib/salesFinancials';
 
 function exportCSV(filename: string, rows: any[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
@@ -38,6 +40,7 @@ type Tab = 'overview' | 'advanced' | 'pl' | 'outstanding' | 'expiry';
 type AdvancedReportType = 'billing' | 'pos' | 'consultations' | 'patients' | 'lab' | 'expenses' | 'inventory';
 
 export function Reports() {
+  const todayKey = useClinicTodayKey();
   const [tab, setTab] = useState<Tab>('overview');
   const [bills, setBills] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
@@ -47,11 +50,12 @@ export function Reports() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [medicines, setMedicines] = useState<any[]>([]);
   const [posSales, setPosSales] = useState<any[]>([]);
+  const [posReturns, setPosReturns] = useState<any[]>([]);
   const [period, setPeriod] = useState<'7d' | '30d' | '3m'>('30d');
   const [outstandingSearch, setOutstandingSearch] = useState('');
   const [advancedType, setAdvancedType] = useState<AdvancedReportType>('billing');
-  const [advancedFrom, setAdvancedFrom] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
-  const [advancedTo, setAdvancedTo] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [advancedFrom, setAdvancedFrom] = useState(clinicDateKey(subDays(parseISO(todayKey), 30)));
+  const [advancedTo, setAdvancedTo] = useState(todayKey);
   const [advancedSearch, setAdvancedSearch] = useState('');
 
   useEffect(() => {
@@ -64,41 +68,49 @@ export function Reports() {
       onSnapshot(collection(db, 'expenses'),       s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })))),
       subscribeToMedicines(setMedicines),
       subscribeToSales(setPosSales),
+      subscribeToSaleReturns(setPosReturns),
     ];
     return () => u.forEach(f => f());
   }, []);
 
   // ── Computed values ──────────────────────────────────────────────────────────
-  const totalOpdRevenue  = bills.reduce((s, b) => s + (b.total || 0), 0);
-  const totalOpdCollected = bills.reduce((s, b) => s + (b.paid || 0), 0);
-  const totalPosRevenue  = posSales.reduce((s, p) => s + (p.total || 0), 0);
+  const activeBills = bills.filter(bill => bill.paymentStatus !== 'cancelled' && bill.paymentStatus !== 'no-show');
+  const posFinancials = summarizeSalesFinancials(posSales, posReturns);
+  const totalOpdRevenue  = sumFinancialValues(activeBills, bill => bill.total);
+  const totalOpdCollected = sumFinancialValues(activeBills, bill => bill.paid);
+  const totalPosRevenue  = posFinancials.netRevenue;
   const totalRevenue     = totalOpdRevenue + totalPosRevenue;
-  const totalExpenses    = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
-  const netProfit        = totalRevenue - totalExpenses;
+  const totalCollected   = totalOpdCollected + posFinancials.netCollected;
+  const totalExpenses    = sumFinancialValues(expenses, expense => expense.amount);
+  const pharmacyCost     = posFinancials.netCost;
+  const netProfit        = totalRevenue - pharmacyCost - totalExpenses;
   const totalPending     = totalOpdRevenue - totalOpdCollected;
   const completedLab     = labOrders.filter(l => l.status === 'completed').length;
 
   // Revenue chart (days)
   const days = period === '7d' ? 7 : period === '30d' ? 30 : 90;
-  const revenueChart = Array.from({ length: Math.min(days, 30) }).map((_, i) => {
-    const d = subDays(new Date(), (Math.min(days, 30) - 1) - i);
+  const dailyPosRevenue = netSalesByDate(posSales, posReturns, recordClinicDateKey);
+  const revenueChart = Array.from({ length: days }).map((_, i) => {
+    const d = subDays(parseISO(todayKey), (days - 1) - i);
     const dateStr = clinicDateKey(d);
-    const opd     = bills.filter(b => clinicDateKey(b.date) === dateStr).reduce((s, b) => s + (b.total || 0), 0);
-    const pos     = posSales.filter(p => recordClinicDateKey(p) === dateStr).reduce((s, p) => s + (p.total || 0), 0);
-    const exp     = expenses.filter(e => clinicDateKey(e.date) === dateStr).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    const opd     = sumFinancialValues(activeBills.filter(b => clinicDateKey(b.date) === dateStr), bill => bill.total);
+    const pos     = dailyPosRevenue.get(dateStr) || 0;
+    const exp     = sumFinancialValues(expenses.filter(e => clinicDateKey(e.date) === dateStr), expense => expense.amount);
     return { date: format(d, 'MMM dd'), opd, pos, total: opd + pos, expenses: exp };
   });
 
   // Monthly P&L (last 6 months)
   const monthlyPL = Array.from({ length: 6 }).map((_, i) => {
-    const d     = subMonths(new Date(), 5 - i);
-    const start = format(startOfMonth(d), 'yyyy-MM-dd');
-    const end   = format(endOfMonth(d), 'yyyy-MM-dd');
-    const opd   = bills.filter(b => b.date >= start && b.date <= end).reduce((s, b) => s + (b.total || 0), 0);
-    const pos   = posSales.filter(p => { const key = recordClinicDateKey(p); return key >= start && key <= end; }).reduce((s, p) => s + (p.total || 0), 0);
-    const exp   = expenses.filter(e => e.date >= start && e.date <= end).reduce((s, e) => s + (Number(e.amount) || 0), 0);
-    const revenue = opd + pos;
-    return { month: format(d, 'MMM yy'), revenue, expenses: exp, profit: revenue - exp };
+    const d     = subMonths(parseISO(todayKey), 5 - i);
+    const start = clinicDateKey(startOfMonth(d));
+    const end   = clinicDateKey(endOfMonth(d));
+    const opd   = sumFinancialValues(activeBills.filter(b => { const key = clinicDateKey(b.date); return key >= start && key <= end; }), bill => bill.total);
+    const monthSales = posSales.filter(p => { const key = recordClinicDateKey(p); return key >= start && key <= end; });
+    const monthReturns = posReturns.filter(entry => { const key = recordClinicDateKey(entry); return key >= start && key <= end; });
+    const monthPos = summarizeSalesFinancials(monthSales, monthReturns);
+    const exp   = sumFinancialValues(expenses.filter(e => { const key = clinicDateKey(e.date); return key >= start && key <= end; }), expense => expense.amount);
+    const revenue = opd + monthPos.netRevenue;
+    return { month: format(d, 'MMM yy'), revenue, cost: monthPos.netCost, expenses: exp, profit: revenue - monthPos.netCost - exp };
   });
 
   // Dept chart
@@ -122,11 +134,11 @@ export function Reports() {
   const totalOutstanding = outstanding.reduce((s, b) => s + (b.balance || 0), 0);
 
   // Expiry tracking
-  const today = format(new Date(), 'yyyy-MM-dd');
+  const todayCalendarDate = parseISO(todayKey);
   const expiryItems = medicines
     .filter(m => m.expiryDate)
     .map(m => {
-      const daysLeft = differenceInDays(parseISO(m.expiryDate), new Date());
+      const daysLeft = differenceInDays(parseISO(m.expiryDate), todayCalendarDate);
       return { ...m, daysLeft };
     })
     .filter(m => m.daysLeft <= 90)
@@ -185,7 +197,7 @@ export function Reports() {
       label: 'Medicine Inventory',
       headers: ['Medicine', 'Category/Form', 'Batch', 'Expiry', 'Stock', 'Cost Price', 'Retail Price', 'Stock Value', 'Status'],
       rows: medicines.map(m => {
-        const daysLeft = m.expiryDate ? differenceInDays(parseISO(m.expiryDate), new Date()) : null;
+        const daysLeft = m.expiryDate ? differenceInDays(parseISO(m.expiryDate), todayCalendarDate) : null;
         const stock = Number(m.stock) || 0;
         const cost = Number(m.costPrice) || 0;
         return [
@@ -218,7 +230,7 @@ export function Reports() {
   }));
 
   const exportAdvancedReport = () => {
-    exportCSV(`${advancedType}-report-${format(new Date(), 'yyyy-MM-dd')}.csv`, advancedRows, activeReport.headers);
+    exportCSV(`${advancedType}-report-${todayKey}.csv`, advancedRows, activeReport.headers);
   };
 
   return (
@@ -230,13 +242,13 @@ export function Reports() {
           <p className="text-sm text-gray-500">{bills.length} bills · {patients.length} patients · {completedLab} lab tests</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => exportCSV(`bills-${format(new Date(),'yyyy-MM-dd')}.csv`,
+          <button onClick={() => exportCSV(`bills-${todayKey}.csv`,
             bills.map(b => [b.billNo, b.patientName, b.patientMRN, b.date?.split('T')[0], b.total, b.paid, b.balance, b.paymentStatus]),
             ['Bill No','Patient','MRN','Date','Total','Paid','Balance','Status'])}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 bg-white rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             <Download className="w-4 h-4" /> Bills
           </button>
-          <button onClick={() => exportCSV(`patients-${format(new Date(),'yyyy-MM-dd')}.csv`,
+          <button onClick={() => exportCSV(`patients-${todayKey}.csv`,
             patients.map(p => [p.mrn, p.name, p.age, p.gender, p.phone, p.address, p.bloodGroup, p.createdAt?.split('T')[0]]),
             ['MRN','Name','Age','Gender','Phone','Address','Blood Group','Registered'])}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 bg-white rounded-lg text-sm text-gray-600 hover:bg-gray-50">
@@ -268,8 +280,8 @@ export function Reports() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="OPD Revenue"      value={formatCurrency(totalOpdRevenue)}  color="text-blue-700"  icon={DollarSign} />
           <StatCard label="POS Revenue"      value={formatCurrency(totalPosRevenue)}  color="text-emerald-700" icon={TrendingUp} />
-          <StatCard label="Total Collected"  value={formatCurrency(totalOpdCollected)} color="text-green-700" icon={Activity} />
-          <StatCard label="Outstanding"      value={formatCurrency(totalPending)}      color="text-red-500"   icon={AlertCircle} />
+          <StatCard label="Total Collected"  value={formatCurrency(totalCollected)}    color="text-green-700" icon={Activity} />
+          <StatCard label="OPD Outstanding"  value={formatCurrency(totalPending)}      color="text-red-500"   icon={AlertCircle} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -279,7 +291,7 @@ export function Reports() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={revenueChart}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#9CA3AF', fontSize: 10 }} interval={period === '30d' ? 6 : 0} dy={8}/>
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#9CA3AF', fontSize: 10 }} interval={period === '7d' ? 0 : period === '30d' ? 6 : 14} dy={8}/>
                   <YAxis axisLine={false} tickLine={false} tick={{ fill: '#9CA3AF', fontSize: 10 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
                   <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(v: number) => [formatCurrency(v)]} />
                   <Bar dataKey="opd" fill="#BFDBFE" radius={[4,4,0,0]} name="OPD" stackId="a" />
@@ -447,8 +459,9 @@ export function Reports() {
       </>)}
 
       {tab === 'pl' && (<>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <StatCard label="Total Revenue"  value={formatCurrency(totalRevenue)}  color="text-blue-700"  icon={TrendingUp} />
+          <StatCard label="Pharmacy COGS"  value={formatCurrency(pharmacyCost)}  color="text-orange-600" icon={Activity} />
           <StatCard label="Total Expenses" value={formatCurrency(totalExpenses)} color="text-red-500"   icon={AlertCircle} />
           <StatCard label="Net Profit"     value={formatCurrency(netProfit)}     color={netProfit >= 0 ? 'text-green-700' : 'text-red-600'} icon={DollarSign} />
           <StatCard label="Profit Margin"  value={totalRevenue > 0 ? `${((netProfit / totalRevenue) * 100).toFixed(1)}%` : '—'}
@@ -458,9 +471,9 @@ export function Reports() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-900">Monthly P&L (Last 6 Months)</h2>
-            <button onClick={() => exportCSV(`pl-${format(new Date(),'yyyy-MM-dd')}.csv`,
-              monthlyPL.map(m => [m.month, m.revenue, m.expenses, m.profit]),
-              ['Month','Revenue','Expenses','Net Profit'])}
+            <button onClick={() => exportCSV(`pl-${todayKey}.csv`,
+              monthlyPL.map(m => [m.month, m.revenue, m.cost, m.expenses, m.profit]),
+              ['Month','Revenue','Pharmacy COGS','Expenses','Net Profit'])}
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">
               <Download className="w-3.5 h-3.5" /> Export
             </button>
@@ -474,6 +487,7 @@ export function Reports() {
                 <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(v: number) => [formatCurrency(v)]} />
                 <Legend />
                 <Bar dataKey="revenue"  fill="#3B82F6" radius={[4,4,0,0]} name="Revenue" />
+                <Bar dataKey="cost"     fill="#FDBA74" radius={[4,4,0,0]} name="Pharmacy COGS" />
                 <Bar dataKey="expenses" fill="#FCA5A5" radius={[4,4,0,0]} name="Expenses" />
                 <Bar dataKey="profit"   fill="#10B981" radius={[4,4,0,0]} name="Net Profit" />
               </BarChart>
@@ -484,7 +498,7 @@ export function Reports() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>{['Month','Revenue','Expenses','Net Profit','Margin'].map(h => (
+              <tr>{['Month','Revenue','Pharmacy COGS','Expenses','Net Profit','Margin'].map(h => (
                 <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
               ))}</tr>
             </thead>
@@ -493,6 +507,7 @@ export function Reports() {
                 <tr key={m.month} className="hover:bg-gray-50/50">
                   <td className="px-5 py-3 font-medium text-gray-900">{m.month}</td>
                   <td className="px-5 py-3 text-blue-700 font-medium">{formatCurrency(m.revenue)}</td>
+                  <td className="px-5 py-3 text-orange-600">{formatCurrency(m.cost)}</td>
                   <td className="px-5 py-3 text-red-500">{formatCurrency(m.expenses)}</td>
                   <td className={`px-5 py-3 font-semibold ${m.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(m.profit)}</td>
                   <td className="px-5 py-3 text-gray-500">{m.revenue > 0 ? `${((m.profit / m.revenue) * 100).toFixed(1)}%` : '—'}</td>
@@ -516,7 +531,7 @@ export function Reports() {
             <input value={outstandingSearch} onChange={e => setOutstandingSearch(e.target.value)}
               placeholder="Search patient name or MRN..."
               className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <button onClick={() => exportCSV(`outstanding-${format(new Date(),'yyyy-MM-dd')}.csv`,
+            <button onClick={() => exportCSV(`outstanding-${todayKey}.csv`,
               outstanding.map(b => [b.billNo, b.patientName, b.patientMRN, b.date?.split('T')[0], b.total, b.paid, b.balance, b.paymentStatus]),
               ['Bill No','Patient','MRN','Date','Total','Paid','Balance','Status'])}
               className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 whitespace-nowrap">
@@ -567,7 +582,7 @@ export function Reports() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
             <h2 className="font-semibold text-gray-900">Medicines Expiring Within 90 Days</h2>
-            <button onClick={() => exportCSV(`expiry-${format(new Date(),'yyyy-MM-dd')}.csv`,
+            <button onClick={() => exportCSV(`expiry-${todayKey}.csv`,
               expiryItems.map(m => [m.name, m.category, m.batchNo, m.expiryDate, m.stock, m.daysLeft]),
               ['Medicine','Category','Batch','Expiry Date','Stock','Days Left'])}
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">

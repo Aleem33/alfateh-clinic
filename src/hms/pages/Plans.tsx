@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc } from '@/lib/firestore';
 import { db, auth } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { Check, Zap, Building2, Crown, Star } from 'lucide-react';
+import { trustedNow } from '../../lib/trustedClock';
 
 const PLANS = [
   {
@@ -91,7 +92,7 @@ export function Plans() {
         const data = snap.data();
         setCurrentPlan(data.plan || 'starter');
         if (data.trialEnds) {
-          const days = Math.ceil((new Date(data.trialEnds).getTime() - Date.now()) / 86400000);
+          const days = Math.ceil((new Date(data.trialEnds).getTime() - trustedNow().getTime()) / 86400000);
           setTrialDaysLeft(days > 0 ? days : 0);
         }
       }

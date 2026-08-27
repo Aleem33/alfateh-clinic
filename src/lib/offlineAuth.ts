@@ -1,4 +1,5 @@
 import type { OfflineAuthProfile } from '../types/electron';
+import { trustedNowISO } from './trustedClock';
 
 export type AuthSession = {
   mode: 'online' | 'offline';
@@ -26,7 +27,7 @@ export function profileFromUserDocument(uid: string, email: string, data: Record
       ? data.permissions.map(String)
       : (data.permissions && typeof data.permissions === 'object' ? data.permissions : []),
     active: data.active !== false && data.disabled !== true,
-    profileUpdatedAt: String(data.updatedAt || new Date().toISOString()),
+    profileUpdatedAt: String(data.updatedAt || trustedNowISO()),
   };
 }
 

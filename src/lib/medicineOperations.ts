@@ -9,6 +9,7 @@ import {
   where,
 } from '@/lib/firestore';
 import { auth, db } from '../firebase';
+import { trustedNowISO } from './trustedClock';
 import {
   findDuplicateMedicine,
   getMedicineIdentity,
@@ -48,7 +49,7 @@ export async function createMedicineSafely(
   input: CreateMedicineInput,
   knownMedicines: MedicineRecord[] = [],
 ): Promise<string> {
-  const timestamp = new Date().toISOString();
+  const timestamp = trustedNowISO();
   const medicineKey = getMedicineIdentity(input);
   const data = {
     ...input,
@@ -173,8 +174,8 @@ async function writeMedicineAudit(action: 'archive' | 'restore', medicine: Medic
       detail: `${action === 'archive' ? 'Archived' : 'Restored'} medicine: ${medicine.name || medicine.id}`,
       userId: auth.currentUser?.uid || 'system',
       userEmail: auth.currentUser?.email || 'system',
-      timestamp: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
+      timestamp: trustedNowISO(),
+      createdAt: trustedNowISO(),
     });
   } catch (error) {
     console.warn('Medicine audit log failed:', error);
@@ -182,7 +183,7 @@ async function writeMedicineAudit(action: 'archive' | 'restore', medicine: Medic
 }
 
 export async function archiveMedicine(medicine: MedicineRecord): Promise<void> {
-  const timestamp = new Date().toISOString();
+  const timestamp = trustedNowISO();
   await updateDoc(doc(db, 'medicines', medicine.id), {
     archived: true,
     archivedAt: timestamp,
@@ -193,7 +194,7 @@ export async function archiveMedicine(medicine: MedicineRecord): Promise<void> {
 }
 
 export async function restoreMedicine(medicine: MedicineRecord): Promise<void> {
-  const timestamp = new Date().toISOString();
+  const timestamp = trustedNowISO();
   await updateDoc(doc(db, 'medicines', medicine.id), {
     archived: false,
     restoredAt: timestamp,

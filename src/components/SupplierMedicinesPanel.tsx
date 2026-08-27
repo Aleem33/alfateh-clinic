@@ -14,6 +14,8 @@ import {
   findMedicinePurchaseBatch,
   MedicineConflictError,
 } from '../lib/medicineOperations';
+import { clinicDateKey } from '../lib/clinicDate';
+import { getTrustedClockReading, trustedNow } from '../lib/trustedClock';
 
 type Supplier = {
   id: string;
@@ -46,7 +48,7 @@ type PurchaseForm = {
   notes: string;
 };
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => clinicDateKey(trustedNow());
 
 const makeEmptyForm = (category: string): MedicineForm => ({
   name: '',
@@ -236,7 +238,7 @@ export function SupplierMedicinesPanel({
       : Number((retailPrice / unitsPerBox).toFixed(2));
     const costPricePerUnit = costPrice / unitsPerBox;
     const totalCost = totalUnitsAdded * costPricePerUnit;
-    const timestamp = new Date().toISOString();
+    const timestamp = (await getTrustedClockReading()).nowIso;
     const batchNo = purchaseBatchMode === 'new'
       ? purchaseForm.batchNo.trim()
       : (purchaseForm.batchNo.trim() || purchasingMedicine.batchNo || '');

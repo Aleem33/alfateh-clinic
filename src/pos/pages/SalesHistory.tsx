@@ -13,8 +13,10 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown, SlidersHorizontal, Edit2, Save,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { recordClinicDateKey } from '../../lib/clinicDate';
-import { subscribeToSales } from '../../lib/salesStore';
+import { clinicTimeLabel, recordClinicDateKey, recordClinicTimestamp } from '../../lib/clinicDate';
+import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
+import { summarizeSalesFinancials } from '../lib/salesFinancials';
+import { trustedNowISO } from '../../lib/trustedClock';
 
 type ExportType = 'all' | 'customer' | 'hospital';
 type ViewMode   = 'summary' | 'excel';
@@ -35,25 +37,28 @@ function thClass(active: boolean) {
 }
 
 function getGross(sale: any): number {
-  if (sale.grossSubtotal != null) return sale.grossSubtotal;
-  return (sale.subtotal || 0) + (sale.totalItemDiscounts || 0);
+  if (sale.grossSubtotal != null) return Number(sale.grossSubtotal) || 0;
+  return (Number(sale.subtotal) || 0) + (Number(sale.totalItemDiscounts) || 0);
 }
 
 function formatSaleDate(sale: any, datePattern = 'MMM dd, yyyy', includeTime = true): string {
   const dateKey = recordClinicDateKey(sale);
   if (!dateKey) return 'N/A';
   const datePart = format(parseISO(dateKey), datePattern);
-  if (!includeTime || !sale?.date) return datePart;
-  const timestamp = new Date(sale.date);
-  return Number.isNaN(timestamp.getTime()) ? datePart : `${datePart} ${format(timestamp, 'HH:mm')}`;
+  if (!includeTime) return datePart;
+  const timestamp = recordClinicTimestamp(sale);
+  const timePart = clinicTimeLabel(timestamp);
+  return timePart ? `${datePart} ${timePart}` : datePart;
 }
 
 function saleDateSortKey(sale: any): string {
-  return `${recordClinicDateKey(sale)}|${String(sale?.date || '')}`;
+  const timestamp = recordClinicTimestamp(sale);
+  return `${recordClinicDateKey(sale)}|${timestamp?.toISOString() || ''}`;
 }
 
 export function SalesHistory() {
   const [sales, setSales]               = useState<any[]>([]);
+  const [saleReturns, setSaleReturns]   = useState<any[]>([]);
   const [search, setSearch]             = useState('');
   const [selectedSale, setSelectedSale] = useState<any | null>(null);
   const [editingSale, setEditingSale]       = useState<any | null>(null);
@@ -85,8 +90,9 @@ export function SalesHistory() {
   };
 
   useEffect(() => {
-    const unsub = subscribeToSales(setSales, err => handleFirestoreError(err, OperationType.GET, 'sales'));
-    return () => unsub();
+    const unsubSales = subscribeToSales(setSales, err => handleFirestoreError(err, OperationType.GET, 'sales'));
+    const unsubReturns = subscribeToSaleReturns(setSaleReturns, err => handleFirestoreError(err, OperationType.GET, 'saleReturns'));
+    return () => { unsubSales(); unsubReturns(); };
   }, []);
 
   const applyFilters = (list: any[], tf: typeof typeFilter, df: string, dt: string, q: string) =>
@@ -177,12 +183,34 @@ export function SalesHistory() {
       ? { col, dir: prev.dir === 'asc' ? 'desc' : prev.dir === 'desc' ? null : 'asc' }
       : { col, dir: 'asc' });
 
-  const totals = useMemo(() => ({
-    subtotal: filteredSales.reduce((s, r) => s + getGross(r), 0),
-    discount: filteredSales.reduce((s, r) => s + (r.discount || 0), 0),
-    total:    filteredSales.reduce((s, r) => s + (r.total    || 0), 0),
-    pending:  filteredSales.reduce((s, r) => s + (r.pendingAmount || 0), 0),
-  }), [filteredSales]);
+  const filteredReturns = useMemo(() => {
+    const salesById = new Map(sales.map(sale => [sale.id, sale]));
+    const queryText = search.trim().toLowerCase();
+    return saleReturns.filter(entry => {
+      const originalSale: any = salesById.get(entry.originalSaleId);
+      const isHospital = entry.customerType === 'hospital' || originalSale?.customerType === 'hospital';
+      const matchesType = typeFilter === 'all' || (typeFilter === 'hospital' ? isHospital : !isHospital);
+      const dateKey = recordClinicDateKey(entry);
+      const matchesDate = (!dateFrom || dateKey >= dateFrom) && (!dateTo || dateKey <= dateTo);
+      const haystack = [
+        entry.returnNo, entry.reason, originalSale?.receiptNo, originalSale?.customerName,
+        ...(entry.items || []).map((item: any) => item.name || item.medicineName),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return matchesType && matchesDate && (!queryText || haystack.includes(queryText));
+    });
+  }, [saleReturns, sales, search, typeFilter, dateFrom, dateTo]);
+
+  const totals = useMemo(() => {
+    const financials = summarizeSalesFinancials(filteredSales, filteredReturns);
+    return {
+      subtotal: filteredSales.reduce((sum, sale) => sum + getGross(sale), 0),
+      discount: filteredSales.reduce((sum, sale) => sum + Number(sale.discount || 0), 0),
+      grossSales: financials.grossRevenue,
+      refunds: financials.refunds,
+      netRevenue: financials.netRevenue,
+      pending: filteredSales.reduce((sum, sale) => sum + Number(sale.pendingAmount || 0), 0),
+    };
+  }, [filteredSales, filteredReturns]);
 
   const handleSaveEdit = async () => {
     if (!editingSale) return;
@@ -214,7 +242,7 @@ export function SalesHistory() {
         customerName: editingSale.customerName,
         customerPhone: editingSale.customerPhone,
         customerType: editingSale.customerType,
-        lastEditedAt: new Date().toISOString(),
+        lastEditedAt: trustedNowISO(),
       });
       setEditingSale(null);
     } catch (error) {
@@ -357,11 +385,13 @@ export function SalesHistory() {
 
         {/* Totals banner */}
         {filteredSales.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 md:gap-3">
             {[
               { label: 'Gross Subtotal',  value: totals.subtotal, color: 'text-gray-900' },
               { label: 'Total Discounts', value: totals.discount, color: 'text-red-600', prefix: '-' },
-              { label: 'Net Revenue',     value: totals.total,    color: 'text-blue-700' },
+              { label: 'Gross Sales',     value: totals.grossSales, color: 'text-blue-700' },
+              { label: 'Returns',         value: totals.refunds, color: 'text-red-600', prefix: '-' },
+              { label: 'Net Revenue',     value: totals.netRevenue, color: 'text-emerald-700' },
               { label: 'Pending',         value: totals.pending,  color: totals.pending > 0 ? 'text-orange-600' : 'text-gray-400' },
             ].map(({ label, value, color, prefix }) => (
               <div key={label} className="bg-white rounded-xl border border-gray-100 shadow-sm px-3 py-2.5 md:px-4 md:py-3">
@@ -549,7 +579,7 @@ export function SalesHistory() {
                       <td className="p-4 text-blue-800" colSpan={5}>TOTAL — {filteredSales.length} sales</td>
                       <td className="p-4 text-blue-800">{formatCurrency(totals.subtotal)}</td>
                       <td className="p-4 text-red-600">-{formatCurrency(totals.discount)}</td>
-                      <td className="p-4 text-blue-900 text-base">{formatCurrency(totals.total)}</td>
+                      <td className="p-4 text-blue-900 text-base">{formatCurrency(totals.grossSales)}</td>
                       <td className="p-4" />
                     </tr>
                   </tfoot>
@@ -610,7 +640,7 @@ export function SalesHistory() {
                       <td className="p-4 text-blue-800">{formatCurrency(sortedExcel.reduce((s, { item }) => s + (item?.total || 0), 0))}</td>
                       <td className="p-4 text-blue-800">{formatCurrency(totals.subtotal)}</td>
                       <td className="p-4 text-red-600">-{formatCurrency(totals.discount)}</td>
-                      <td className="p-4 text-blue-900 text-base">{formatCurrency(totals.total)}</td>
+                      <td className="p-4 text-blue-900 text-base">{formatCurrency(totals.grossSales)}</td>
                     </tr>
                   </tfoot>
                 )}

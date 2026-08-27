@@ -14,6 +14,7 @@ import {
 import { findDuplicateMedicine, getMedicineIdentity, getMedicineSearchText, normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { createMedicineSafely, ensureMedicinePurchaseBatch, findMedicinePurchaseBatch, MedicineConflictError } from '../../lib/medicineOperations';
+import { trustedNow } from '../../lib/trustedClock';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -175,7 +176,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
   const filteredMeds = searchMedicines(medicines, search).filter(m => {
     const matchFilter = stockFilter === 'all' ? true
       : stockFilter === 'low' ? m.stock <= (m.unitsPerBox || 1) * 2
-      : m.expiryDate && new Date(m.expiryDate) < new Date(Date.now() + 30 * 86400000);
+      : m.expiryDate && new Date(m.expiryDate) < new Date(trustedNow().getTime() + 30 * 86400000);
     return matchFilter;
   });
 
@@ -185,7 +186,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
   );
   const pendingCount  = pharmacyOrders.filter(o => o.status === 'pending').length;
   const lowStockCount = medicines.filter(m => m.stock <= (m.unitsPerBox || 1) * 2).length;
-  const expiringCount = medicines.filter(m => m.expiryDate && new Date(m.expiryDate) < new Date(Date.now() + 30 * 86400000)).length;
+  const expiringCount = medicines.filter(m => m.expiryDate && new Date(m.expiryDate) < new Date(trustedNow().getTime() + 30 * 86400000)).length;
 
   const openEdit = (m: any) => {
     const unitsPerBox = m.unitsPerBox || 1;
@@ -506,7 +507,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
                 <tr><td colSpan={8} className="text-center py-12 text-gray-400">No medicines found</td></tr>
               ) : filteredMeds.map(m => {
                 const isLow      = m.stock <= (m.unitsPerBox || 1) * 2;
-                const isExpiring = m.expiryDate && new Date(m.expiryDate) < new Date(Date.now() + 30 * 86400000);
+                const isExpiring = m.expiryDate && new Date(m.expiryDate) < new Date(trustedNow().getTime() + 30 * 86400000);
                 return (
                   <tr key={m.id} className={`hover:bg-gray-50/50 ${isLow ? 'bg-red-50/30' : ''}`}>
                     <td className="px-4 py-3">

@@ -8,6 +8,7 @@ import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucid
 import { format } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
+import { getTrustedClockReading } from '../../lib/trustedClock';
 
 // ── Print via hidden iframe ───────────────────────────────────────────────────
 function printSlip(slipHtml: string) {
@@ -146,6 +147,7 @@ export function PurchaseReturns() {
     setSubmitting(true);
     try {
       const returnNo = await getNextPosPurchaseReturnNo();
+      const returnTimestamp = (await getTrustedClockReading()).nowIso;
       const returnDoc = {
         returnNo,
         originalPurchaseId: selectedPurchase.id,
@@ -160,7 +162,7 @@ export function PurchaseReturns() {
         costPricePerUnit,
         refundAmount,
         reason: returnReason,
-        date: new Date().toISOString(),
+        date: returnTimestamp,
         processedBy: auth.currentUser?.uid,
         unitsPerBox,
       };

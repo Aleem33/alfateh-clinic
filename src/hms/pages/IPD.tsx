@@ -7,6 +7,7 @@ import { Plus, Search, X, BedDouble, LogOut, Eye, Pill, FileText, Activity, Chev
 import { differenceInDays } from 'date-fns';
 import { cn } from '../lib/utils';
 import { useAppDialog } from '../../components/AppDialog';
+import { trustedNow } from '../../lib/trustedClock';
 
 const TREATMENT_TYPES = ['Medication', 'Procedure', 'Lab Test', 'Vitals', 'Nursing Note', 'Doctor Note'];
 
@@ -196,7 +197,7 @@ export function IPD() {
             {filtered.length === 0 ? (
               <tr><td colSpan={8} className="text-center py-12 text-gray-400">No records found</td></tr>
             ) : filtered.map(a => {
-              const days = differenceInDays(new Date(a.dischargeDate || new Date()), new Date(a.admissionDate)) || 1;
+              const days = differenceInDays(new Date(a.dischargeDate || trustedNow()), new Date(a.admissionDate)) || 1;
               const admTreatments = treatments.filter(t => t.admissionId === a.id);
               const expanded = expandedAdmission === a.id;
               return (

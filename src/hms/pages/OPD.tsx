@@ -58,9 +58,9 @@ function getPatientLabHistory(labOrders: any[], patientId: string) {
 function dateAfterDays(date: string, days: string): string {
   const count = Number(days);
   if (!date || !count) return '';
-  const next = new Date(`${date}T00:00:00`);
+  const next = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(next.getTime())) return '';
-  next.setDate(next.getDate() + count);
+  next.setUTCDate(next.getUTCDate() + count);
   return next.toISOString().slice(0, 10);
 }
 

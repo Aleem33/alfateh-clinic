@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, limit } from '@/lib/firestore';
 import { db } from '../../firebase';
-import { formatDate } from '../lib/utils';
+import { formatDate, today } from '../lib/utils';
 import { Shield, Search, User, FileText, Trash2, Edit2, Plus, Printer, LogIn, Download } from 'lucide-react';
-import { format } from 'date-fns';
 
 const ACTION_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
   create:  { icon: Plus,      color: 'bg-green-100 text-green-700',  label: 'Created'  },
@@ -20,7 +19,7 @@ function exportCSV(logs: any[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `audit-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+  const a = document.createElement('a'); a.href = url; a.download = `audit-${today()}.csv`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 

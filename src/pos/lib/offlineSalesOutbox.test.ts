@@ -10,7 +10,13 @@ import {
 
 const sampleSale = (saleId = 'sale-offline-1'): PendingPosSale => ({
   saleId,
-  saleData: { receiptNo: 'SALE-R001-1', total: 250 },
+  saleData: {
+    receiptNo: 'SALE-R001-1',
+    total: 250,
+    date: '2026-08-26T18:30:00.000Z',
+    trustedDate: '2026-08-26T18:30:00.000Z',
+    businessDate: '2026-08-26',
+  },
   movements: [{ id: 'move-1', data: { medicineId: 'batch-a', quantity: -2 } }],
   stockAdjustments: [{ medicineId: 'batch-a', units: 2 }],
   createdAt: '2026-08-25T10:00:00.000Z',
@@ -67,6 +73,13 @@ describe('offline sales outbox', () => {
     const saleExists = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     await replayPendingPosSaleRecords([record], { saleExists, replay, remove });
     expect(replay).toHaveBeenCalledTimes(1);
+    expect(replay).toHaveBeenCalledWith(expect.objectContaining({
+      saleData: expect.objectContaining({
+        date: '2026-08-26T18:30:00.000Z',
+        trustedDate: '2026-08-26T18:30:00.000Z',
+        businessDate: '2026-08-26',
+      }),
+    }));
     expect(remove).toHaveBeenCalledWith(record.saleId);
   });
 

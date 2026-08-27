@@ -1,4 +1,5 @@
 import type { LanActivity, LanStatus } from '../types/electron';
+import { trustedNowISO } from './trustedClock';
 
 const listeners = new Set<(status: LanStatus) => void>();
 const activityListeners = new Set<(activity: LanActivity) => void>();
@@ -107,6 +108,6 @@ export async function publishLanActivity(activity: Partial<LanActivity>) {
   await window.electronAPI.publishLanActivity({
     ...activity,
     id: activity.id || crypto.randomUUID(),
-    createdAt: activity.createdAt || new Date().toISOString(),
+    createdAt: activity.createdAt || trustedNowISO(),
   });
 }

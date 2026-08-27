@@ -1,6 +1,7 @@
 import { addDoc, collection, serverTimestamp } from '@/lib/firestore';
 import { db, auth } from '../../firebase';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
+import { trustedNowISO } from '../../lib/trustedClock';
 
 // ── Audit Log ────────────────────────────────────────────────
 export async function logAudit(
@@ -17,7 +18,7 @@ export async function logAudit(
       detail: detail || '',
       userId: auth.currentUser?.uid || 'system',
       userEmail: auth.currentUser?.email || 'system',
-      timestamp: new Date().toISOString(),
+      timestamp: trustedNowISO(),
       createdAt: serverTimestamp(),
     }));
   } catch (e) {
@@ -40,7 +41,7 @@ export async function createNotification(
       type,
       link: link || '',
       read: false,
-      createdAt: new Date().toISOString(),
+      createdAt: trustedNowISO(),
     }));
   } catch (e) {
     console.warn('Notification creation failed:', e);

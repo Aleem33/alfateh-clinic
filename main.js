@@ -3,10 +3,12 @@ const path = require('path');
 const { initAutoUpdater, checkForUpdates, installUpdate } = require('./updater');
 const { createLanCoordinator } = require('./lanCoordinator');
 const { createOfflineCredentialVault } = require('./offlineCredentialVault');
+const { createTrustedClock } = require('./trustedClock');
 
 let mainWindow;
 let lanCoordinator;
 let offlineCredentialVault;
+let trustedClock;
 
 function getInitialWindowBounds() {
   const { workAreaSize } = screen.getPrimaryDisplay();
@@ -104,8 +106,13 @@ ipcMain.handle('offline-auth:verify', (_event, input) => offlineCredentialVault?
 ipcMain.handle('offline-auth:get-cloud-credential', (_event, username) => offlineCredentialVault?.getCloudCredential(username));
 ipcMain.handle('offline-auth:update-profile', (_event, profile) => offlineCredentialVault?.updateProfile(profile));
 ipcMain.handle('offline-auth:revoke', (_event, username) => offlineCredentialVault?.revoke(username));
+ipcMain.handle('clock:get-snapshot', () => trustedClock?.snapshot());
 
 app.whenReady().then(async () => {
+  trustedClock = createTrustedClock({
+    userDataPath: app.getPath('userData'),
+    safeStorage,
+  });
   offlineCredentialVault = createOfflineCredentialVault({
     userDataPath: app.getPath('userData'),
     safeStorage,
@@ -115,6 +122,7 @@ app.whenReady().then(async () => {
     sendToRenderer: (channel, payload) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
     },
+    observeServerDate: (dateHeader, roundTripMs) => trustedClock.observeServerDate(dateHeader, roundTripMs),
   });
   await lanCoordinator.whenConnectivityKnown();
   createWindow();

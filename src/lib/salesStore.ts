@@ -115,7 +115,7 @@ function startLifecycle() {
   });
   const refreshActive = () => {
     if (!isCloudOnline()) return;
-    const now = Date.now();
+    const now = performance.now();
     if (now - lastFocusRefreshAt < 30_000) return;
     lastFocusRefreshAt = now;
     resources.forEach(target => { if (target.subscribers.size > 0) void refreshFromServer(target); });

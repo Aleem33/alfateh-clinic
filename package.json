@@ -34,6 +34,7 @@
       "preload.js",
       "lanCoordinator.js",
       "offlineCredentialVault.js",
+      "trustedClock.js",
       "updater.js",
       "icon.ico",
       "icon.png",

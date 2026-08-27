@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
 import { clinicDateKey } from './clinicDate';
+import { refreshTrustedClock, trustedNow } from './trustedClock';
 
 const DATE_REFRESH_INTERVAL_MS = 30_000;
 
 export function useClinicTodayKey(): string {
-  const [todayKey, setTodayKey] = useState(() => clinicDateKey(new Date()));
+  const [todayKey, setTodayKey] = useState(() => clinicDateKey(trustedNow()));
 
   useEffect(() => {
-    const refresh = () => setTodayKey(current => {
-      const next = clinicDateKey(new Date());
-      return next === current ? current : next;
-    });
+    const refresh = () => {
+      void refreshTrustedClock().finally(() => setTodayKey(current => {
+        const next = clinicDateKey(trustedNow());
+        return next === current ? current : next;
+      }));
+    };
     const intervalId = window.setInterval(refresh, DATE_REFRESH_INTERVAL_MS);
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);

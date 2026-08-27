@@ -3,7 +3,7 @@ import { doc, getDoc, setDoc } from '@/lib/firestore';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { renewActiveOfflineCredential } from '../../lib/offlineAuth';
 import { db, auth, registerUser } from '../../firebase';
-import { nowISO } from '../lib/utils';
+import { nowISO, today } from '../lib/utils';
 import { Building2, Download, Upload, Trash2, AlertTriangle, UserPlus, X, Lock, Eye, EyeOff, Bot, CheckCircle, RefreshCw, Printer, FlaskConical } from 'lucide-react';
 import { AppUpdater } from '../../components/AppUpdater';
 import { getGeminiKey, setGeminiKey } from '../lib/translate';
@@ -287,7 +287,7 @@ export function Settings() {
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `alfateh-suite-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.href = url; a.download = `alfateh-suite-backup-${today()}.json`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       setExportMsg('Done: complete HMS + Pharmacy backup downloaded!');
       setTimeout(() => setExportMsg(''), 4000);

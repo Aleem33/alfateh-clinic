@@ -6,6 +6,8 @@ import { AlertTriangle, Trash2, X, Download, Upload, CheckCircle, Database, Lock
 import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 import { auth } from '../../firebase';
 import { MedicineCategoryManager } from '../../components/MedicineCategoryManager';
+import { clinicDateKey } from '../../lib/clinicDate';
+import { trustedNow } from '../../lib/trustedClock';
 
 export function Settings() {
   const [currentPass, setCurrentPass] = useState('');
@@ -78,7 +80,7 @@ export function Settings() {
     try {
       const backup = await exportAllAppData(setExportProgress);
       const json = JSON.stringify(backup, null, 2);
-      const date = new Date().toISOString().split('T')[0];
+      const date = clinicDateKey(trustedNow());
       await downloadOrShare(json, `alfateh-suite-backup-${date}.json`, 'application/json');
 
       setExportProgress('Done: complete HMS + Pharmacy backup downloaded!');

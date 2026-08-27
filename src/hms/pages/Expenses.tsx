@@ -3,8 +3,9 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '@/lib
 import { db, auth } from '../../firebase';
 import { formatCurrency, formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, Edit2, Trash2, X, Receipt, TrendingDown, Filter } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { useAppDialog } from '../../components/AppDialog';
+import { isExpenseInScope } from '../../lib/expenseScope';
 
 const CATEGORIES = [
   'Salaries & Wages', 'Medicine Purchase', 'Medical Equipment',
@@ -24,7 +25,7 @@ export function Expenses() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('');
-  const [monthFilter, setMonthFilter] = useState(format(new Date(), 'yyyy-MM'));
+  const [monthFilter, setMonthFilter] = useState(today().slice(0, 7));
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -44,7 +45,8 @@ export function Expenses() {
   }, []);
 
   // Filtering
-  const filtered = expenses.filter(e => {
+  const hmsExpenses = expenses.filter(e => isExpenseInScope(e, 'hms'));
+  const filtered = hmsExpenses.filter(e => {
     const matchMonth = !monthFilter || (e.date || '').startsWith(monthFilter);
     const matchCat = !catFilter || e.category === catFilter;
     const matchSearch =
@@ -56,8 +58,8 @@ export function Expenses() {
   });
 
   const totalFiltered = filtered.reduce((s, e) => s + (e.amount || 0), 0);
-  const totalThisMonth = expenses
-    .filter(e => (e.date || '').startsWith(format(new Date(), 'yyyy-MM')))
+  const totalThisMonth = hmsExpenses
+    .filter(e => (e.date || '').startsWith(today().slice(0, 7)))
     .reduce((s, e) => s + (e.amount || 0), 0);
 
   // Group by category for summary
@@ -110,7 +112,7 @@ export function Expenses() {
 
   // Month options: current + last 5 months
   const monthOptions = Array.from({ length: 6 }, (_, i) => {
-    const d = subMonths(new Date(), i);
+    const d = subMonths(parseISO(today()), i);
     return { value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy') };
   });
 

@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from '@/lib/firestore';
 import { auth, db } from '../firebase';
 import { isCloudOnline } from './lanCoordinator';
+import { trustedNowISO } from './trustedClock';
 
 export const GLOBAL_DATA_COLLECTIONS = [
   'settings',
@@ -127,7 +128,7 @@ function isCounterInScope(id: string, scope: ResetScope) {
 
 export async function exportAllAppData(onProgress?: ProgressFn): Promise<BackupFile> {
   const backup: BackupFile = {
-    exportedAt: new Date().toISOString(),
+    exportedAt: trustedNowISO(),
     version: '2.0',
     scope: 'alfateh-clinic-suite',
     collections: {},
@@ -193,7 +194,7 @@ export async function deleteAppDataScope(scope: ResetScope, onProgress?: Progres
       email: 'admin',
       role: 'admin',
       app: 'hms',
-      repairedAt: new Date().toISOString(),
+      repairedAt: trustedNowISO(),
     }, { merge: true });
   }
 
@@ -226,7 +227,7 @@ export async function deleteAppDataScope(scope: ResetScope, onProgress?: Progres
       email: currentUserData?.email || 'admin',
       role: 'admin',
       app: currentUserData?.app || 'hms',
-      repairedAt: new Date().toISOString(),
+      repairedAt: trustedNowISO(),
     }, { merge: true });
   }
 

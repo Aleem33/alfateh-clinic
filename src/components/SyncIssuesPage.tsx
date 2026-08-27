@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { db } from '../firebase';
 import { runOfflineSyncNow } from '../lib/offlineSync';
 import { isCloudOnline } from '../lib/lanCoordinator';
+import { trustedNowISO } from '../lib/trustedClock';
 
 export function SyncIssuesPage() {
   const [issues, setIssues] = useState<any[]>([]);
@@ -19,7 +20,7 @@ export function SyncIssuesPage() {
   const resolveIssue = async (issue: any) => {
     await updateDoc(doc(db, 'syncIssues', issue.id), {
       status: 'resolved',
-      resolvedAt: new Date().toISOString(),
+      resolvedAt: trustedNowISO(),
     });
   };
 

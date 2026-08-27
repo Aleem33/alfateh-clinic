@@ -3,11 +3,12 @@ import { handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { DollarSign, AlertTriangle, Package, Clock, ShoppingCart, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { format, subDays, isBefore, addDays } from 'date-fns';
+import { format, subDays, isBefore, addDays, parseISO } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
+import { netSalesByDate } from '../lib/salesFinancials';
 
 export function Dashboard() {
   const todayStr = useClinicTodayKey();
@@ -30,7 +31,7 @@ export function Dashboard() {
       let expiringCount = 0;
       let inStockCount = 0;
       let stockValue = 0;
-      const today = new Date();
+      const today = parseISO(todayStr);
       const nextMonth = addDays(today, 30);
 
       const expiring: any[] = [];
@@ -55,29 +56,17 @@ export function Dashboard() {
     const unsubReturns = subscribeToSaleReturns(setSaleReturns, error => handleFirestoreError(error, OperationType.GET, 'saleReturns'));
 
     return () => { unsubMedicines(); unsubSales(); unsubReturns(); };
-  }, []);
+  }, [todayStr]);
 
   useEffect(() => {
-    let todayTotal = 0;
+    const dailyNetSales = netSalesByDate(sales, saleReturns, recordClinicDateKey);
     const last7Days = Array.from({ length: 7 }).map((_, i) => {
-      const d = subDays(new Date(), i);
-      return { date: format(d, 'MMM dd'), fullDate: clinicDateKey(d), total: 0 };
+      const d = subDays(parseISO(todayStr), i);
+      const fullDate = clinicDateKey(d);
+      return { date: format(d, 'MMM dd'), fullDate, total: dailyNetSales.get(fullDate) || 0 };
     }).reverse();
 
-    sales.forEach(data => {
-      const saleDateStr = recordClinicDateKey(data);
-      if (saleDateStr === todayStr) todayTotal += Number(data.total || 0);
-      const dayMatch = last7Days.find(d => d.fullDate === saleDateStr);
-      if (dayMatch) dayMatch.total += Number(data.total || 0);
-    });
-    saleReturns.forEach(data => {
-      const returnDateStr = recordClinicDateKey(data);
-      if (returnDateStr === todayStr) todayTotal -= Number(data.totalRefund || 0);
-      const dayMatch = last7Days.find(d => d.fullDate === returnDateStr);
-      if (dayMatch) dayMatch.total -= Number(data.totalRefund || 0);
-    });
-
-    setStats(prev => ({ ...prev, todaySales: todayTotal }));
+    setStats(prev => ({ ...prev, todaySales: dailyNetSales.get(todayStr) || 0 }));
     setSalesData(last7Days);
   }, [sales, saleReturns, todayStr]);
 

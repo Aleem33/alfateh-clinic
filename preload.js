@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOfflineCloudCredential: (username) => ipcRenderer.invoke('offline-auth:get-cloud-credential', username),
   updateOfflineAuthProfile: (profile) => ipcRenderer.invoke('offline-auth:update-profile', profile),
   revokeOfflineCredential: (username) => ipcRenderer.invoke('offline-auth:revoke', username),
+  getTrustedClockSnapshot: () => ipcRenderer.invoke('clock:get-snapshot'),
   onUpdateStatus: (callback) => {
     const handler = (_event, status) => callback(status);
     ipcRenderer.on('updater:status', handler);

@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { Plus, Edit2, Trash2, Search, X, Phone, MapPin, ChevronDown, Package } from 'lucide-react';
 import { format } from 'date-fns';
 import { SupplierMedicinesPanel } from '../../components/SupplierMedicinesPanel';
+import { trustedNowISO } from '../../lib/trustedClock';
 
 export function Suppliers() {
   const [suppliers, setSuppliers]   = useState<any[]>([]);
@@ -34,7 +35,7 @@ export function Suppliers() {
       if (editingId) {
         await updateDoc(doc(db, 'suppliers', editingId), data);
       } else {
-        await addDoc(collection(db, 'suppliers'), { ...data, createdAt: new Date().toISOString() });
+        await addDoc(collection(db, 'suppliers'), { ...data, createdAt: trustedNowISO() });
       }
       setIsModalOpen(false); setEditingId(null);
       setFormData({ name: '', contact: '', address: '' });

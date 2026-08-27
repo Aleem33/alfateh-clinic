@@ -4,6 +4,9 @@ import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Plus, Edit2, Trash2, Search, Receipt, X } from 'lucide-react';
 import { format } from 'date-fns';
+import { isExpenseInScope } from '../../lib/expenseScope';
+import { clinicDateKey } from '../../lib/clinicDate';
+import { getTrustedClockReading, trustedNow } from '../../lib/trustedClock';
 
 const CATEGORIES = ['Utility', 'Rent', 'Salary', 'Maintenance', 'Supplies', 'Other'];
 
@@ -25,7 +28,7 @@ export function Expenses() {
 
   const [formData, setFormData] = useState({
     description: '', amount: '', category: 'Utility',
-    date: format(new Date(), 'yyyy-MM-dd'),
+    date: clinicDateKey(trustedNow()),
   });
 
   useEffect(() => {
@@ -37,7 +40,8 @@ export function Expenses() {
     return () => unsub();
   }, []);
 
-  const filteredExpenses = expenses.filter(e =>
+  const pharmacyExpenses = expenses.filter(e => isExpenseInScope(e, 'pharmacy'));
+  const filteredExpenses = pharmacyExpenses.filter(e =>
     e.description.toLowerCase().includes(search.toLowerCase()) ||
     e.category.toLowerCase().includes(search.toLowerCase())
   );
@@ -47,6 +51,7 @@ export function Expenses() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const expenseTimestamp = (await getTrustedClockReading()).nowIso;
       const data = {
         description: formData.description, amount: parseFloat(formData.amount || '0'),
         category: formData.category, date: formData.date,
@@ -56,7 +61,7 @@ export function Expenses() {
       if (editingId) {
         await updateDoc(doc(db, 'expenses', editingId), data);
       } else {
-        await addDoc(collection(db, 'expenses'), { ...data, createdAt: new Date().toISOString() });
+        await addDoc(collection(db, 'expenses'), { ...data, createdAt: expenseTimestamp });
       }
       setIsModalOpen(false); setEditingId(null);
     } catch (error) {
@@ -78,7 +83,7 @@ export function Expenses() {
 
   const openAdd = () => {
     setEditingId(null);
-    setFormData({ description: '', amount: '', category: 'Utility', date: format(new Date(), 'yyyy-MM-dd') });
+    setFormData({ description: '', amount: '', category: 'Utility', date: clinicDateKey(trustedNow()) });
     setIsModalOpen(true);
   };
 

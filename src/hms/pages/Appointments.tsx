@@ -65,7 +65,7 @@ export function Appointments() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [calMonth, setCalMonth] = useState(new Date());
+  const [calMonth, setCalMonth] = useState(() => parseISO(today()));
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   // Detect if current user is a doctor
@@ -361,7 +361,7 @@ export function Appointments() {
               {Array.from({ length: startPad }).map((_, i) => <div key={`pad-${i}`} className="min-h-[80px] border-b border-r border-gray-100 bg-gray-50/40" />)}
               {calDays.map(date => (
                 <CalendarCell key={date.toISOString()} date={date} appointments={visibleAppointments} currentMonth={calMonth}
-                  todayDate={new Date()} onDayClick={(d: Date) => setSelectedDay(isSameDay(d, selectedDay || new Date(0)) ? null : d)} />
+                  todayDate={parseISO(today())} onDayClick={(d: Date) => setSelectedDay(isSameDay(d, selectedDay || new Date(0)) ? null : d)} />
               ))}
             </div>
           </div>

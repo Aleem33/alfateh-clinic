@@ -61,6 +61,15 @@ export interface OfflineAuthResult {
   profile?: OfflineAuthProfile;
 }
 
+export interface TrustedClockSnapshot {
+  nowMs: number;
+  nowIso: string;
+  source: 'server' | 'cached-server' | 'unverified';
+  serverSyncedAtMs?: number;
+  ageMs?: number;
+  uncertaintyMs?: number;
+}
+
 export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   checkForUpdates: () => Promise<{ ok: boolean; message?: string }>;
@@ -80,6 +89,7 @@ export interface ElectronAPI {
   getOfflineCloudCredential: (username: string) => Promise<{ username: string; password: string; uid: string } | null>;
   updateOfflineAuthProfile: (profile: OfflineAuthProfile) => Promise<boolean>;
   revokeOfflineCredential: (username: string) => Promise<boolean>;
+  getTrustedClockSnapshot: () => Promise<TrustedClockSnapshot | undefined>;
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
   onAppMessage: (callback: (message: AppMessage) => void) => () => void;
   onWindowMaximizedChange: (callback: (maximized: boolean) => void) => () => void;

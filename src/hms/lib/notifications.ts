@@ -4,13 +4,16 @@ import { db } from '../../firebase';
 import { createNotification } from './audit';
 import { addDays, isBefore, parseISO } from 'date-fns';
 import { getMedicinesOnce } from '../../lib/medicineStore';
+import { clinicDateKey } from '../../lib/clinicDate';
+import { trustedNow } from '../../lib/trustedClock';
 
 /** Runs once per session, watches pharmacy data and fires notifications */
 export function useAutoNotifications() {
   const lastRunRef = useRef<string>('');
 
   useEffect(() => {
-    const todayKey = new Date().toISOString().split('T')[0];
+    const now = trustedNow();
+    const todayKey = clinicDateKey(now);
 
     // Only run once per session per day to avoid spam
     if (lastRunRef.current === todayKey) return;
@@ -19,7 +22,6 @@ export function useAutoNotifications() {
     async function checkAndNotify() {
       try {
         const medicines = await getMedicinesOnce();
-        const now = new Date();
         const in30Days = addDays(now, 30);
         const in7Days = addDays(now, 7);
 

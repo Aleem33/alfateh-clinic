@@ -1,5 +1,6 @@
 const DEVICE_KEY = 'alfateh.offline.device';
 const COUNTER_PREFIX = 'alfateh.offline.counter.';
+import { trustedNowISO } from './trustedClock';
 
 type DeviceInfo = {
   id: string;
@@ -14,7 +15,7 @@ function makeDeviceInfo(): DeviceInfo {
   return {
     id: `device-${Date.now().toString(36)}-${suffix.toLowerCase()}`,
     prefix: `R${suffix.slice(0, 3)}`,
-    createdAt: new Date().toISOString(),
+    createdAt: trustedNowISO(),
   };
 }
 

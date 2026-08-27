@@ -9,6 +9,7 @@ import { GLOBAL_DATA_COLLECTIONS } from './dataSync';
 import { isCloudAuthReady } from './offlineAuth';
 import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
 import { waitForSyncStep } from './syncTiming';
+import { trustedNowISO } from './trustedClock';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -116,7 +117,7 @@ export async function queueLabReportUpload(input: {
     fileType: input.file.type || 'application/pdf',
     fileSize: input.file.size,
     storagePath: input.storagePath,
-    createdAt: new Date().toISOString(),
+    createdAt: trustedNowISO(),
     blob: input.file,
   };
 
@@ -147,7 +148,7 @@ async function processLabReportQueue() {
         const storageRef = ref(storage, record.storagePath);
         await uploadBytes(storageRef, record.blob, { contentType: record.fileType || 'application/pdf' });
         url = await getDownloadURL(storageRef);
-        uploadedAt = new Date().toISOString();
+        uploadedAt = trustedNowISO();
         await saveQueuedLabReport({ ...record, uploadedUrl: url, uploadedAt, lastError: '' });
       }
       await updateDoc(doc(db, 'labOrders', record.orderId), {
@@ -160,7 +161,7 @@ async function processLabReportQueue() {
           uploadedAt,
           pendingUpload: false,
         },
-        updatedAt: new Date().toISOString(),
+        updatedAt: trustedNowISO(),
       });
       await deleteQueuedLabReport(record.id);
     } catch (error: any) {
@@ -213,8 +214,8 @@ async function checkStockConflicts() {
       stock: data.stock || 0,
       message: `${data.name || 'Medicine'} stock is negative after offline sync.`,
       devicePrefix: device.prefix,
-      updatedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
+      updatedAt: trustedNowISO(),
+      createdAt: trustedNowISO(),
     }, { merge: true });
   }
   notify();

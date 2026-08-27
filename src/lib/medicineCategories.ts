@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { doc, onSnapshot, setDoc } from '@/lib/firestore';
 import { db } from '../firebase';
+import { trustedNowISO } from './trustedClock';
 
 export const DEFAULT_MEDICINE_CATEGORIES = [
   'Tablet',
@@ -64,7 +65,7 @@ export async function saveMedicineCategories(categories: string[]) {
   if (!normalized.length) throw new Error('At least one medicine category is required.');
   await setDoc(CATEGORY_SETTINGS_DOC, {
     categories: normalized,
-    updatedAt: new Date().toISOString(),
+    updatedAt: trustedNowISO(),
   });
 }
 

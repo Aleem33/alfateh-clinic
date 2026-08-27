@@ -3,6 +3,7 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from '@/lib
 import { db, registerSecondaryUser, usernameToEmail, handleFirestoreError, OperationType } from '../../firebase';
 import { Plus, Trash2, Shield, User as UserIcon, Edit2, X } from 'lucide-react';
 import { format } from 'date-fns';
+import { trustedNowISO } from '../../lib/trustedClock';
 
 const ROLES = [
   { value: 'cashier', label: 'Cashier (Billing Only)' },
@@ -50,7 +51,7 @@ export function Users() {
         await updateDoc(doc(db, 'users', editingId), {
           name: form.name.trim(),
           role: form.role,
-          updatedAt: new Date().toISOString(),
+          updatedAt: trustedNowISO(),
         });
       } else {
         const username = form.username.trim().toLowerCase();
@@ -61,7 +62,7 @@ export function Users() {
           email: usernameToEmail(username),
           role: form.role,
           app: 'pos',
-          createdAt: new Date().toISOString(),
+          createdAt: trustedNowISO(),
         });
       }
       setShowModal(false);

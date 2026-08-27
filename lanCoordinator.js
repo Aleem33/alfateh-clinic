@@ -65,7 +65,7 @@ function safeActivity(activity) {
   };
 }
 
-function createLanCoordinator({ userDataPath, sendToRenderer }) {
+function createLanCoordinator({ userDataPath, sendToRenderer, observeServerDate }) {
   const id = loadDeviceId(userDataPath);
   const name = deviceName();
   const peers = new Map();
@@ -291,12 +291,19 @@ function createLanCoordinator({ userDataPath, sendToRenderer }) {
   };
 
   const checkCloudReachability = () => new Promise(resolve => {
+    const startedAt = process.hrtime.bigint();
     const request = https.request({
       method: 'HEAD',
       hostname: 'firestore.googleapis.com',
       path: '/',
       timeout: 3500,
     }, response => {
+      const roundTripMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+      try {
+        observeServerDate?.(response.headers.date, roundTripMs);
+      } catch {
+        // Connectivity remains valid if the Date header cannot refresh the clock.
+      }
       response.resume();
       resolve(true);
     });

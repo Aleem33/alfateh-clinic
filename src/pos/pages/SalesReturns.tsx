@@ -6,13 +6,13 @@ import { formatCurrency } from '../lib/utils';
 import { getReturnNo, getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer, Trash2, Plus } from 'lucide-react';
-import { format } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { searchMedicines } from '../../lib/medicineIndex';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { calculateReturnRefund, calculateReturnStockUnits } from '../lib/saleReturn';
-import { clinicDateKey } from '../../lib/clinicDate';
+import { clinicDateKey, recordClinicDateTimeLabel } from '../../lib/clinicDate';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
+import { getTrustedClockReading } from '../../lib/trustedClock';
 
 // ── Print via hidden iframe so main page layout is unaffected ────────────────
 function printSlip(slipHtml: string) {
@@ -108,7 +108,7 @@ export function SalesReturns() {
   const filteredSales = sales.filter(s =>
     getSaleReceiptNo(s, '').toLowerCase().includes(search.toLowerCase()) ||
     s.id.toLowerCase().includes(search.toLowerCase()) ||
-    (s.date && format(new Date(s.date), 'MMM dd, yyyy').toLowerCase().includes(search.toLowerCase()))
+    recordClinicDateTimeLabel(s).toLowerCase().includes(search.toLowerCase())
   );
 
   const getReturnedQty = (saleId: string, cartItemId: string) => {
@@ -160,7 +160,7 @@ export function SalesReturns() {
         <div style="text-align:center;margin-bottom:10px">
           <div style="font-size:16px;font-weight:bold">${PHARMACY_RECEIPT_NAME}</div>
           <div style="font-weight:bold;letter-spacing:2px;margin-top:2px">SALE RETURN SLIP</div>
-          <div>${format(new Date(data.date), 'dd/MM/yyyy HH:mm')}</div>
+          <div>${recordClinicDateTimeLabel(data)}</div>
           <div style="font-size:10px;margin-top:2px">Return No: ${getReturnNo(data)}</div>
           <div style="font-size:10px">${data.withoutReceipt ? 'Return without receipt' : `Orig. Receipt: ${data.originalReceiptNo || 'Unnumbered'}`}</div>
         </div>
@@ -205,7 +205,8 @@ export function SalesReturns() {
     setSubmitting(true);
     try {
       const returnNo = await getNextPosSaleReturnNo();
-      const returnTimestamp = new Date().toISOString();
+      const returnClock = await getTrustedClockReading();
+      const returnTimestamp = returnClock.nowIso;
       const itemsToReturn = returnItems.filter(i => i.returnQty > 0).map(i => ({
         cartItemId: i.cartItemId,
         medicineId: i.medicineId,
@@ -228,7 +229,9 @@ export function SalesReturns() {
         totalRefund: returnTotal,
         reason: returnReason,
         date: returnTimestamp,
+        trustedDate: returnTimestamp,
         businessDate: clinicDateKey(returnTimestamp),
+        timeSource: returnClock.source,
         processedBy: auth.currentUser?.uid,
       };
 
@@ -248,7 +251,7 @@ export function SalesReturns() {
           medicineId: item.medicineId,
           medicineName: item.name,
           quantity: unitsToRestore,
-          createdAt: new Date().toISOString(),
+          createdAt: returnTimestamp,
           processedBy: auth.currentUser?.uid || '',
         });
         batch.update(doc(db, 'medicines', item.medicineId), {
@@ -275,7 +278,8 @@ export function SalesReturns() {
     setSubmitting(true);
     try {
       const returnNo = await getNextPosSaleReturnNo();
-      const returnTimestamp = new Date().toISOString();
+      const returnClock = await getTrustedClockReading();
+      const returnTimestamp = returnClock.nowIso;
       const returnDoc = {
         returnNo,
         originalSaleId: '',
@@ -285,7 +289,9 @@ export function SalesReturns() {
         totalRefund,
         reason: manualReason.trim() || 'Return processed without original receipt',
         date: returnTimestamp,
+        trustedDate: returnTimestamp,
         businessDate: clinicDateKey(returnTimestamp),
+        timeSource: returnClock.source,
         processedBy: auth.currentUser?.uid || '',
       };
       const batch = writeBatch(db);
@@ -304,7 +310,7 @@ export function SalesReturns() {
           medicineName: item.name,
           batchNo: item.batchNo || '',
           quantity: unitsToRestore,
-          createdAt: new Date().toISOString(),
+          createdAt: returnTimestamp,
           processedBy: auth.currentUser?.uid || '',
         });
       }
@@ -377,7 +383,7 @@ export function SalesReturns() {
                 <div key={sale.id} className="p-4 hover:bg-gray-50 flex justify-between items-center gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-gray-900 text-sm">
-                      {sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                      {recordClinicDateTimeLabel(sale) || 'N/A'}
                     </p>
                     <p className="text-xs text-gray-400 font-mono">{getSaleReceiptLabel(sale)}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{sale.items?.length || 0} items • {formatCurrency(sale.total)}</p>
@@ -413,7 +419,7 @@ export function SalesReturns() {
                 <div className="flex justify-between items-start gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900">
-                      {r.date ? format(new Date(r.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                      {recordClinicDateTimeLabel(r) || 'N/A'}
                     </p>
                     <p className="text-xs text-gray-400 font-mono">Return #{getReturnNo(r)}</p>
                     <p className="text-xs text-gray-400">{r.withoutReceipt ? 'Without original receipt' : `Orig. Receipt: ${r.originalReceiptNo || 'Unnumbered'}`}</p>
@@ -531,7 +537,7 @@ export function SalesReturns() {
               <div>
                 <h2 className="text-xl font-bold text-gray-900">Process Sale Return</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
-                  {selectedSale.date ? format(new Date(selectedSale.date), 'MMM dd, yyyy HH:mm') : ''} • {formatCurrency(selectedSale.total)}
+                  {recordClinicDateTimeLabel(selectedSale)} • {formatCurrency(selectedSale.total)}
                 </p>
               </div>
               <button onClick={() => setSelectedSale(null)} className="p-1 text-gray-400 hover:text-gray-600">

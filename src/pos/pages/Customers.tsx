@@ -13,8 +13,9 @@ import {
   Plus, Edit2, Trash2, Search, ChevronDown, ChevronUp,
   Eye, X, Wallet, CheckCircle, Clock, CreditCard, Receipt, Printer
 } from 'lucide-react';
-import { format } from 'date-fns';
 import { subscribeToSales } from '../../lib/salesStore';
+import { trustedNowISO } from '../../lib/trustedClock';
+import { recordClinicDateTimeLabel } from '../../lib/clinicDate';
 
 export function Customers() {
   const [customers, setCustomers]       = useState<any[]>([]);
@@ -74,7 +75,7 @@ export function Customers() {
       const paymentRef = doc(collection(db, 'customerPayments'));
       batch.set(paymentRef, {
         customerId: paymentModal.id, customerName: paymentModal.name,
-        amount, note: paymentNote || '', date: new Date().toISOString(),
+        amount, note: paymentNote || '', date: trustedNowISO(),
       });
       batch.update(doc(db, 'customers', paymentModal.id), { creditBalance: increment(-amount) });
 
@@ -129,7 +130,7 @@ export function Customers() {
           updateDoc(d.ref, { customerName: formData.name, customerPhone: formData.phone })
         ));
       } else {
-        await addDoc(collection(db, 'customers'), { ...data, createdAt: new Date().toISOString() });
+        await addDoc(collection(db, 'customers'), { ...data, createdAt: trustedNowISO() });
       }
       setIsModalOpen(false); setEditingId(null);
       setFormData({ name: '', phone: '', creditBalance: '0' });
@@ -171,7 +172,7 @@ export function Customers() {
       return `
         <div style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
           <div style="background:#f3f4f6;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;">
-            <span style="font-weight:700;font-size:12px;color:#374151;">Receipt #${getSaleReceiptNo(sale)} &nbsp;-&nbsp; ${sale.date ? new Date(sale.date).toLocaleDateString('en-PK') : 'N/A'}</span>
+            <span style="font-weight:700;font-size:12px;color:#374151;">Receipt #${getSaleReceiptNo(sale)} &nbsp;-&nbsp; ${recordClinicDateTimeLabel(sale) || 'N/A'}</span>
             ${pending > 0
               ? `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;">DUE Rs.${pending.toFixed(2)}</span>`
               : `<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;">✓ PAID</span>`
@@ -199,7 +200,7 @@ export function Customers() {
           <h2 style="margin:0;font-size:16px;">${PHARMACY_RECEIPT_NAME}</h2>
           <p style="margin:4px 0 0;font-size:13px;font-weight:700;">${cust.name}</p>
           ${cust.phone ? `<p style="margin:2px 0 0;font-size:11px;color:#555;">${cust.phone}</p>` : ''}
-          <p style="margin:2px 0 0;font-size:10px;color:#888;">Printed: ${new Date().toLocaleString('en-PK')}</p>
+          <p style="margin:2px 0 0;font-size:10px;color:#888;">Printed: ${recordClinicDateTimeLabel({ date: trustedNowISO() })}</p>
         </div>
         ${rows}
         <div style="border-top:2px solid #111;padding-top:8px;margin-top:4px;">
@@ -343,7 +344,7 @@ export function Customers() {
                     <div>
                       <span className="text-xs text-gray-400">Since: </span>
                       <span className="text-xs text-gray-600">
-                        {cust.createdAt ? format(new Date(cust.createdAt), 'MMM dd, yyyy') : 'N/A'}
+                        {cust.createdAt ? recordClinicDateTimeLabel({ date: cust.createdAt }) : 'N/A'}
                       </span>
                     </div>
                   </div>
@@ -374,7 +375,7 @@ export function Customers() {
                               <div className="flex items-start justify-between gap-2 mb-2">
                                 <div>
                                   <p className="text-xs font-semibold text-gray-700">
-                                    {sale.date ? format(new Date(sale.date), 'MMM dd, yyyy') : 'N/A'}
+                                    {recordClinicDateTimeLabel(sale) || 'N/A'}
                                   </p>
                                   <p className="text-xs text-blue-500 font-mono">{getSaleReceiptLabel(sale)}</p>
                                   <p className="text-xs text-gray-400">{sale.items?.length || 0} item(s)</p>
@@ -437,7 +438,7 @@ export function Customers() {
                               {custSales.map(sale => (
                                 <tr key={sale.id} className="hover:bg-blue-50">
                                   <td className="p-3 text-gray-700 whitespace-nowrap">
-                                    {sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                                    {recordClinicDateTimeLabel(sale) || 'N/A'}
                                   </td>
                                   <td className="p-3 text-gray-500 font-mono text-xs">{getSaleReceiptNo(sale)}</td>
                                   <td className="p-3 text-gray-600">{sale.items?.length || 0} item(s)</td>
@@ -485,7 +486,7 @@ export function Customers() {
                               <div>
                                 <div className="flex items-center gap-1 text-xs text-gray-500">
                                   <Clock className="w-3 h-3" />
-                                  {p.date ? format(new Date(p.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                                  {recordClinicDateTimeLabel(p) || 'N/A'}
                                 </div>
                                 {p.note && <p className="text-xs text-gray-400 italic mt-0.5">{p.note}</p>}
                               </div>
@@ -514,7 +515,7 @@ export function Customers() {
                                   <td className="p-3 text-gray-700 whitespace-nowrap">
                                     <div className="flex items-center gap-1.5">
                                       <Clock className="w-3.5 h-3.5 text-gray-400" />
-                                      {p.date ? format(new Date(p.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                                      {recordClinicDateTimeLabel(p) || 'N/A'}
                                     </div>
                                   </td>
                                   <td className="p-3 text-right font-bold text-green-700">+{formatCurrency(p.amount)}</td>
@@ -666,7 +667,7 @@ export function Customers() {
               <div>
                 <h2 className="text-lg font-bold text-gray-900">Sale Details</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
-                  {selectedSale.date ? format(new Date(selectedSale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                  {recordClinicDateTimeLabel(selectedSale) || 'N/A'}
                   {' '}- {getSaleReceiptLabel(selectedSale)}
                 </p>
               </div>

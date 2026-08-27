@@ -26,6 +26,7 @@ import {
   verifyOfflineCredential,
   type AuthSession,
 } from './lib/offlineAuth';
+import { trustedNowISO } from './lib/trustedClock';
 
 // ── App instances ─────────────────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
@@ -189,4 +190,4 @@ export function handleFirestoreError(err: unknown, operation: OperationType = 'r
   }
 }
 
-export const nowISO = () => new Date().toISOString();
+export const nowISO = trustedNowISO;

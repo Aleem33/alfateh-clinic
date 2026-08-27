@@ -6,6 +6,7 @@ import { formatCurrency } from '../lib/utils';
 import { Plus, Edit2, Archive, RotateCcw, Search, AlertCircle, Upload, Download, X } from 'lucide-react';
 import { format, isBefore, addDays } from 'date-fns';
 import Papa from 'papaparse';
+import { trustedNow, trustedNowISO } from '../../lib/trustedClock';
 import {
   getDefaultMedicineCategory,
   includeLegacyMedicineCategory,
@@ -145,7 +146,7 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
         name,
         contact: supplierForm.contact.trim(),
         address: supplierForm.address.trim(),
-        createdAt: new Date().toISOString(),
+        createdAt: trustedNowISO(),
       });
       setFormData(prev => ({ ...prev, supplierId: ref.id, supplierName: name }));
       setSupplierForm(emptySupplierForm);
@@ -198,7 +199,7 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
 
   const isExpiringSoon = (dateStr: string) => {
     if (!dateStr) return false;
-    return isBefore(new Date(dateStr), addDays(new Date(), 30));
+    return isBefore(new Date(dateStr), addDays(trustedNow(), 30));
   };
 
   const handleDownloadTemplate = () => {
