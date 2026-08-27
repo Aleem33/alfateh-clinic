@@ -4,6 +4,7 @@ import { auth, db, usernameToEmail } from '../firebase';
 import {
   getActiveAuthSession,
   setCloudAuthReady,
+  isCloudAuthReady,
   profileFromUserDocument,
   revokeOfflineCredential,
   setActiveAuthSession,
@@ -11,6 +12,7 @@ import {
   type AuthSession,
 } from './offlineAuth';
 import { subscribeLanStatus } from './lanCoordinator';
+import { needsCloudSessionRestore, shouldAnnounceCloudReady } from './offlineAuthDecision';
 
 type Hooks = {
   onSession?: (session: AuthSession) => void;
@@ -30,11 +32,12 @@ async function keepFirestoreOffline() {
 }
 
 async function restoreFirestoreNetwork() {
+  const shouldAnnounceReady = shouldAnnounceCloudReady(firestoreNetworkDisabled, isCloudAuthReady());
   if (firestoreNetworkDisabled) {
     await enableNetwork(db);
     firestoreNetworkDisabled = false;
   }
-  setCloudAuthReady(true);
+  if (shouldAnnounceReady) setCloudAuthReady(true);
 }
 
 async function revokeSession(session: AuthSession, hooks: Hooks, message: string) {
@@ -49,6 +52,10 @@ async function reconnectAuthenticatedSession(hooks: Hooks) {
   if (reconnecting) return;
   const session = getActiveAuthSession();
   if (!session) {
+    await restoreFirestoreNetwork();
+    return;
+  }
+  if (!needsCloudSessionRestore(session, auth.currentUser?.uid)) {
     await restoreFirestoreNetwork();
     return;
   }
@@ -108,13 +115,24 @@ export function startOfflineAuthSync(hooks: Hooks = {}) {
   if (started || typeof window === 'undefined') return;
   started = true;
 
+  let cloudOnline = false;
   const handleStatus = (online: boolean) => {
+    cloudOnline = online;
     if (!online) {
       void keepFirestoreOffline();
       return;
     }
     void reconnectAuthenticatedSession(hooks);
   };
+  const retryCloudSession = () => {
+    if (!cloudOnline) return;
+    const session = getActiveAuthSession();
+    if (needsCloudSessionRestore(session, auth.currentUser?.uid)) {
+      void reconnectAuthenticatedSession(hooks);
+    }
+  };
 
   subscribeLanStatus(status => handleStatus(status.online));
+  window.setInterval(retryCloudSession, 15_000);
+  window.addEventListener('focus', retryCloudSession);
 }

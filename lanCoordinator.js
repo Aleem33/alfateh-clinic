@@ -11,9 +11,14 @@ const PROTOCOL = 'alfateh-lan-v1';
 const HEARTBEAT_MS = 1500;
 const LEASE_MS = 5000;
 const ELECTION_MS = 900;
+const SYNC_BARRIER_MS = 60_000;
 
 function selectLanPrimaryCandidate(candidateIds) {
   return [...new Set(candidateIds)].sort()[0] || null;
+}
+
+function shouldExpireSyncBarrier(role, barrierUntil, now = Date.now()) {
+  return (role === 'syncing-primary' || role === 'sync-wait') && barrierUntil > 0 && now >= barrierUntil;
 }
 
 function deviceName() {
@@ -77,6 +82,7 @@ function createLanCoordinator({ userDataPath, sendToRenderer }) {
   let monitorTimer = null;
   let reachabilityTimer = null;
   let electionPromise = null;
+  let syncBarrierUntil = 0;
 
   const rememberPeer = peer => {
     if (knownPeers.has(peer.deviceId)) return;
@@ -186,6 +192,7 @@ function createLanCoordinator({ userDataPath, sendToRenderer }) {
     if (message.type === 'SYNC_COMPLETE' && primary?.deviceId === message.deviceId) {
       primary = null;
       primaryLeaseUntil = 0;
+      syncBarrierUntil = 0;
       role = online ? 'online' : 'ready';
       notify();
       return;
@@ -227,6 +234,13 @@ function createLanCoordinator({ userDataPath, sendToRenderer }) {
         role = 'ready';
         notify();
       }
+      if (online && shouldExpireSyncBarrier(role, syncBarrierUntil, now)) {
+        primary = null;
+        primaryLeaseUntil = 0;
+        syncBarrierUntil = 0;
+        role = 'online';
+        notify();
+      }
       broadcast({ type: 'HELLO', role });
     }, 3000);
   };
@@ -239,18 +253,22 @@ function createLanCoordinator({ userDataPath, sendToRenderer }) {
       stopHeartbeat();
       if (!wasOnline && role === 'primary') {
         role = 'syncing-primary';
+        syncBarrierUntil = Date.now() + SYNC_BARRIER_MS;
         notify();
       } else if (!wasOnline && role === 'viewer') {
         role = 'sync-wait';
+        syncBarrierUntil = Date.now() + SYNC_BARRIER_MS;
         notify();
       } else if (role !== 'syncing-primary' && role !== 'sync-wait') {
         primary = null;
         primaryLeaseUntil = 0;
+        syncBarrierUntil = 0;
         role = 'online';
         notify();
       }
     }
     else {
+      syncBarrierUntil = 0;
       role = primary && primaryLeaseUntil > Date.now() ? 'viewer' : 'ready';
       broadcast({ type: 'HELLO', role });
       notify();
@@ -266,6 +284,7 @@ function createLanCoordinator({ userDataPath, sendToRenderer }) {
     setTimeout(announceComplete, 1200);
     primary = null;
     primaryLeaseUntil = 0;
+    syncBarrierUntil = 0;
     role = 'online';
     notify();
     return currentStatus();
@@ -376,4 +395,4 @@ function createLanCoordinator({ userDataPath, sendToRenderer }) {
   };
 }
 
-module.exports = { createLanCoordinator, selectLanPrimaryCandidate };
+module.exports = { createLanCoordinator, selectLanPrimaryCandidate, shouldExpireSyncBarrier };

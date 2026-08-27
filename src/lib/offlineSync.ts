@@ -8,6 +8,7 @@ import { subscribeOfflineCache } from './offlineCache';
 import { GLOBAL_DATA_COLLECTIONS } from './dataSync';
 import { isCloudAuthReady } from './offlineAuth';
 import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
+import { waitForSyncStep } from './syncTiming';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -226,6 +227,7 @@ export async function runOfflineSyncNow() {
   if (!auth.currentUser) {
     lastError = '';
     notify();
+    await completeLanCloudSync();
     return;
   }
   syncing = true;
@@ -234,9 +236,10 @@ export async function runOfflineSyncNow() {
   try {
     await processLabReportQueue();
     try {
-      await waitForPendingWrites(db);
-    } catch (error) {
-      console.warn('A queued Firestore write was rejected; durable sales will be replayed:', error);
+      await waitForSyncStep(waitForPendingWrites(db), 15_000, 'Queued cloud writes');
+    } catch (error: any) {
+      lastError = error?.message || 'Queued cloud writes could not be confirmed yet.';
+      console.warn('A queued Firestore write was rejected or timed out; durable sales will still be verified:', error);
     }
     await replayPendingPosSales();
     await checkStockConflicts();
