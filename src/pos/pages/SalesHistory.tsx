@@ -12,7 +12,8 @@ import {
   Users, Building2, LayoutList, Table2,
   ArrowUpDown, ArrowUp, ArrowDown, SlidersHorizontal, Edit2, Save,
 } from 'lucide-react';
-import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import { recordClinicDateKey } from '../../lib/clinicDate';
 
 type ExportType = 'all' | 'customer' | 'hospital';
 type ViewMode   = 'summary' | 'excel';
@@ -35,6 +36,19 @@ function thClass(active: boolean) {
 function getGross(sale: any): number {
   if (sale.grossSubtotal != null) return sale.grossSubtotal;
   return (sale.subtotal || 0) + (sale.totalItemDiscounts || 0);
+}
+
+function formatSaleDate(sale: any, datePattern = 'MMM dd, yyyy', includeTime = true): string {
+  const dateKey = recordClinicDateKey(sale);
+  if (!dateKey) return 'N/A';
+  const datePart = format(parseISO(dateKey), datePattern);
+  if (!includeTime || !sale?.date) return datePart;
+  const timestamp = new Date(sale.date);
+  return Number.isNaN(timestamp.getTime()) ? datePart : `${datePart} ${format(timestamp, 'HH:mm')}`;
+}
+
+function saleDateSortKey(sale: any): string {
+  return `${recordClinicDateKey(sale)}|${String(sale?.date || '')}`;
 }
 
 export function SalesHistory() {
@@ -82,18 +96,18 @@ export function SalesHistory() {
       const matchSearch =
         getSaleReceiptNo(s, '').toLowerCase().includes(q.toLowerCase()) ||
         s.id.toLowerCase().includes(q.toLowerCase()) ||
-        (s.date && format(new Date(s.date), 'MMM dd, yyyy').toLowerCase().includes(q.toLowerCase())) ||
+        formatSaleDate(s, 'MMM dd, yyyy', false).toLowerCase().includes(q.toLowerCase()) ||
         (s.customerName && s.customerName.toLowerCase().includes(q.toLowerCase())) ||
         (s.items?.some((it: any) => it.name?.toLowerCase().includes(q.toLowerCase())));
       const matchType =
         tf === 'all' || (tf === 'hospital' ? s.customerType === 'hospital' : s.customerType !== 'hospital');
       let matchDate = true;
       if (df || dt) {
-        const d = s.date ? new Date(s.date) : null;
-        if (d) {
-          if (df && dt) matchDate = isWithinInterval(d, { start: startOfDay(parseISO(df)), end: endOfDay(parseISO(dt)) });
-          else if (df)  matchDate = d >= startOfDay(parseISO(df));
-          else if (dt)  matchDate = d <= endOfDay(parseISO(dt));
+        const dateKey = recordClinicDateKey(s);
+        if (dateKey) {
+          if (df && dt) matchDate = dateKey >= df && dateKey <= dt;
+          else if (df)  matchDate = dateKey >= df;
+          else if (dt)  matchDate = dateKey <= dt;
         } else matchDate = false;
       }
       return matchSearch && matchType && matchDate;
@@ -110,7 +124,7 @@ export function SalesHistory() {
     if (!col || !dir) return arr;
     arr.sort((a, b) => {
       let av: any, bv: any;
-      if (col === 'date')     { av = new Date(a.date || 0).getTime(); bv = new Date(b.date || 0).getTime(); }
+      if (col === 'date')     { av = saleDateSortKey(a);              bv = saleDateSortKey(b); }
       if (col === 'type')     { av = a.customerType || 'customer';    bv = b.customerType || 'customer'; }
       if (col === 'items')    { av = a.items?.length || 0;            bv = b.items?.length || 0; }
       if (col === 'subtotal') { av = getGross(a);                     bv = getGross(b); }
@@ -138,7 +152,7 @@ export function SalesHistory() {
     if (!col || !dir) return arr;
     arr.sort(({ sale: a, item: ai }, { sale: b, item: bi }) => {
       let av: any, bv: any;
-      if (col === 'date')      { av = new Date(a.date || 0).getTime(); bv = new Date(b.date || 0).getTime(); }
+      if (col === 'date')      { av = saleDateSortKey(a);              bv = saleDateSortKey(b); }
       if (col === 'type')      { av = a.customerType || 'customer';    bv = b.customerType || 'customer'; }
       if (col === 'itemName')  { av = ai?.name  || '';                 bv = bi?.name  || ''; }
       if (col === 'sellType')  { av = ai?.sellType || '';              bv = bi?.sellType || ''; }
@@ -223,7 +237,7 @@ export function SalesHistory() {
       ['Date & Time','Receipt No','Sale Type','Customer','Item Name','Sell Type','Quantity','Unit Price','Item Total','Gross Subtotal','Sale Discount','Sale Total','Amount Paid','Pending Amount'],
     ];
     exportSales.forEach(sale => {
-      const dateStr  = sale.date ? format(new Date(sale.date), 'dd/MM/yyyy HH:mm') : 'N/A';
+      const dateStr  = formatSaleDate(sale, 'dd/MM/yyyy');
       const saleType = sale.customerType === 'hospital' ? 'Hospital' : 'Customer';
       const custName = sale.customerName || '';
       const gross = getGross(sale);
@@ -284,7 +298,7 @@ export function SalesHistory() {
           <div className="text-center mb-3">
             <h2 className="text-lg font-bold">{PHARMACY_RECEIPT_NAME}</h2>
             <p>Receipt (Reprint)</p>
-            <p>{selectedSale.date ? format(new Date(selectedSale.date), 'dd/MM/yyyy HH:mm') : 'N/A'}</p>
+            <p>{formatSaleDate(selectedSale, 'dd/MM/yyyy')}</p>
             <p className="text-xs mt-1">Receipt No: {getSaleReceiptNo(selectedSale)}</p>
             {selectedSale.customerName && <p className="text-xs mt-1">Customer: {selectedSale.customerName}</p>}
           </div>
@@ -435,7 +449,7 @@ export function SalesHistory() {
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
                     <p className="text-sm font-semibold text-gray-900">
-                      {sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                      {formatSaleDate(sale)}
                     </p>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${sale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -500,7 +514,7 @@ export function SalesHistory() {
                 <tbody className="divide-y divide-gray-100">
                   {sortedSummary.map(sale => (
                     <tr key={sale.id} className="hover:bg-gray-50">
-                      <td className="p-4 text-gray-900 font-medium">{sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}</td>
+                      <td className="p-4 text-gray-900 font-medium">{formatSaleDate(sale)}</td>
                       <td className="p-4 text-gray-500 font-mono text-sm">{getSaleReceiptNo(sale)}</td>
                       <td className="p-4 text-sm">
                         {sale.customerName ? <span className="font-medium text-gray-800">{sale.customerName}</span> : <span className="text-gray-300 italic text-xs">—</span>}
@@ -568,7 +582,7 @@ export function SalesHistory() {
                 <tbody className="divide-y divide-gray-100">
                   {sortedExcel.map(({ sale, item }, idx) => (
                     <tr key={`${sale.id}-${idx}`} className="hover:bg-gray-50">
-                      <td className="p-3 text-gray-700 whitespace-nowrap">{sale.date ? format(new Date(sale.date), 'MMM dd, yyyy HH:mm') : 'N/A'}</td>
+                      <td className="p-3 text-gray-700 whitespace-nowrap">{formatSaleDate(sale)}</td>
                       <td className="p-3 text-gray-400 font-mono text-xs">{getSaleReceiptNo(sale)}</td>
                       <td className="p-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${sale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{sale.customerType || 'customer'}</span></td>
                       <td className="p-3 text-gray-900 font-medium">{item?.name || <span className="text-gray-400 italic">—</span>}</td>
@@ -615,7 +629,7 @@ export function SalesHistory() {
                 <div>
                   <h2 className="text-lg font-bold text-gray-900">Sale Details</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {selectedSale.date ? format(new Date(selectedSale.date), 'MMM dd, yyyy HH:mm') : 'N/A'} •{' '}
+                    {formatSaleDate(selectedSale)} •{' '}
                     <span className="font-mono">{getSaleReceiptLabel(selectedSale)}</span>
                     <span className={`ml-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${selectedSale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                       {selectedSale.customerType || 'customer'}
@@ -741,7 +755,7 @@ export function SalesHistory() {
                 <div>
                   <h2 className="text-lg font-bold text-gray-900">Edit Sale</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {editingSale.date ? format(new Date(editingSale.date), 'MMM dd, yyyy HH:mm') : 'N/A'} - <span className="font-mono">{getSaleReceiptLabel(editingSale)}</span>
+                    {formatSaleDate(editingSale)} - <span className="font-mono">{getSaleReceiptLabel(editingSale)}</span>
                   </p>
                 </div>
                 <button onClick={() => setEditingSale(null)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full"><X className="w-5 h-5" /></button>
