@@ -15,6 +15,7 @@ import { findDuplicateMedicine, getMedicineIdentity, getMedicineSearchText, norm
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { createMedicineSafely, ensureMedicinePurchaseBatch, findMedicinePurchaseBatch, MedicineConflictError } from '../../lib/medicineOperations';
 import { trustedNow } from '../../lib/trustedClock';
+import { calculatePurchaseQuantities } from '../../pos/lib/purchaseInvoice';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -81,7 +82,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
   const [medForm, setMedForm]       = useState(emptyMed);
   const [purchaseForm, setPurchaseForm] = useState({
     medicineId: '', medicineName: '', supplierId: '', supplierName: '',
-    boxes: '', looseUnits: '0', unitsPerBox: '1',
+    boxes: '', looseUnits: '0', bonusBoxes: '0', bonusLooseUnits: '0', unitsPerBox: '1',
     costPerBox: '', retailPrice: '', unitPrice: '',
     batchNo: '', expiryDate: today(), invoiceNo: '', date: today(),
   });
@@ -221,6 +222,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
         unitPrice: toNumber(medForm.unitPrice),
         unitsPerBox,
         stock,
+        bonusStockUnits: editingMedicine ? Math.min(stock, Math.max(0, Number(editingMedicine.bonusStockUnits || 0))) : 0,
         reorderLevel: Math.floor(toNumber(medForm.reorderLevel, 10)) || 10,
         supplierId: medForm.supplierId || '',
         supplierName: medForm.supplierName || '',
@@ -246,18 +248,13 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
 
   const handleSavePurchase = async () => {
     const previewUnitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
-    const previewUnits = (parseInt(purchaseForm.boxes || '0') * previewUnitsPerBox) + parseInt(purchaseForm.looseUnits || '0');
+    const previewUnits = ((parseInt(purchaseForm.boxes || '0') + parseInt(purchaseForm.bonusBoxes || '0')) * previewUnitsPerBox) + parseInt(purchaseForm.looseUnits || '0') + parseInt(purchaseForm.bonusLooseUnits || '0');
     if (!purchaseForm.medicineId || previewUnits <= 0) { setError('Medicine and purchase quantity are required.'); return; }
     setSaving(true); setError('');
     try {
       const med = medicines.find(m => m.id === purchaseForm.medicineId)!;
-      const boxesPurchased = parseInt(purchaseForm.boxes || '0');
-      const looseUnitsPurchased = parseInt(purchaseForm.looseUnits || '0');
-      const unitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
-      const unitsAdded = boxesPurchased * unitsPerBox + looseUnitsPurchased;
-      const costPerBox = parseFloat(purchaseForm.costPerBox || '0');
-      const costPricePerUnit = costPerBox / unitsPerBox;
-      const totalCost = unitsAdded * costPricePerUnit;
+      const quantities = calculatePurchaseQuantities(purchaseForm.boxes, purchaseForm.looseUnits, purchaseForm.unitsPerBox, purchaseForm.costPerBox, purchaseForm.bonusBoxes, purchaseForm.bonusLooseUnits);
+      const { boxesPurchased, looseUnitsPurchased, unitsPerBox, paidUnits, bonusUnits, totalUnits: unitsAdded, costPrice: costPerBox, costPricePerUnit, totalCost } = quantities;
       const retailPrice = parseFloat(purchaseForm.retailPrice || '0');
       const unitPrice = parseFloat(purchaseForm.unitPrice || '0');
       const batchNo = purchaseBatchMode === 'new'
@@ -266,8 +263,12 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       if (editingPurchase) {
         if (!canEditPurchases) return;
         const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
+        const oldBonusUnits = Number(editingPurchase.bonusUnits || 0);
         const stockDelta = unitsAdded - oldUnits;
-        if (Number(med.stock || 0) + stockDelta < 0) {
+        const bonusDelta = bonusUnits - oldBonusUnits;
+        const nextStock = Number(med.stock || 0) + stockDelta;
+        const nextBonusStock = Number(med.bonusStockUnits || 0) + bonusDelta;
+        if (nextStock < 0 || nextBonusStock < 0 || nextBonusStock > nextStock) {
           setError('This correction would make the linked batch stock negative.');
           return;
         }
@@ -281,6 +282,12 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
           boxesPurchased,
           looseUnits: looseUnitsPurchased,
           looseUnitsPurchased,
+          paidBoxesPurchased: boxesPurchased,
+          paidLooseUnitsPurchased: looseUnitsPurchased,
+          bonusBoxes: quantities.bonusBoxes,
+          bonusLooseUnits: quantities.bonusLooseUnits,
+          paidUnits,
+          bonusUnits,
           totalUnitsAdded: unitsAdded,
           unitsAdded,
           unitsPerBox,
@@ -294,6 +301,8 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
         });
         editBatch.update(doc(db, 'medicines', med.id), {
           stock: increment(stockDelta),
+          bonusStockUnits: increment(bonusDelta),
+          costPrice: costPerBox,
           updatedAt: nowISO(),
         });
         await editBatch.commit();
@@ -323,6 +332,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
         batchNo,
         expiryDate: purchaseForm.expiryDate || med.expiryDate || '',
         stock: unitsAdded,
+        bonusStockUnits: bonusUnits,
         unitsPerBox,
         costPrice: costPerBox,
         retailPrice,
@@ -339,6 +349,12 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
         boxesPurchased,
         looseUnits: looseUnitsPurchased,
         looseUnitsPurchased,
+        paidBoxesPurchased: boxesPurchased,
+        paidLooseUnitsPurchased: looseUnitsPurchased,
+        bonusBoxes: quantities.bonusBoxes,
+        bonusLooseUnits: quantities.bonusLooseUnits,
+        paidUnits,
+        bonusUnits,
         totalUnitsAdded: unitsAdded,
         unitsAdded,
         unitsPerBox,
@@ -353,6 +369,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       if (!batchTarget.created) {
         batch.update(doc(db, 'medicines', batchTarget.medicineId), {
           stock: increment(unitsAdded),
+          bonusStockUnits: increment(bonusUnits),
           updatedAt: nowISO(),
         });
       }
@@ -361,7 +378,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       setShowPurchaseModal(false);
       setEditingPurchase(null);
       setPurchaseBatchMode('existing');
-      setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', looseUnits: '0', unitsPerBox: '1', costPerBox: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
+      setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', looseUnits: '0', bonusBoxes: '0', bonusLooseUnits: '0', unitsPerBox: '1', costPerBox: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
     } catch (e: any) { setError(e instanceof MedicineConflictError ? e.message : e.message); }
     finally { setSaving(false); }
   };
@@ -382,6 +399,8 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
       supplierName: purchase.supplierName || medicine.supplierName || '',
       boxes: String(purchase.boxesPurchased ?? purchase.boxes ?? 0),
       looseUnits: String(purchase.looseUnitsPurchased ?? purchase.looseUnits ?? 0),
+      bonusBoxes: String(purchase.bonusBoxes ?? 0),
+      bonusLooseUnits: String(purchase.bonusLooseUnits ?? 0),
       unitsPerBox: String(purchase.unitsPerBox || medicine.unitsPerBox || 1),
       costPerBox: String(purchase.costPerBox ?? purchase.costPrice ?? medicine.costPrice ?? ''),
       retailPrice: String(purchase.retailPrice ?? medicine.retailPrice ?? medicine.price ?? ''),
@@ -427,11 +446,12 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
   };
   const getPurchaseUnits = () => {
     const unitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
-    return (parseInt(purchaseForm.boxes || '0') * unitsPerBox) + parseInt(purchaseForm.looseUnits || '0');
+    return ((parseInt(purchaseForm.boxes || '0') + parseInt(purchaseForm.bonusBoxes || '0')) * unitsPerBox) + parseInt(purchaseForm.looseUnits || '0') + parseInt(purchaseForm.bonusLooseUnits || '0');
   };
   const getPurchaseTotalCost = () => {
     const unitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
-    return getPurchaseUnits() * (parseFloat(purchaseForm.costPerBox || '0') / unitsPerBox);
+    const paidUnits = (parseInt(purchaseForm.boxes || '0') * unitsPerBox) + parseInt(purchaseForm.looseUnits || '0');
+    return paidUnits * (parseFloat(purchaseForm.costPerBox || '0') / unitsPerBox);
   };
 
   return (
@@ -548,7 +568,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>{['Date', 'Medicine', 'Supplier', 'Boxes', 'Cost/Box', 'Total', 'Invoice', 'Batch', ...(canEditPurchases ? ['Actions'] : [])].map(h => (
+              <tr>{['Date', 'Medicine', 'Supplier', 'Paid / Bonus', 'Cost/Box', 'Payable', 'Invoice', 'Batch', ...(canEditPurchases ? ['Actions'] : [])].map(h => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
               ))}</tr>
             </thead>
@@ -560,7 +580,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
                     <td className="px-4 py-3 text-sm text-gray-600">{formatDate(p.date)}</td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{p.medicineName}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{p.supplierName || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{p.boxes}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{p.paidUnits ?? p.totalUnitsAdded} / {p.bonusUnits || 0} units</td>
                     <td className="px-4 py-3 text-sm text-gray-600">Rs. {p.costPerBox}</td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-800">Rs. {p.totalCost?.toLocaleString()}</td>
                     <td className="px-4 py-3 text-xs text-gray-400">{p.invoiceNo || '—'}</td>
@@ -869,8 +889,10 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { label: 'Purchase Date', key: 'date', type: 'date' },
-                  { label: 'Boxes Purchased *', key: 'boxes', type: 'number' },
-                  { label: 'Loose Units', key: 'looseUnits', type: 'number' },
+                  { label: 'Paid Boxes', key: 'boxes', type: 'number' },
+                  { label: 'Paid Loose Units', key: 'looseUnits', type: 'number' },
+                  { label: 'Bonus Boxes (Free)', key: 'bonusBoxes', type: 'number' },
+                  { label: 'Bonus Loose Units', key: 'bonusLooseUnits', type: 'number' },
                   { label: 'Units Per Box *', key: 'unitsPerBox', type: 'number' },
                   { label: 'Cost Per Box (Rs.)', key: 'costPerBox', type: 'number' },
                   { label: 'Retail Per Box (Rs.)', key: 'retailPrice', type: 'number' },
@@ -922,12 +944,15 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
               )}
               {purchaseForm.costPerBox && (
                 <div className="bg-blue-50 rounded-lg p-3 text-sm">
-                  <span className="text-blue-600">Total Cost: </span>
+                  <span className="text-blue-600">Supplier Payable: </span>
                   <span className="font-bold text-blue-800">
                     Rs. {getPurchaseTotalCost().toLocaleString()}
                   </span>
                   <div className="text-xs text-blue-700 mt-1">
                     Adds {getPurchaseUnits()} units using {purchaseForm.unitsPerBox || 1} units/box.
+                  </div>
+                  <div className="text-xs text-emerald-700 mt-1">
+                    Bonus stock is valued at zero and excluded from payable.
                   </div>
                 </div>
               )}

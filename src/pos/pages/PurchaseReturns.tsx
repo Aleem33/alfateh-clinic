@@ -51,6 +51,7 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
           </tr></tbody>
         </table>
         <div style="font-size:9px;margin-top:3px">Returned: ${formatUnitsInline(data.totalUnitsReturned, upb)}</div>
+        <div style="font-size:9px;margin-top:2px">Paid: ${data.paidUnitsReturned ?? data.totalUnitsReturned} · Bonus: ${data.bonusUnitsReturned || 0}</div>
       </div>
       ${data.reason ? `<div style="font-size:10px;margin-bottom:6px">Reason: ${data.reason}</div>` : ''}
       <div style="border-top:1px dashed #000;padding-top:6px;break-inside:avoid">
@@ -68,20 +69,27 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
 
 export function PurchaseReturns() {
   const [purchases, setPurchases] = useState<any[]>([]);
-  const [medicines, setMedicines] = useState<Record<string, number>>({});  // medicineId → current stock
+  const [medicines, setMedicines] = useState<Record<string, { stock: number; bonusStockUnits: number }>>({});
   const [returns, setReturns] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [selectedPurchase, setSelectedPurchase] = useState<any>(null);
   const [returnBoxes, setReturnBoxes] = useState('');
   const [returnLoose, setReturnLoose] = useState('0');
+  const [bonusReturnBoxes, setBonusReturnBoxes] = useState('');
+  const [bonusReturnLoose, setBonusReturnLoose] = useState('0');
   const [returnReason, setReturnReason] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const unsubMedicines = subscribeToMedicines((medicineList) => {
-      const stockMap: Record<string, number> = {};
-      medicineList.forEach(medicine => { stockMap[medicine.id] = medicine.stock || 0; });
+      const stockMap: Record<string, { stock: number; bonusStockUnits: number }> = {};
+      medicineList.forEach(medicine => {
+        stockMap[medicine.id] = {
+          stock: Number(medicine.stock || 0),
+          bonusStockUnits: Math.min(Number(medicine.stock || 0), Math.max(0, Number(medicine.bonusStockUnits || 0))),
+        };
+      });
       setMedicines(stockMap);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'medicines'));
 
@@ -106,16 +114,20 @@ export function PurchaseReturns() {
     p.supplierName?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const getAlreadyReturnedUnits = (purchaseId: string) => {
+  const getAlreadyReturnedUnits = (purchaseId: string, bucket?: 'paid' | 'bonus') => {
     return returns
       .filter(r => r.originalPurchaseId === purchaseId)
-      .reduce((sum, r) => sum + (r.totalUnitsReturned || 0), 0);
+      .reduce((sum, r) => sum + (bucket === 'paid'
+        ? (r.paidUnitsReturned ?? r.totalUnitsReturned ?? 0)
+        : bucket === 'bonus' ? (r.bonusUnitsReturned || 0) : (r.totalUnitsReturned || 0)), 0);
   };
 
   const openReturn = (purchase: any) => {
     setSelectedPurchase(purchase);
     setReturnBoxes('');
     setReturnLoose('0');
+    setBonusReturnBoxes('');
+    setBonusReturnLoose('0');
     setReturnReason('');
   };
 
@@ -124,14 +136,25 @@ export function PurchaseReturns() {
     ?? (selectedPurchase ? (selectedPurchase.costPrice || 0) / unitsPerBox : 0);
   const boxes = parseInt(returnBoxes || '0');
   const loose = parseInt(returnLoose || '0');
-  const totalUnitsToReturn = boxes * unitsPerBox + loose;
+  const bonusBoxes = parseInt(bonusReturnBoxes || '0');
+  const bonusLoose = parseInt(bonusReturnLoose || '0');
+  const paidUnitsToReturn = boxes * unitsPerBox + loose;
+  const bonusUnitsToReturn = bonusBoxes * unitsPerBox + bonusLoose;
+  const totalUnitsToReturn = paidUnitsToReturn + bonusUnitsToReturn;
   const alreadyReturned = selectedPurchase ? getAlreadyReturnedUnits(selectedPurchase.id) : 0;
-  const currentStock = selectedPurchase ? (medicines[selectedPurchase.medicineId] ?? 0) : 0;
-  const maxReturnable = selectedPurchase
-    ? Math.min(selectedPurchase.totalUnitsAdded - alreadyReturned, currentStock)
-    : 0;
-  const isValid = totalUnitsToReturn > 0 && totalUnitsToReturn <= maxReturnable;
-  const refundAmount = (boxes * unitsPerBox + loose) * costPricePerUnit;
+  const alreadyPaidReturned = selectedPurchase ? getAlreadyReturnedUnits(selectedPurchase.id, 'paid') : 0;
+  const alreadyBonusReturned = selectedPurchase ? getAlreadyReturnedUnits(selectedPurchase.id, 'bonus') : 0;
+  const currentBuckets = selectedPurchase ? medicines[selectedPurchase.medicineId] : undefined;
+  const currentStock = currentBuckets?.stock || 0;
+  const currentBonusStock = currentBuckets?.bonusStockUnits || 0;
+  const currentPaidStock = Math.max(0, currentStock - currentBonusStock);
+  const purchasedPaidUnits = Number(selectedPurchase?.paidUnits ?? selectedPurchase?.totalUnitsAdded ?? 0);
+  const purchasedBonusUnits = Number(selectedPurchase?.bonusUnits || 0);
+  const maxPaidReturnable = Math.min(Math.max(0, purchasedPaidUnits - alreadyPaidReturned), currentPaidStock);
+  const maxBonusReturnable = Math.min(Math.max(0, purchasedBonusUnits - alreadyBonusReturned), currentBonusStock);
+  const maxReturnable = maxPaidReturnable + maxBonusReturnable;
+  const isValid = totalUnitsToReturn > 0 && paidUnitsToReturn <= maxPaidReturnable && bonusUnitsToReturn <= maxBonusReturnable;
+  const refundAmount = paidUnitsToReturn * costPricePerUnit;
 
   const formatUnits = (units: number, upb: number) => {
     if (!upb || upb <= 1) return `${units} units`;
@@ -157,6 +180,12 @@ export function PurchaseReturns() {
         supplierName: selectedPurchase.supplierName || 'N/A',
         boxesReturned: boxes,
         looseUnitsReturned: loose,
+        paidBoxesReturned: boxes,
+        paidLooseUnitsReturned: loose,
+        bonusBoxesReturned: bonusBoxes,
+        bonusLooseUnitsReturned: bonusLoose,
+        paidUnitsReturned: paidUnitsToReturn,
+        bonusUnitsReturned: bonusUnitsToReturn,
         totalUnitsReturned: totalUnitsToReturn,
         costPrice: selectedPurchase.costPrice || 0,
         costPricePerUnit,
@@ -172,6 +201,7 @@ export function PurchaseReturns() {
       batch.set(docRef, returnDoc);
       batch.update(doc(db, 'medicines', selectedPurchase.medicineId), {
         stock: increment(-totalUnitsToReturn),
+        ...(bonusUnitsToReturn > 0 ? { bonusStockUnits: increment(-bonusUnitsToReturn) } : {}),
       });
       await batch.commit();
 
@@ -267,6 +297,7 @@ export function PurchaseReturns() {
                       {r.looseUnitsReturned > 0 ? ` ${r.looseUnitsReturned} loose` : ''}
                       {' '}({r.totalUnitsReturned} units)
                     </p>
+                    <p className="text-xs text-gray-500">Paid {r.paidUnitsReturned ?? r.totalUnitsReturned} · Bonus {r.bonusUnitsReturned || 0}</p>
                     {r.reason && <p className="text-xs italic text-gray-400">"{r.reason}"</p>}
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
@@ -321,6 +352,10 @@ export function PurchaseReturns() {
                   <span>Available to return:</span>
                   <span>{formatUnits(maxReturnable, unitsPerBox)}</span>
                 </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Paid / Bonus available:</span>
+                  <span>{maxPaidReturnable} / {maxBonusReturnable} units</span>
+                </div>
                 <div className="flex justify-between text-gray-500 text-xs pt-1">
                   <span>Refund rate:</span>
                   <span>{formatCurrency(costPricePerUnit)} per unit {unitsPerBox > 1 ? `(box price ${formatCurrency(selectedPurchase.costPrice)} ÷ ${unitsPerBox})` : ''}</span>
@@ -330,7 +365,7 @@ export function PurchaseReturns() {
               {unitsPerBox > 1 ? (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Boxes to Return</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Paid Boxes to Return</label>
                     <input
                       type="number" min="0" value={returnBoxes} placeholder="0"
                       onChange={e => setReturnBoxes(e.target.value)}
@@ -339,7 +374,7 @@ export function PurchaseReturns() {
                     <p className="text-xs text-gray-400 mt-1">{unitsPerBox} units/box</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Loose Units to Return</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Paid Loose Units</label>
                     <input
                       type="number" min="0" value={returnLoose} placeholder="0"
                       onChange={e => setReturnLoose(e.target.value)}
@@ -350,7 +385,7 @@ export function PurchaseReturns() {
                 </div>
               ) : (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Units to Return</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Paid Units to Return</label>
                   <input
                     type="number" min="0" value={returnLoose} placeholder="0"
                     onChange={e => setReturnLoose(e.target.value)}
@@ -359,10 +394,33 @@ export function PurchaseReturns() {
                 </div>
               )}
 
-              {totalUnitsToReturn > maxReturnable && totalUnitsToReturn > 0 && (
+              {purchasedBonusUnits > 0 && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                  <p className="text-sm font-semibold text-emerald-800 mb-2">Free bonus return (zero refund)</p>
+                  {unitsPerBox > 1 ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Bonus Boxes</label>
+                        <input type="number" min="0" value={bonusReturnBoxes} onChange={e => setBonusReturnBoxes(e.target.value)}
+                          className="w-full p-2 border border-emerald-200 rounded-md" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Bonus Loose Units</label>
+                        <input type="number" min="0" value={bonusReturnLoose} onChange={e => setBonusReturnLoose(e.target.value)}
+                          className="w-full p-2 border border-emerald-200 rounded-md" />
+                      </div>
+                    </div>
+                  ) : (
+                    <input type="number" min="0" value={bonusReturnLoose} onChange={e => setBonusReturnLoose(e.target.value)}
+                      className="w-full p-2 border border-emerald-200 rounded-md" />
+                  )}
+                </div>
+              )}
+
+              {!isValid && totalUnitsToReturn > 0 && (
                 <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 p-2 rounded-lg">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  Cannot return more than {formatUnits(maxReturnable, unitsPerBox)}.
+                  Paid and bonus returns cannot exceed their separate available quantities.
                 </div>
               )}
 
@@ -381,6 +439,10 @@ export function PurchaseReturns() {
                   <div className="flex justify-between text-sm text-orange-800">
                     <span>Units returning:</span>
                     <span className="font-semibold">{totalUnitsToReturn} units</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-orange-700">
+                    <span>Paid / Bonus:</span>
+                    <span>{paidUnitsToReturn} / {bonusUnitsToReturn}</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-orange-900">
                     <span>Estimated Refund Value:</span>

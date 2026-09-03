@@ -10,6 +10,7 @@ import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../../pos/lib/salesFinancials';
+import { getBonusAwareStockValue } from '../../pos/lib/bonusInventory';
 
 function exportCSV(filename: string, rows: any[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
@@ -208,7 +209,7 @@ export function Reports() {
           stock,
           cost,
           Number(m.retailPrice || m.price) || 0,
-          stock * (cost / Math.max(Number(m.unitsPerBox) || 1, 1)),
+          getBonusAwareStockValue(m),
           daysLeft === null ? 'No expiry' : daysLeft <= 0 ? 'Expired' : daysLeft <= 30 ? 'Expiring soon' : stock <= Math.max(Number(m.unitsPerBox) || 1, 1) * 2 ? 'Low stock' : 'OK',
         ];
       }),

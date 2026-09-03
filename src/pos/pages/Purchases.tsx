@@ -14,6 +14,7 @@ import { getTrustedClockReading, trustedNow } from '../../lib/trustedClock';
 const today = () => clinicDateKey(trustedNow());
 const emptyPurchaseForm = () => ({
   supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0',
+  bonusBoxes: '0', bonusLooseUnits: '0',
   unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '',
   batchNo: '', expiryDate: '', date: today(), notes: '',
 });
@@ -92,6 +93,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       formData.looseUnitsPurchased,
       formData.unitsPerBox,
       formData.costPrice,
+      formData.bonusBoxes,
+      formData.bonusLooseUnits,
     );
     if (quantities.totalUnits <= 0) throw new Error('Enter at least one box or loose unit.');
 
@@ -181,8 +184,12 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         unitPrice: editingPurchase.unitPrice ?? selectedMedicine.unitPrice ?? 0,
       });
       const oldUnits = Number(editingPurchase.totalUnitsAdded || editingPurchase.unitsAdded || 0);
+      const oldBonusUnits = Number(editingPurchase.bonusUnits || 0);
       const stockDelta = line.totalUnits - oldUnits;
-      if (Number(selectedMedicine.stock || 0) + stockDelta < 0) {
+      const bonusDelta = line.bonusUnits - oldBonusUnits;
+      const nextStock = Number(selectedMedicine.stock || 0) + stockDelta;
+      const nextBonusStock = Number(selectedMedicine.bonusStockUnits || 0) + bonusDelta;
+      if (nextStock < 0 || nextBonusStock < 0 || nextBonusStock > nextStock) {
         setFormError('This change would make the batch stock negative. Reduce the adjustment or correct current stock first.');
         return;
       }
@@ -195,6 +202,12 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         supplierName: line.supplierName || 'N/A',
         boxesPurchased: line.boxesPurchased,
         looseUnitsPurchased: line.looseUnitsPurchased,
+        paidBoxesPurchased: line.paidBoxesPurchased,
+        paidLooseUnitsPurchased: line.paidLooseUnitsPurchased,
+        bonusBoxes: line.bonusBoxes,
+        bonusLooseUnits: line.bonusLooseUnits,
+        paidUnits: line.paidUnits,
+        bonusUnits: line.bonusUnits,
         totalUnitsAdded: line.totalUnits,
         unitsPerBox: line.unitsPerBox,
         costPrice: line.costPrice,
@@ -211,6 +224,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       });
       batch.update(doc(db, 'medicines', line.medicineId), {
         stock: increment(stockDelta),
+        bonusStockUnits: increment(bonusDelta),
         costPrice: line.costPrice,
         ...sellingPriceUpdate,
         updatedAt: timestamp,
@@ -241,6 +255,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               batchNo: line.batchNo,
               expiryDate: line.expiryDate,
               stock: line.totalUnits,
+              bonusStockUnits: line.bonusUnits,
               unitsPerBox: line.unitsPerBox,
               costPrice: line.costPrice,
               retailPrice: line.retailPrice,
@@ -259,6 +274,12 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
           supplierName: line.supplierName || 'N/A',
           boxesPurchased: line.boxesPurchased,
           looseUnitsPurchased: line.looseUnitsPurchased,
+          paidBoxesPurchased: line.paidBoxesPurchased,
+          paidLooseUnitsPurchased: line.paidLooseUnitsPurchased,
+          bonusBoxes: line.bonusBoxes,
+          bonusLooseUnits: line.bonusLooseUnits,
+          paidUnits: line.paidUnits,
+          bonusUnits: line.bonusUnits,
           totalUnitsAdded: line.totalUnits,
           unitsPerBox: line.unitsPerBox,
           costPrice: line.costPrice,
@@ -277,6 +298,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         if (!batchTarget.created) {
           batch.update(doc(db, 'medicines', batchTarget.medicineId), {
             stock: increment(line.totalUnits),
+            bonusStockUnits: increment(line.bonusUnits),
             costPrice: line.costPrice,
             updatedAt: timestamp,
           });
@@ -310,6 +332,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       supplierId: purchase.supplierId || medicine.supplierId || '',
       boxesPurchased: String(purchase.boxesPurchased ?? purchase.boxes ?? 0),
       looseUnitsPurchased: String(purchase.looseUnitsPurchased ?? purchase.looseUnits ?? 0),
+      bonusBoxes: String(purchase.bonusBoxes ?? 0),
+      bonusLooseUnits: String(purchase.bonusLooseUnits ?? 0),
       unitsPerBox: String(unitsPerBox),
       costPrice: String(purchase.costPrice ?? purchase.costPerBox ?? medicine.costPrice ?? ''),
       retailPrice: String(purchase.retailPrice ?? medicine.retailPrice ?? medicine.price ?? ''),
@@ -394,6 +418,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                 <span className="bg-green-100 text-green-800 font-semibold px-2 py-0.5 rounded-full">
                   +{p.totalUnitsAdded} units
                 </span>
+                <span className="text-gray-500">Paid {p.paidUnits ?? p.totalUnitsAdded} · Bonus {p.bonusUnits || 0}</span>
                 <span className="text-gray-500">Cost/box: {formatCurrency(p.costPrice)}</span>
                 {p.expiryDate && <span className="text-gray-400">Exp: {format(new Date(p.expiryDate), 'MMM yyyy')}</span>}
               </div>
@@ -421,9 +446,9 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                 <th className="p-4 font-medium">Medicine</th>
                 <th className="p-4 font-medium">Supplier</th>
                 <th className="p-4 font-medium">Batch No</th>
-                <th className="p-4 font-medium">Qty Added</th>
+                <th className="p-4 font-medium">Paid + Bonus</th>
                 <th className="p-4 font-medium">Cost/Box</th>
-                <th className="p-4 font-medium">Total Cost</th>
+                <th className="p-4 font-medium">Supplier Payable</th>
                 {canEdit && <th className="p-4 font-medium text-right">Actions</th>}
               </tr>
             </thead>
@@ -439,6 +464,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                   <td className="p-4 text-gray-600 font-mono text-sm">{p.batchNo || '-'}</td>
                   <td className="p-4">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">+{p.totalUnitsAdded} units</span>
+                    <p className="text-xs text-gray-500 mt-0.5">Paid {p.paidUnits ?? p.totalUnitsAdded} · Bonus {p.bonusUnits || 0}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {p.boxesPurchased > 0 ? `${p.boxesPurchased} box` : ''}
                       {p.looseUnitsPurchased > 0 ? ` ${p.looseUnitsPurchased} loose` : ''}
@@ -500,7 +526,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                       <div key={line.id} className="px-3 py-2.5 flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-gray-900 truncate">{line.medicineName}</p>
-                          <p className="text-xs text-gray-500">Batch {line.batchNo || 'N/A'} - {line.totalUnits} units - {formatCurrency(line.totalCost)}</p>
+                          <p className="text-xs text-gray-500">Batch {line.batchNo || 'N/A'} · Paid {line.paidUnits} + Bonus {line.bonusUnits} = {line.totalUnits} units · Payable {formatCurrency(line.totalCost)}</p>
                         </div>
                         <button type="button" onClick={() => setInvoiceLines(previous => previous.filter(item => item.id !== line.id))}
                           className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg" title="Remove from purchase bill">
@@ -585,7 +611,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               {/* Quantity */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Boxes <span className="text-red-500">*</span></label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Paid Boxes</label>
                   <input type="number" min="0" value={formData.boxesPurchased}
                     onChange={e => setFormData({ ...formData, boxesPurchased: e.target.value })}
                     placeholder="e.g. 10"
@@ -594,12 +620,33 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                 </div>
                 {parseInt(formData.unitsPerBox || '1') > 1 && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Loose Units</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Paid Loose Units</label>
                     <input type="number" min="0" value={formData.looseUnitsPurchased}
                       onChange={e => setFormData({ ...formData, looseUnitsPurchased: e.target.value })}
                       className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
                   </div>
                 )}
+              </div>
+
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700 mb-3">Free bonus quantity</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bonus Boxes</label>
+                    <input type="number" min="0" value={formData.bonusBoxes}
+                      onChange={e => setFormData({ ...formData, bonusBoxes: e.target.value })}
+                      className="w-full p-2.5 border border-emerald-200 rounded-lg focus:ring-emerald-500 focus:border-emerald-500" />
+                  </div>
+                  {parseInt(formData.unitsPerBox || '1') > 1 && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Bonus Loose Units</label>
+                      <input type="number" min="0" value={formData.bonusLooseUnits}
+                        onChange={e => setFormData({ ...formData, bonusLooseUnits: e.target.value })}
+                        className="w-full p-2.5 border border-emerald-200 rounded-lg focus:ring-emerald-500 focus:border-emerald-500" />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-emerald-700 mt-2">Bonus stock is added at zero cost and does not increase the supplier payable.</p>
               </div>
 
               {/* Prices */}
@@ -664,12 +711,13 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               </div>
 
               {/* Preview */}
-              {selectedMedicine && formData.boxesPurchased && (
+              {selectedMedicine && (Number(formData.boxesPurchased) > 0 || Number(formData.looseUnitsPurchased) > 0 || Number(formData.bonusBoxes) > 0 || Number(formData.bonusLooseUnits) > 0) && (
                 <div className={`${purchaseBatchMode === 'new' ? 'bg-emerald-50 border-emerald-200' : 'bg-blue-50 border-blue-200'} border rounded-lg p-3`}>
                   <p className="text-sm font-medium text-green-800">Preview:</p>
                   <p className="text-sm text-green-700 mt-1">
-                    {editingPurchase ? 'Corrected purchase quantity' : purchaseBatchMode === 'new' ? 'Separate new batch stock' : 'Stock added to selected batch'}: <strong>{(parseInt(formData.boxesPurchased || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0')} units</strong>
+                    {editingPurchase ? 'Corrected purchase quantity' : purchaseBatchMode === 'new' ? 'Separate new batch stock' : 'Stock added to selected batch'}: <strong>{((parseInt(formData.boxesPurchased || '0') + parseInt(formData.bonusBoxes || '0')) * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.looseUnitsPurchased || '0') + parseInt(formData.bonusLooseUnits || '0')} units</strong>
                   </p>
+                  <p className="text-xs mt-1 text-emerald-700">Bonus: {(parseInt(formData.bonusBoxes || '0') * (parseInt(formData.unitsPerBox || '1') || 1)) + parseInt(formData.bonusLooseUnits || '0')} units · Payable excludes bonus stock.</p>
                   {!editingPurchase && <p className="text-xs mt-1 text-gray-600">{purchaseBatchMode === 'new' ? 'Existing batch prices will remain unchanged.' : 'The cost price will be saved on this exact batch; pack size and retail price stay unchanged.'}</p>}
                 </div>
               )}

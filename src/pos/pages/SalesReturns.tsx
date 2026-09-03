@@ -13,6 +13,7 @@ import { calculateReturnRefund, calculateReturnStockUnits } from '../lib/saleRet
 import { clinicDateKey, recordClinicDateTimeLabel } from '../../lib/clinicDate';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { getTrustedClockReading } from '../../lib/trustedClock';
+import { allocateReceiptReturn } from '../lib/bonusInventory';
 
 // ── Print via hidden iframe so main page layout is unaffected ────────────────
 function printSlip(slipHtml: string) {
@@ -207,7 +208,13 @@ export function SalesReturns() {
       const returnNo = await getNextPosSaleReturnNo();
       const returnClock = await getTrustedClockReading();
       const returnTimestamp = returnClock.nowIso;
-      const itemsToReturn = returnItems.filter(i => i.returnQty > 0).map(i => ({
+      const itemsToReturn = returnItems.filter(i => i.returnQty > 0).map(i => {
+        const unitsPerBox = Math.max(1, Number(i.unitsPerBox || 1));
+        const returnedUnits = calculateReturnStockUnits(i.returnQty, i.sellType === 'box' ? 'box' : 'unit', unitsPerBox);
+        const previouslyReturnedUnits = calculateReturnStockUnits(i.alreadyReturned || 0, i.sellType === 'box' ? 'box' : 'unit', unitsPerBox);
+        const originallySoldUnits = calculateReturnStockUnits(i.quantity, i.sellType === 'box' ? 'box' : 'unit', unitsPerBox);
+        const allocation = allocateReceiptReturn(returnedUnits, previouslyReturnedUnits, i.paidUnitsSold ?? originallySoldUnits, i.bonusUnitsSold || 0);
+        return {
         cartItemId: i.cartItemId,
         medicineId: i.medicineId,
         name: i.name,
@@ -217,8 +224,11 @@ export function SalesReturns() {
         unitsPerBox: i.unitsPerBox || 1,
         batchNo: i.batchNo || '',
         costPrice: Number(i.costPrice || 0),
+        ...allocation,
+        costTotal: allocation.paidUnitsRestored * (Number(i.costPrice || 0) / unitsPerBox),
         refundAmount: (i.total / i.quantity) * orderDiscountRatio * i.returnQty,
-      }));
+        };
+      });
 
       const returnDoc = {
         returnNo,
@@ -251,11 +261,14 @@ export function SalesReturns() {
           medicineId: item.medicineId,
           medicineName: item.name,
           quantity: unitsToRestore,
+          paidUnits: item.paidUnitsRestored,
+          bonusUnits: item.bonusUnitsRestored,
           createdAt: returnTimestamp,
           processedBy: auth.currentUser?.uid || '',
         });
         batch.update(doc(db, 'medicines', item.medicineId), {
           stock: increment(unitsToRestore),
+          ...(item.bonusUnitsRestored ? { bonusStockUnits: increment(item.bonusUnitsRestored) } : {}),
         });
       }
       await waitForOnlineWrite(batch.commit());
@@ -285,7 +298,15 @@ export function SalesReturns() {
         originalSaleId: '',
         originalReceiptNo: '',
         withoutReceipt: true,
-        items: manualItems,
+        items: manualItems.map(item => {
+          const units = calculateReturnStockUnits(item.returnQty, item.sellType, item.unitsPerBox);
+          return {
+            ...item,
+            paidUnitsRestored: units,
+            bonusUnitsRestored: 0,
+            costTotal: units * (Number(item.costPrice || 0) / Math.max(1, Number(item.unitsPerBox || 1))),
+          };
+        }),
         totalRefund,
         reason: manualReason.trim() || 'Return processed without original receipt',
         date: returnTimestamp,
@@ -310,6 +331,8 @@ export function SalesReturns() {
           medicineName: item.name,
           batchNo: item.batchNo || '',
           quantity: unitsToRestore,
+          paidUnits: unitsToRestore,
+          bonusUnits: 0,
           createdAt: returnTimestamp,
           processedBy: auth.currentUser?.uid || '',
         });

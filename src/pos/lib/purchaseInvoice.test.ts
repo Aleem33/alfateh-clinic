@@ -18,6 +18,16 @@ describe('multi-medicine purchase invoices', () => {
     });
   });
 
+  it('adds bonus stock without adding it to supplier payable', () => {
+    expect(calculatePurchaseQuantities(10, 0, 10, 100, 2, 0)).toMatchObject({
+      paidUnits: 100,
+      bonusUnits: 20,
+      totalUnits: 120,
+      totalCost: 1000,
+      bonusBoxes: 2,
+    });
+  });
+
   it('prevents the same existing batch from being added twice', () => {
     const line: PurchaseInvoiceLineIdentity = {
       medicineId: 'batch-a', medicineName: 'Example', batchMode: 'existing', batchNo: 'A-1',

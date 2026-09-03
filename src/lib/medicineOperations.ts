@@ -94,6 +94,7 @@ type MedicineBatchInput = {
   batchNo: string;
   expiryDate?: string;
   stock: number;
+  bonusStockUnits?: number;
   unitsPerBox: number;
   costPrice: number;
   retailPrice?: number;
@@ -143,6 +144,7 @@ export async function ensureMedicinePurchaseBatch(
     batchNo: candidate.batchNo,
     expiryDate: batchInput.expiryDate || '',
     stock: batchInput.stock,
+    bonusStockUnits: Math.max(0, Number(batchInput.bonusStockUnits || 0)),
     unitsPerBox: batchInput.unitsPerBox,
     costPrice: batchInput.costPrice,
     retailPrice: batchInput.retailPrice ?? Number(sourceMedicine.retailPrice || sourceMedicine.price || 0),

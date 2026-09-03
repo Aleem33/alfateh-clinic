@@ -47,6 +47,12 @@ describe('offline sales outbox', () => {
     ]);
   });
 
+  it('persists bonus bucket deductions for idempotent offline replay', () => {
+    expect(aggregateSaleStockAdjustments([
+      { medicineId: 'batch-a', quantity: 2, sellType: 'unit', unitsPerBox: 10, bonusUnitsSold: 2 },
+    ])).toEqual([{ medicineId: 'batch-a', units: 2, bonusUnits: 2 }]);
+  });
+
   it('persists a complete pending sale across fresh IndexedDB connections', async () => {
     const record = sampleSale();
     await queuePendingPosSale(record);

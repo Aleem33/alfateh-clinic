@@ -22,6 +22,12 @@ describe('shared sales financial calculations', () => {
     })).toBe(500);
   });
 
+  it('uses frozen paid-only COGS when a sale includes zero-cost bonus units', () => {
+    expect(calculateSaleCost({
+      items: [{ quantity: 12, sellType: 'unit', unitsPerBox: 10, costPrice: 100, costTotal: 100 }],
+    })).toBe(100);
+  });
+
   it('subtracts refunds and reverses returned cost exactly once', () => {
     const summary = summarizeSalesFinancials(
       [{

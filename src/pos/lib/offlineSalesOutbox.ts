@@ -2,7 +2,7 @@ export type PendingPosSale = {
   saleId: string;
   saleData: Record<string, any>;
   movements: Array<{ id: string; data: Record<string, any> }>;
-  stockAdjustments: Array<{ medicineId: string; units: number }>;
+  stockAdjustments: Array<{ medicineId: string; units: number; bonusUnits?: number }>;
   customerAdjustment?: { customerId: string; pendingAmount: number };
   createdAt: string;
 };
@@ -62,15 +62,22 @@ export async function countPendingPosSales() {
   return useStore<number>('readonly', store => store.count());
 }
 
-export function aggregateSaleStockAdjustments(items: Array<{ medicineId?: string; quantity?: number; sellType?: string; unitsPerBox?: number }>) {
-  const totals = new Map<string, number>();
+export function aggregateSaleStockAdjustments(items: Array<{ medicineId?: string; quantity?: number; sellType?: string; unitsPerBox?: number; bonusUnitsSold?: number }>) {
+  const totals = new Map<string, { units: number; bonusUnits: number }>();
   for (const item of items) {
     if (!item.medicineId) continue;
     const quantity = Math.max(0, Number(item.quantity) || 0);
     const unitsPerBox = item.sellType === 'box' ? Math.max(1, Number(item.unitsPerBox) || 1) : 1;
-    totals.set(item.medicineId, (totals.get(item.medicineId) || 0) + quantity * unitsPerBox);
+    const current = totals.get(item.medicineId) || { units: 0, bonusUnits: 0 };
+    current.units += quantity * unitsPerBox;
+    current.bonusUnits += Math.max(0, Number(item.bonusUnitsSold) || 0);
+    totals.set(item.medicineId, current);
   }
-  return [...totals].map(([medicineId, units]) => ({ medicineId, units }));
+  return [...totals].map(([medicineId, value]) => ({
+    medicineId,
+    units: value.units,
+    ...(value.bonusUnits > 0 ? { bonusUnits: value.bonusUnits } : {}),
+  }));
 }
 
 export type PendingPosSaleReplayAdapter = {

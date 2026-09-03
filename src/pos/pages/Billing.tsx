@@ -17,6 +17,7 @@ import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountTyp
 import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
 import { cartItemUnits, findCartStockProblem } from '../lib/billingCart';
 import { aggregateSaleStockAdjustments, queuePendingPosSale, removePendingPosSale } from '../lib/offlineSalesOutbox';
+import { allocateCartBonusCost } from '../lib/bonusInventory';
 import { isCloudOnline } from '../../lib/lanCoordinator';
 import { clinicDateKey, clinicTimeLabel, recordClinicDateTimeLabel } from '../../lib/clinicDate';
 import { getTrustedClockReading, trustedNow, trustedNowISO } from '../../lib/trustedClock';
@@ -408,9 +409,10 @@ export function Billing() {
       const receiptNo = await getNextPosReceiptNo();
       const saleClock = await getTrustedClockReading();
       const saleTimestamp = saleClock.nowIso;
+      const saleItems = allocateCartBonusCost(cart, medicines);
       const saleData: any = {
         receiptNo,
-        items: cart, grossSubtotal, totalItemDiscounts,
+        items: saleItems, grossSubtotal, totalItemDiscounts,
         subtotal: subtotalAfterItemDisc,
         orderDiscount: orderDiscountAmount,
         orderDiscountType,
@@ -431,10 +433,10 @@ export function Billing() {
       }
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'sales'));
-      const stockAdjustments = aggregateSaleStockAdjustments(cart);
+      const stockAdjustments = aggregateSaleStockAdjustments(saleItems);
       const movements: Array<{ id: string; data: Record<string, any> }> = [];
       batch.set(docRef, saleData);
-      for (const item of cart) {
+      for (const item of saleItems) {
         const unitsToDeduct = item.quantity * (item.sellType === 'box' ? item.unitsPerBox : 1);
         const movementRef = doc(collection(db, 'stockMovements'));
         const movementData = {
@@ -445,6 +447,8 @@ export function Billing() {
           medicineName: item.name,
           batchNo: item.batchNo || '',
           quantity: -unitsToDeduct,
+          paidUnits: -Number(item.paidUnitsSold || 0),
+          bonusUnits: -Number(item.bonusUnitsSold || 0),
           deviceReceiptNo: receiptNo,
           createdAt: saleTimestamp,
           cashierId: auth.currentUser?.uid || '',
@@ -455,6 +459,7 @@ export function Billing() {
       stockAdjustments.forEach(adjustment => {
         batch.update(doc(db, 'medicines', adjustment.medicineId), {
           stock: increment(-adjustment.units),
+          ...(adjustment.bonusUnits ? { bonusStockUnits: increment(-adjustment.bonusUnits) } : {}),
         });
       });
       if (selectedCustomer && pendingAmount > 0) {

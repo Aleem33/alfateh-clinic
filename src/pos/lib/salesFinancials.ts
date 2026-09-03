@@ -5,6 +5,7 @@ type SaleItem = {
   sellType?: unknown;
   unitsPerBox?: unknown;
   costPrice?: unknown;
+  costTotal?: unknown;
 };
 
 export type FinancialSale = {
@@ -20,6 +21,7 @@ export type FinancialReturn = {
     sellType?: 'box' | 'unit';
     unitsPerBox?: number;
     costPrice?: number;
+    costTotal?: number;
   }>;
 };
 
@@ -38,6 +40,9 @@ export function sumFinancialValues<T>(records: T[], getValue: (record: T) => unk
 
 export function calculateSaleCost(sale: FinancialSale): number {
   return (sale.items || []).reduce((sum, item) => {
+    if (item.costTotal != null && Number.isFinite(Number(item.costTotal))) {
+      return sum + nonNegativeNumber(item.costTotal);
+    }
     const quantity = nonNegativeNumber(item.quantity);
     const unitsPerBox = Math.max(1, nonNegativeNumber(item.unitsPerBox) || 1);
     const costPerBox = nonNegativeNumber(item.costPrice);

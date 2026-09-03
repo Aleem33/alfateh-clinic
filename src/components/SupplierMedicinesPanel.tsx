@@ -16,6 +16,7 @@ import {
 } from '../lib/medicineOperations';
 import { clinicDateKey } from '../lib/clinicDate';
 import { getTrustedClockReading, trustedNow } from '../lib/trustedClock';
+import { calculatePurchaseQuantities } from '../pos/lib/purchaseInvoice';
 
 type Supplier = {
   id: string;
@@ -37,6 +38,8 @@ type MedicineForm = {
 type PurchaseForm = {
   boxesPurchased: string;
   looseUnitsPurchased: string;
+  bonusBoxes: string;
+  bonusLooseUnits: string;
   unitsPerBox: string;
   costPrice: string;
   retailPrice: string;
@@ -74,6 +77,8 @@ const makePurchaseForm = (medicine: any): PurchaseForm => {
   return {
     boxesPurchased: '',
     looseUnitsPurchased: '0',
+    bonusBoxes: '0',
+    bonusLooseUnits: '0',
     unitsPerBox: String(unitsPerBox),
     costPrice: String(medicine.costPrice || ''),
     retailPrice: String(retailPrice || ''),
@@ -222,10 +227,15 @@ export function SupplierMedicinesPanel({
     event.preventDefault();
     if (!purchasingMedicine || !purchaseForm) return;
 
-    const unitsPerBox = Math.max(1, Math.floor(toNumber(purchaseForm.unitsPerBox, 1)));
-    const boxesPurchased = Math.max(0, Math.floor(toNumber(purchaseForm.boxesPurchased)));
-    const looseUnitsPurchased = Math.max(0, Math.floor(toNumber(purchaseForm.looseUnitsPurchased)));
-    const totalUnitsAdded = boxesPurchased * unitsPerBox + looseUnitsPurchased;
+    const quantities = calculatePurchaseQuantities(
+      purchaseForm.boxesPurchased,
+      purchaseForm.looseUnitsPurchased,
+      purchaseForm.unitsPerBox,
+      purchaseForm.costPrice,
+      purchaseForm.bonusBoxes,
+      purchaseForm.bonusLooseUnits,
+    );
+    const { unitsPerBox, boxesPurchased, looseUnitsPurchased, paidUnits, bonusUnits, totalUnits: totalUnitsAdded, costPricePerUnit, totalCost } = quantities;
     if (totalUnitsAdded <= 0) {
       setError('Enter at least one box or loose unit.');
       return;
@@ -236,8 +246,6 @@ export function SupplierMedicinesPanel({
     const unitPrice = purchaseForm.unitPrice.trim()
       ? Math.max(0, toNumber(purchaseForm.unitPrice))
       : Number((retailPrice / unitsPerBox).toFixed(2));
-    const costPricePerUnit = costPrice / unitsPerBox;
-    const totalCost = totalUnitsAdded * costPricePerUnit;
     const timestamp = (await getTrustedClockReading()).nowIso;
     const batchNo = purchaseBatchMode === 'new'
       ? purchaseForm.batchNo.trim()
@@ -271,6 +279,7 @@ export function SupplierMedicinesPanel({
         batchNo,
         expiryDate: purchaseForm.expiryDate || purchasingMedicine.expiryDate || '',
         stock: totalUnitsAdded,
+        bonusStockUnits: bonusUnits,
         unitsPerBox,
         costPrice,
         retailPrice,
@@ -289,6 +298,12 @@ export function SupplierMedicinesPanel({
         boxesPurchased,
         looseUnits: looseUnitsPurchased,
         looseUnitsPurchased,
+        paidBoxesPurchased: boxesPurchased,
+        paidLooseUnitsPurchased: looseUnitsPurchased,
+        bonusBoxes: quantities.bonusBoxes,
+        bonusLooseUnits: quantities.bonusLooseUnits,
+        paidUnits,
+        bonusUnits,
         totalUnitsAdded,
         unitsAdded: totalUnitsAdded,
         unitsPerBox,
@@ -309,6 +324,7 @@ export function SupplierMedicinesPanel({
       if (!batchTarget.created) {
         batch.update(doc(db, 'medicines', batchTarget.medicineId), {
           stock: increment(totalUnitsAdded),
+          bonusStockUnits: increment(bonusUnits),
           updatedAt: timestamp,
         });
       }
@@ -614,7 +630,7 @@ export function SupplierMedicinesPanel({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Boxes Purchased *</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Paid Boxes</label>
                   <input
                     autoFocus
                     type="number"
@@ -626,13 +642,33 @@ export function SupplierMedicinesPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Loose Units</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Paid Loose Units</label>
                   <input
                     type="number"
                     min="0"
                     value={purchaseForm.looseUnitsPurchased}
                     onChange={event => setPurchaseForm(current => current ? ({ ...current, looseUnitsPurchased: event.target.value }) : current)}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-emerald-700 mb-1">Bonus Boxes</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={purchaseForm.bonusBoxes}
+                    onChange={event => setPurchaseForm(current => current ? ({ ...current, bonusBoxes: event.target.value }) : current)}
+                    className="w-full border border-emerald-200 bg-emerald-50 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-emerald-700 mb-1">Bonus Loose Units</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={purchaseForm.bonusLooseUnits}
+                    onChange={event => setPurchaseForm(current => current ? ({ ...current, bonusLooseUnits: event.target.value }) : current)}
+                    className="w-full border border-emerald-200 bg-emerald-50 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
                 <div>
@@ -728,10 +764,11 @@ export function SupplierMedicinesPanel({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm">
                 <div>
-                  <p className="text-xs text-emerald-600">Units to add</p>
+                  <p className="text-xs text-emerald-600">Total units to add</p>
                   <p className="font-semibold text-emerald-900">
-                    {Math.max(0, Math.floor(toNumber(purchaseForm.boxesPurchased))) * Math.max(1, Math.floor(toNumber(purchaseForm.unitsPerBox, 1))) + Math.max(0, Math.floor(toNumber(purchaseForm.looseUnitsPurchased)))}
+                    {(Math.max(0, Math.floor(toNumber(purchaseForm.boxesPurchased))) + Math.max(0, Math.floor(toNumber(purchaseForm.bonusBoxes)))) * Math.max(1, Math.floor(toNumber(purchaseForm.unitsPerBox, 1))) + Math.max(0, Math.floor(toNumber(purchaseForm.looseUnitsPurchased))) + Math.max(0, Math.floor(toNumber(purchaseForm.bonusLooseUnits)))}
                   </p>
+                  <p className="text-[11px] text-emerald-700">Bonus: {Math.max(0, Math.floor(toNumber(purchaseForm.bonusBoxes))) * Math.max(1, Math.floor(toNumber(purchaseForm.unitsPerBox, 1))) + Math.max(0, Math.floor(toNumber(purchaseForm.bonusLooseUnits)))} units</p>
                 </div>
                 <div>
                   <p className="text-xs text-emerald-600">Current stock</p>
@@ -745,6 +782,7 @@ export function SupplierMedicinesPanel({
                       (Math.max(0, toNumber(purchaseForm.costPrice)) / Math.max(1, Math.floor(toNumber(purchaseForm.unitsPerBox, 1))))
                     ).toFixed(2)}
                   </p>
+                  <p className="text-[11px] text-emerald-700">Bonus is free</p>
                 </div>
               </div>
 

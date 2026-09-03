@@ -17,10 +17,14 @@ export type ReturnFinancialItem = {
   sellType?: ReturnSellType;
   unitsPerBox?: number;
   costPrice?: number;
+  costTotal?: number;
 };
 
 export function calculateReturnedCost(items: ReturnFinancialItem[] = []) {
   return items.reduce((sum, item) => {
+    if (item.costTotal != null && Number.isFinite(Number(item.costTotal))) {
+      return sum + Math.max(0, Number(item.costTotal));
+    }
     const quantity = Math.max(0, Number(item.returnQty) || 0);
     const unitsPerBox = Math.max(1, Number(item.unitsPerBox) || 1);
     const costPerBox = Math.max(0, Number(item.costPrice) || 0);

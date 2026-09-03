@@ -111,7 +111,9 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
         costPrice:   toNumber(formData.costPrice),
         retailPrice: toNumber(formData.retailPrice),
         unitPrice:   toNumber(formData.unitPrice),
-        stock: totalStock, expiryDate: formData.expiryDate || '', batchNo: formData.batchNo || '',
+        stock: totalStock,
+        bonusStockUnits: editingMedicine ? Math.min(totalStock, Math.max(0, Number(editingMedicine.bonusStockUnits || 0))) : 0,
+        expiryDate: formData.expiryDate || '', batchNo: formData.batchNo || '',
         supplierId: formData.supplierId || '',
         supplierName,
       };

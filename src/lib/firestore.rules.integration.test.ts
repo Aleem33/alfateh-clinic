@@ -37,6 +37,7 @@ integrationDescribe('Firestore offline operational rules', () => {
         stock: 100,
         retailPrice: 500,
         costPrice: 300,
+        bonusStockUnits: 10,
         archived: false,
       });
       await setDoc(doc(database, 'customers', 'customer-1'), {
@@ -59,9 +60,15 @@ integrationDescribe('Firestore offline operational rules', () => {
       medicineId: 'batch-a',
       quantity: -10,
     });
-    batch.update(doc(database, 'medicines', 'batch-a'), { stock: 90 });
+    batch.update(doc(database, 'medicines', 'batch-a'), { stock: 90, bonusStockUnits: 5 });
     batch.update(doc(database, 'customers', 'customer-1'), { creditBalance: 100 });
     await assertSucceeds(batch.commit());
+  });
+
+  it('blocks a cashier from making the bonus bucket negative or larger than stock', async () => {
+    const database = environment.authenticatedContext('cashier-1').firestore();
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { bonusStockUnits: -1 }));
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { stock: 5, bonusStockUnits: 6 }));
   });
 
   it('allows a cashier return batch to restore stock', async () => {

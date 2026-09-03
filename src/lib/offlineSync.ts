@@ -188,6 +188,7 @@ async function replayPendingPosSales() {
       record.stockAdjustments.forEach(adjustment => {
         batch.update(doc(db, 'medicines', adjustment.medicineId), {
           stock: increment(-adjustment.units),
+          ...(adjustment.bonusUnits ? { bonusStockUnits: increment(-adjustment.bonusUnits) } : {}),
         });
       });
       if (record.customerAdjustment && record.customerAdjustment.pendingAmount > 0) {

@@ -16,22 +16,34 @@ export function calculatePurchaseQuantities(
   looseUnits: unknown,
   unitsPerBox: unknown,
   costPricePerBox: unknown,
+  bonusBoxes: unknown = 0,
+  bonusLooseUnits: unknown = 0,
 ) {
   const boxCount = Math.max(0, Math.floor(Number(boxes) || 0));
   const looseCount = Math.max(0, Math.floor(Number(looseUnits) || 0));
+  const bonusBoxCount = Math.max(0, Math.floor(Number(bonusBoxes) || 0));
+  const bonusLooseCount = Math.max(0, Math.floor(Number(bonusLooseUnits) || 0));
   const packSize = Math.max(1, Math.floor(Number(unitsPerBox) || 1));
   const costPerBox = Math.max(0, Number(costPricePerBox) || 0);
-  const totalUnits = (boxCount * packSize) + looseCount;
+  const paidUnits = (boxCount * packSize) + looseCount;
+  const bonusUnits = (bonusBoxCount * packSize) + bonusLooseCount;
+  const totalUnits = paidUnits + bonusUnits;
   const costPricePerUnit = costPerBox / packSize;
 
   return {
     boxesPurchased: boxCount,
     looseUnitsPurchased: looseCount,
+    paidBoxesPurchased: boxCount,
+    paidLooseUnitsPurchased: looseCount,
+    bonusBoxes: bonusBoxCount,
+    bonusLooseUnits: bonusLooseCount,
     unitsPerBox: packSize,
+    paidUnits,
+    bonusUnits,
     totalUnits,
     costPrice: costPerBox,
     costPricePerUnit,
-    totalCost: totalUnits * costPricePerUnit,
+    totalCost: paidUnits * costPricePerUnit,
   };
 }
 

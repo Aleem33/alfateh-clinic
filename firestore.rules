@@ -105,8 +105,11 @@ service cloud.firestore {
         ])
       ) || (
         isCashier() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock']) &&
-        request.resource.data.stock is number
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'bonusStockUnits']) &&
+        request.resource.data.stock is number &&
+        request.resource.data.get('bonusStockUnits', 0) is number &&
+        request.resource.data.get('bonusStockUnits', 0) >= 0 &&
+        request.resource.data.get('bonusStockUnits', 0) <= request.resource.data.stock
       );
       allow delete: if isAdmin();
     }

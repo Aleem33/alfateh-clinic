@@ -9,6 +9,7 @@ import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { netSalesByDate } from '../lib/salesFinancials';
+import { getBonusAwareStockValue } from '../lib/bonusInventory';
 
 export function Dashboard() {
   const todayStr = useClinicTodayKey();
@@ -43,9 +44,7 @@ export function Dashboard() {
           expiringCount++;
           expiring.push(data);
         }
-        const unitsPerBox = data.unitsPerBox || 1;
-        const boxes = stock / unitsPerBox;
-        stockValue += (data.costPrice || 0) * boxes;
+        stockValue += getBonusAwareStockValue(data);
       });
 
       setStats(prev => ({ ...prev, lowStock: lowStockCount, expiringSoon: expiringCount, totalMedicines: inStockCount, totalStockValue: stockValue }));

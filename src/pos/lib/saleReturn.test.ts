@@ -21,6 +21,12 @@ describe('receipt-less medicine returns', () => {
     ])).toBe(230);
   });
 
+  it('uses frozen paid-only return cost for bonus-aware receipt returns', () => {
+    expect(calculateReturnedCost([
+      { returnQty: 3, sellType: 'unit', unitsPerBox: 10, costPrice: 100, costTotal: 10 },
+    ])).toBe(10);
+  });
+
   it('subtracts refunds from revenue and reverses returned inventory cost from profit', () => {
     expect(calculateNetSalesProfit(1000, 600, [
       { totalRefund: 200, items: [{ returnQty: 1, sellType: 'box', unitsPerBox: 10, costPrice: 120 }] },
