@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { Plus, Edit2, Trash2, Search, X, Phone, MapPin, ChevronDown, Package } from 'lucide-react';
 import { format } from 'date-fns';
 import { SupplierMedicinesPanel } from '../../components/SupplierMedicinesPanel';
 import { trustedNowISO } from '../../lib/trustedClock';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export function Suppliers() {
   const [suppliers, setSuppliers]   = useState<any[]>([]);
@@ -17,9 +18,11 @@ export function Suppliers() {
   const [formData, setFormData] = useState({ name: '', contact: '', address: '' });
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
-      setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'suppliers'));
+    const unsub = subscribeToLocalCollection(
+      'suppliers',
+      setSuppliers,
+      err => handleFirestoreError(err, OperationType.GET, 'suppliers'),
+    );
     return () => unsub();
   }, []);
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, increment, query, orderBy, getDocs, where, writeBatch
+  collection, addDoc, updateDoc, deleteDoc,
+  doc, increment, query, getDocs, where, writeBatch
 } from '@/lib/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -16,6 +16,7 @@ import {
 import { subscribeToSales } from '../../lib/salesStore';
 import { trustedNowISO } from '../../lib/trustedClock';
 import { recordClinicDateTimeLabel } from '../../lib/clinicDate';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export function Customers() {
   const [customers, setCustomers]       = useState<any[]>([]);
@@ -37,14 +38,18 @@ export function Customers() {
   const [formData, setFormData] = useState({ name: '', phone: '', creditBalance: '0' });
 
   useEffect(() => {
-    const unsub1 = onSnapshot(collection(db, 'customers'), snap => {
-      setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'customers'));
+    const unsub1 = subscribeToLocalCollection(
+      'customers',
+      setCustomers,
+      err => handleFirestoreError(err, OperationType.GET, 'customers'),
+    );
     const unsub2 = subscribeToSales(setSales, err => handleFirestoreError(err, OperationType.GET, 'sales'));
-    const unsub3 = onSnapshot(
-      query(collection(db, 'customerPayments'), orderBy('date', 'desc')),
-      snap => setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-      err => handleFirestoreError(err, OperationType.GET, 'customerPayments')
+    const unsub3 = subscribeToLocalCollection(
+      'customerPayments',
+      records => setPayments([...records].sort((a: any, b: any) =>
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      )),
+      err => handleFirestoreError(err, OperationType.GET, 'customerPayments'),
     );
     return () => { unsub1(); unsub2(); unsub3(); };
   }, []);

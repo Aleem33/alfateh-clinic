@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, increment, writeBatch } from '@/lib/firestore';
+import { collection, doc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosPurchaseReturnNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -9,6 +9,7 @@ import { format } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { getTrustedClockReading } from '../../lib/trustedClock';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 // ── Print via hidden iframe ───────────────────────────────────────────────────
 function printSlip(slipHtml: string) {
@@ -93,14 +94,14 @@ export function PurchaseReturns() {
       setMedicines(stockMap);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'medicines'));
 
-    const unsubPurchases = onSnapshot(collection(db, 'purchases'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const unsubPurchases = subscribeToLocalCollection('purchases', records => {
+      const list = [...records];
       list.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setPurchases(list);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'purchases'));
 
-    const unsubReturns = onSnapshot(collection(db, 'purchaseReturns'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const unsubReturns = subscribeToLocalCollection('purchaseReturns', records => {
+      const list = [...records];
       list.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setReturns(list);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'purchaseReturns'));

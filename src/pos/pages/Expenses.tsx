@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Plus, Edit2, Trash2, Search, Receipt, X } from 'lucide-react';
@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { isExpenseInScope } from '../../lib/expenseScope';
 import { clinicDateKey } from '../../lib/clinicDate';
 import { getTrustedClockReading, trustedNow } from '../../lib/trustedClock';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const CATEGORIES = ['Utility', 'Rent', 'Salary', 'Maintenance', 'Supplies', 'Other'];
 
@@ -32,8 +33,8 @@ export function Expenses() {
   });
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'expenses'), snap => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+    const unsub = subscribeToLocalCollection('expenses', records => {
+      const list = [...records];
       list.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setExpenses(list);
     }, err => handleFirestoreError(err, OperationType.GET, 'expenses'));
