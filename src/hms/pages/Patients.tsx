@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where, setDoc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, query, where, setDoc } from '@/lib/firestore';
 import { db, getNextMRN } from '../../firebase';
 import { formatDate, formatCurrency, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Search, Plus, Edit2, Trash2, User, Phone, ChevronDown, X, FileText, BedDouble, FlaskConical, Receipt, History } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'Unknown'];
 const GENDERS = ['Male', 'Female', 'Other'];
@@ -34,8 +35,8 @@ export function Patients() {
   const [histBills, setHistBills] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'patients'), snap =>
-      setPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => (b.createdAt || '') > (a.createdAt || '') ? 1 : -1))
+    const unsub = subscribeToLocalCollection('patients', records =>
+      setPatients(records.sort((a: any, b: any) => (b.createdAt || '') > (a.createdAt || '') ? 1 : -1))
     );
     return () => unsub();
   }, []);
@@ -47,17 +48,17 @@ export function Patients() {
       return;
     }
     const pid = viewPatient.id;
-    const u1 = onSnapshot(collection(db, 'consultations'), s =>
-      setHistConsults(s.docs.map(d => ({ id: d.id, ...d.data() })).filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
+    const u1 = subscribeToLocalCollection('consultations', records =>
+      setHistConsults(records.filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
-    const u2 = onSnapshot(collection(db, 'admissions'), s =>
-      setHistAdmissions(s.docs.map(d => ({ id: d.id, ...d.data() })).filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.admissionDate > a.admissionDate ? 1 : -1))
+    const u2 = subscribeToLocalCollection('admissions', records =>
+      setHistAdmissions(records.filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.admissionDate > a.admissionDate ? 1 : -1))
     );
-    const u3 = onSnapshot(collection(db, 'labOrders'), s =>
-      setHistLab(s.docs.map(d => ({ id: d.id, ...d.data() })).filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
+    const u3 = subscribeToLocalCollection('labOrders', records =>
+      setHistLab(records.filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
-    const u4 = onSnapshot(collection(db, 'bills'), s =>
-      setHistBills(s.docs.map(d => ({ id: d.id, ...d.data() })).filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
+    const u4 = subscribeToLocalCollection('bills', records =>
+      setHistBills(records.filter((c: any) => c.patientId === pid).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
     return () => { u1(); u2(); u3(); u4(); };
   }, [viewPatient]);

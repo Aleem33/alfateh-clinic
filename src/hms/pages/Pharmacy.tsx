@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, updateDoc, doc, increment, writeBatch } from '@/lib/firestore';
+import { collection, updateDoc, doc, increment, writeBatch } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, X, AlertTriangle, Edit2, FileText, CheckCircle, Clock } from 'lucide-react';
@@ -16,6 +16,7 @@ import { subscribeToMedicines } from '../../lib/medicineStore';
 import { createMedicineSafely, ensureMedicinePurchaseBatch, findMedicinePurchaseBatch, MedicineConflictError } from '../../lib/medicineOperations';
 import { trustedNow } from '../../lib/trustedClock';
 import { calculatePurchaseQuantities } from '../../pos/lib/purchaseInvoice';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -105,12 +106,12 @@ export function Pharmacy({
     const u1 = subscribeToMedicines(items =>
       setMedicines([...items].sort((a: any, b: any) => a.name > b.name ? 1 : -1))
     );
-    const u2 = onSnapshot(collection(db, 'suppliers'), snap => setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u3 = onSnapshot(collection(db, 'purchases'), snap =>
-      setPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.date > a.date ? 1 : -1))
+    const u2 = subscribeToLocalCollection('suppliers', setSuppliers);
+    const u3 = subscribeToLocalCollection('purchases', records =>
+      setPurchases(records.sort((a: any, b: any) => b.date > a.date ? 1 : -1))
     );
-    const u4 = onSnapshot(collection(db, 'pharmacyOrders'), snap =>
-      setPharmacyOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
+    const u4 = subscribeToLocalCollection('pharmacyOrders', records =>
+      setPharmacyOrders(records.sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
     return () => { u1(); u2(); u3(); u4(); };
   }, []);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, doc } from '@/lib/firestore';
 import { db, auth, getNextBillNo } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
@@ -8,6 +8,7 @@ import { differenceInDays } from 'date-fns';
 import { cn } from '../lib/utils';
 import { useAppDialog } from '../../components/AppDialog';
 import { trustedNow } from '../../lib/trustedClock';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const TREATMENT_TYPES = ['Medication', 'Procedure', 'Lab Test', 'Vitals', 'Nursing Note', 'Doctor Note'];
 
@@ -39,12 +40,12 @@ export function IPD() {
   const [treatForm, setTreatForm] = useState({ type: 'Medication', description: '', date: today(), time: '08:00' });
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'admissions'), snap => setAdmissions(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.admissionDate > a.admissionDate ? 1 : -1)));
-    const u2 = onSnapshot(collection(db, 'patients'), snap => setPatients(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u3 = onSnapshot(collection(db, 'staff'), snap => setStaff(snap.docs.filter(d => d.data().role === 'doctor').map(d => ({ id: d.id, ...d.data() }))));
-    const u4 = onSnapshot(collection(db, 'wards'), snap => setWards(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u5 = onSnapshot(collection(db, 'beds'), snap => setBeds(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u6 = onSnapshot(collection(db, 'bedTreatments'), snap => setTreatments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const u1 = subscribeToLocalCollection('admissions', records => setAdmissions(records.sort((a: any, b: any) => b.admissionDate > a.admissionDate ? 1 : -1)));
+    const u2 = subscribeToLocalCollection('patients', setPatients);
+    const u3 = subscribeToLocalCollection('staff', records => setStaff(records.filter(record => record.role === 'doctor')));
+    const u4 = subscribeToLocalCollection('wards', setWards);
+    const u5 = subscribeToLocalCollection('beds', setBeds);
+    const u6 = subscribeToLocalCollection('bedTreatments', setTreatments);
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, []);
 

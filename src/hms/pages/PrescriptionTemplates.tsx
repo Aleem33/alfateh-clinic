@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc } from '@/lib/firestore';
+import { deleteDoc, doc } from '@/lib/firestore';
 import { db, auth } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { Stethoscope, Plus, Trash2, Search, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export function PrescriptionTemplates() {
   const { confirm } = useAppDialog();
@@ -13,8 +14,8 @@ export function PrescriptionTemplates() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'prescriptionTemplates'), snap => {
-      setTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    const unsub = subscribeToLocalCollection('prescriptionTemplates', records => {
+      setTemplates(records
         .sort((a: any, b: any) => (b.createdAt || '') > (a.createdAt || '') ? 1 : -1));
     });
     return () => unsub();

@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, onSnapshot } from '@/lib/firestore';
-import { db } from '../../firebase';
 import { searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export interface SearchResult {
   id: string;
@@ -19,12 +18,8 @@ export function useGlobalSearch(query: string) {
   const [medicines, setMedicines] = useState<any[]>([]);
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'patients'), s =>
-      setPatients(s.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
-    const u2 = onSnapshot(collection(db, 'staff'), s =>
-      setStaff(s.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
+    const u1 = subscribeToLocalCollection('patients', setPatients);
+    const u2 = subscribeToLocalCollection('staff', setStaff);
     const u3 = subscribeToMedicines(setMedicines);
     return () => { u1(); u2(); u3(); };
   }, []);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, getDoc, addDoc } from '@/lib/firestore';
+import { collection, doc, getDoc, addDoc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';
@@ -8,6 +8,7 @@ import { transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { getPrescriptionEnglishLine, getPrescriptionUrduLine, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
 import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
 import { useAppDialog } from '../../components/AppDialog';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export function Prescriptions() {
   const { alert } = useAppDialog();
@@ -22,13 +23,12 @@ export function Prescriptions() {
     getDoc(doc(db, 'settings', 'hospital')).then(snap => {
       if (snap.exists()) setHospitalSettings(s => ({ ...s, ...snap.data() }));
     });
-    const unsubPharm = onSnapshot(collection(db, 'pharmacyOrders'), snap => {
-      setPharmacySentIds(new Set(snap.docs.map(d => d.data().consultationId).filter(Boolean)));
+    const unsubPharm = subscribeToLocalCollection('pharmacyOrders', records => {
+      setPharmacySentIds(new Set(records.map(record => record.consultationId).filter(Boolean)));
     });
-    const unsub = onSnapshot(collection(db, 'consultations'), snap => {
+    const unsub = subscribeToLocalCollection('consultations', records => {
       setConsultations(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
+        records
           .filter((c: any) => c.prescriptions?.length > 0)
           .sort((a: any, b: any) => (b.createdAt > a.createdAt ? 1 : -1))
       );

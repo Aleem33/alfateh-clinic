@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, orderBy, doc, updateDoc } from '@/lib/firestore';
+import { doc, updateDoc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { today, formatDate } from '../lib/utils';
 import { Monitor, ChevronRight, Clock, Users, CheckCircle } from 'lucide-react';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const STAT_COLORS: Record<string, { bg: string; text: string }> = {
   yellow: { bg: 'bg-yellow-100', text: 'text-yellow-600' },
@@ -16,11 +17,10 @@ export function TokenDisplay() {
 
   useEffect(() => {
     const todayStr = today();
-    const unsub = onSnapshot(
-      collection(db, 'appointments'),
-      snap => {
-        const appts = snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
+    const unsub = subscribeToLocalCollection(
+      'appointments',
+      records => {
+        const appts = records
           .filter((a: any) => a.date === todayStr)
           .sort((a: any, b: any) => (a.tokenNo || 999) - (b.tokenNo || 999));
         setAppointments(appts as any[]);

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc } from '@/lib/firestore';
 import { db, registerUser } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Search, Edit2, Trash2, X, UserCheck, UserX } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const DEPARTMENTS = ['Administration', 'General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Cardiology', 'Neurology', 'Emergency', 'Laboratory', 'Pharmacy', 'Radiology', 'Nursing', 'Anesthesia'];
 const ROLES: Record<string, string> = { admin: 'Admin', receptionist: 'Receptionist', doctor: 'Doctor', pharmacist: 'Pharmacist', lab_technician: 'Lab Technician', cashier: 'Cashier', nurse: 'Nurse' };
@@ -24,8 +25,8 @@ export function Staff() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'staff'), snap =>
-      setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => a.name > b.name ? 1 : -1))
+    const unsub = subscribeToLocalCollection('staff', records =>
+      setStaff(records.sort((a: any, b: any) => a.name > b.name ? 1 : -1))
     );
     return () => unsub();
   }, []);

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
 import { db, auth } from '../../firebase';
 import { formatCurrency, formatDate, today, nowISO } from '../lib/utils';
 import { Plus, Search, Edit2, Trash2, X, Receipt, TrendingDown, Filter } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { useAppDialog } from '../../components/AppDialog';
 import { isExpenseInScope } from '../../lib/expenseScope';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const CATEGORIES = [
   'Salaries & Wages', 'Medicine Purchase', 'Medical Equipment',
@@ -34,10 +35,9 @@ export function Expenses() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'expenses'), snap =>
+    const unsub = subscribeToLocalCollection('expenses', records =>
       setExpenses(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
+        records
           .sort((a: any, b: any) => (b.date > a.date ? 1 : -1))
       )
     );

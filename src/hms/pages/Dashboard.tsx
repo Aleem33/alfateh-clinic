@@ -11,6 +11,7 @@ import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../../pos/lib/salesFinancials';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -27,17 +28,17 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'appointments'), snap =>
-      setStats(p => ({ ...p, todayAppointments: snap.docs.filter(d => d.data().date === todayStr).length }))
+    const u1 = subscribeToLocalCollection('appointments', records =>
+      setStats(p => ({ ...p, todayAppointments: records.filter(record => record.date === todayStr).length }))
     );
-    const u2 = onSnapshot(collection(db, 'patients'), snap =>
-      setStats(p => ({ ...p, newPatientsToday: snap.docs.filter(d => clinicDateKey(d.data().createdAt) === todayStr).length, totalPatients: snap.size }))
+    const u2 = subscribeToLocalCollection('patients', records =>
+      setStats(p => ({ ...p, newPatientsToday: records.filter(record => clinicDateKey(record.createdAt) === todayStr).length, totalPatients: records.length }))
     );
-    const u3 = onSnapshot(collection(db, 'admissions'), snap =>
-      setStats(p => ({ ...p, ipdCount: snap.docs.filter(d => d.data().status === 'admitted').length }))
+    const u3 = subscribeToLocalCollection('admissions', records =>
+      setStats(p => ({ ...p, ipdCount: records.filter(record => record.status === 'admitted').length }))
     );
-    const u4 = onSnapshot(collection(db, 'labOrders'), snap =>
-      setStats(p => ({ ...p, pendingLab: snap.docs.filter(d => d.data().status === 'pending').length }))
+    const u4 = subscribeToLocalCollection('labOrders', records =>
+      setStats(p => ({ ...p, pendingLab: records.filter(record => record.status === 'pending').length }))
     );
     const u5 = subscribeToMedicines(meds => {
       const lowStock = meds.filter(m => (m.stock || 0) <= (m.reorderLevel || (m.unitsPerBox || 1) * 2));
@@ -49,8 +50,8 @@ export function Dashboard() {
       setLowStockItems(lowStock.slice(0, 5));
       setStats(p => ({ ...p, lowStock: lowStock.length, expiringMeds: expiring.length }));
     });
-    const u6 = onSnapshot(collection(db, 'bills'), snap => {
-      setBills(snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]);
+    const u6 = subscribeToLocalCollection('bills', records => {
+      setBills(records as any[]);
       setLoading(false);
     });
     const u7 = subscribeToSales(setPosSales);

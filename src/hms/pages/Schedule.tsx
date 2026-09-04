@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, setDoc, getDoc } from '@/lib/firestore';
+import { doc, setDoc, getDoc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Clock, Check, X, Save, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAppDialog } from '../../components/AppDialog';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const TIME_SLOTS = [
@@ -27,9 +28,8 @@ export function Schedule() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'staff'), snap => {
-      const docs = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
+    const unsub = subscribeToLocalCollection('staff', records => {
+      const docs = records
         .filter((s: any) => s.role === 'doctor' && s.status !== 'inactive') as any[];
       setDoctors(docs);
       if (docs.length > 0 && !selectedDoctor) setSelectedDoctor(docs[0]);
