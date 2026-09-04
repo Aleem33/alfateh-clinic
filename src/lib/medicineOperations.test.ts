@@ -7,6 +7,7 @@ const firestore = vi.hoisted(() => ({
   getDocsFromServer: vi.fn(),
   limit: vi.fn((value: number) => ({ value })),
   query: vi.fn((...parts: unknown[]) => parts),
+  serverTimestamp: vi.fn(() => ({ kind: 'server-timestamp' })),
   updateDoc: vi.fn(),
   where: vi.fn((...parts: unknown[]) => parts),
 }));
