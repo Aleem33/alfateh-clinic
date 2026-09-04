@@ -63,7 +63,13 @@ function calcQty(freq: string, dur: string, prescription?: any): number {
   return q > 0 ? q : 1;
 }
 
-export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: boolean }) {
+export function Pharmacy({
+  canEditMedicines = false,
+  canEditPurchases = false,
+}: {
+  canEditMedicines?: boolean;
+  canEditPurchases?: boolean;
+}) {
   const { alert } = useAppDialog();
   const { categories } = useMedicineCategories();
   const [medicines, setMedicines]           = useState<any[]>([]);
@@ -190,6 +196,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
   const expiringCount = medicines.filter(m => m.expiryDate && new Date(m.expiryDate) < new Date(trustedNow().getTime() + 30 * 86400000)).length;
 
   const openEdit = (m: any) => {
+    if (!canEditMedicines) return;
     const unitsPerBox = m.unitsPerBox || 1;
     setEditMedId(m.id);
     setMedForm({ name: m.name, nameUrdu: m.nameUrdu || '', category: resolveMedicineCategory(categories, m.category || m.form), manufacturer: m.manufacturer || '', batchNo: m.batchNo || '', expiryDate: m.expiryDate || '', costPrice: String(m.costPrice || ''), retailPrice: String(m.retailPrice || m.price || ''), unitPrice: String(m.unitPrice || ''), unitsPerBox: String(unitsPerBox), stockBoxes: String(Math.floor((m.stock || 0) / unitsPerBox)), stockLoose: String((m.stock || 0) % unitsPerBox), reorderLevel: String(m.reorderLevel || '10'), supplierId: m.supplierId || '', supplierName: m.supplierName || '' });
@@ -197,6 +204,10 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
   };
 
   const handleSaveMed = async () => {
+    if (editMedId && !canEditMedicines) {
+      setError('Only an administrator can edit medicine records.');
+      return;
+    }
     const name = medForm.name.trim();
     const category = medForm.category || 'Tablet';
     if (!name || !category) { setError('Name and category are required.'); return; }
@@ -553,7 +564,7 @@ export function Pharmacy({ canEditPurchases = false }: { canEditPurchases?: bool
                     <td className="px-4 py-3 text-sm text-gray-600">Rs. {m.costPrice || '—'}</td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-800">Rs. {m.retailPrice || m.price}</td>
                     <td className="px-4 py-3">
-                      <button onClick={() => openEdit(m)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg"><Edit2 className="w-4 h-4" /></button>
+                      {canEditMedicines && <button onClick={() => openEdit(m)} title="Edit medicine" className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg"><Edit2 className="w-4 h-4" /></button>}
                     </td>
                   </tr>
                 );

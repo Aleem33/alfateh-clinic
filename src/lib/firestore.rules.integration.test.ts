@@ -30,6 +30,7 @@ integrationDescribe('Firestore offline operational rules', () => {
     await environment.clearFirestore();
     await environment.withSecurityRulesDisabled(async context => {
       const database = context.firestore();
+      await setDoc(doc(database, 'users', 'admin-1'), { role: 'admin', active: true });
       await setDoc(doc(database, 'users', 'cashier-1'), { role: 'cashier', active: true });
       await setDoc(doc(database, 'users', 'pharmacist-1'), { role: 'pharmacist', active: true });
       await setDoc(doc(database, 'medicines', 'batch-a'), {
@@ -105,6 +106,24 @@ integrationDescribe('Firestore offline operational rules', () => {
     });
     batch.update(doc(database, 'medicines', 'batch-a'), { stock: 120, costPrice: 320 });
     await assertSucceeds(batch.commit());
+  });
+
+  it('blocks a pharmacist from editing medicine identity, batch, expiry, or selling price', async () => {
+    const database = environment.authenticatedContext('pharmacist-1').firestore();
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { name: 'Changed Medicine' }));
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { batchNo: 'B-2' }));
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { expiryDate: '2030-01-01' }));
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { retailPrice: 1 }));
+  });
+
+  it('allows an administrator to edit a medicine record', async () => {
+    const database = environment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(updateDoc(doc(database, 'medicines', 'batch-a'), {
+      name: 'Corrected Medicine',
+      batchNo: 'B-2',
+      expiryDate: '2030-01-01',
+      retailPrice: 550,
+    }));
   });
 
   it('allows a pharmacist purchase return batch to remove stock', async () => {

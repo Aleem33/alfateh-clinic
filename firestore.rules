@@ -96,13 +96,17 @@ service cloud.firestore {
       );
       allow update: if isAdmin() || (
         isPharmacist() &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'archived',
-          'archivedAt',
-          'archivedBy',
-          'restoredAt',
-          'restoredBy'
-        ])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'stock',
+          'bonusStockUnits',
+          'costPrice',
+          'updatedAt'
+        ]) &&
+        request.resource.data.stock is number &&
+        request.resource.data.get('bonusStockUnits', 0) is number &&
+        request.resource.data.stock >= 0 &&
+        request.resource.data.get('bonusStockUnits', 0) >= 0 &&
+        request.resource.data.get('bonusStockUnits', 0) <= request.resource.data.stock
       ) || (
         isCashier() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'bonusStockUnits']) &&

@@ -43,7 +43,7 @@ const toNumber = (value: string, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
+export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: boolean; canArchive?: boolean }) {
   const { categories } = useMedicineCategories();
   const [medicines, setMedicines]       = useState<any[]>([]);
   const [archivedMedicines, setArchivedMedicines] = useState<any[]>([]);
@@ -95,6 +95,10 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
+    if (editingId && !canEdit) {
+      setFormError('Only an administrator can edit medicine records.');
+      return;
+    }
     try {
       const unitsPerBox = Math.max(1, Math.floor(toNumber(formData.unitsPerBox, 1)));
       const totalStock = (Math.floor(toNumber(formData.stockBoxes)) * unitsPerBox) + Math.floor(toNumber(formData.stockLoose));
@@ -159,6 +163,7 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
   };
 
   const handleEdit = (med: any) => {
+    if (!canEdit) return;
     const unitsPerBox = med.unitsPerBox || 1;
     setFormData({
       name: med.name, form: resolveMedicineCategory(categories, med.form || med.category),
@@ -381,7 +386,7 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
                   </p>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  {!showArchived && <button onClick={() => handleEdit(med)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
+                  {canEdit && !showArchived && <button onClick={() => handleEdit(med)} title="Edit medicine" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
                     <Edit2 className="w-4 h-4" />
                   </button>}
                   {canArchive && (showArchived ? (
@@ -454,7 +459,7 @@ export function Medicines({ canArchive = false }: { canArchive?: boolean }) {
                     </div>
                   </td>
                   <td className="p-4 flex justify-end gap-2">
-                    {!showArchived && <button onClick={() => handleEdit(med)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>}
+                    {canEdit && !showArchived && <button onClick={() => handleEdit(med)} title="Edit medicine" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>}
                     {canArchive && (showArchived ? (
                       <button onClick={() => handleRestore(med)} title="Restore medicine" className="p-1.5 text-green-600 hover:bg-green-50 rounded"><RotateCcw className="w-4 h-4" /></button>
                     ) : (

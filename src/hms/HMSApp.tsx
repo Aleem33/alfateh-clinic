@@ -61,7 +61,7 @@ export function HMSApp({ userRole, userEmail, onSwitchApp, onLoginSuccess, onBac
             {['admin','doctor'].includes(r)                         && <Route path="prescriptions"         element={<Prescriptions />} />}
             {['admin','doctor'].includes(r)                         && <Route path="prescription-templates" element={<PrescriptionTemplates />} />}
             {['admin','doctor','lab_technician'].includes(r)        && <Route path="lab"                   element={<Lab />} />}
-            {['admin','pharmacist'].includes(r)                     && <Route path="pharmacy"              element={<Pharmacy canEditPurchases={isAdmin} />} />}
+            {['admin','pharmacist'].includes(r)                     && <Route path="pharmacy"              element={<Pharmacy canEditMedicines={isAdmin} canEditPurchases={isAdmin} />} />}
             {['admin','pharmacist'].includes(r)                     && <Route path="suppliers"             element={<Suppliers />} />}
             {['admin','cashier'].includes(r)                        && <Route path="billing"               element={<Billing />} />}
             {isAdmin && <Route path="staff"    element={<Staff />} />}
