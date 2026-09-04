@@ -1,6 +1,7 @@
-import { collection, getDocsFromServer, onSnapshot, type Unsubscribe } from '@/lib/firestore';
+import { collection, onSnapshot, type Unsubscribe } from '@/lib/firestore';
 import { db } from '../firebase';
 import { isCloudOnline, subscribeLanStatus } from './lanCoordinator';
+import { recordFirestoreRead, type FirestoreReadReason } from './readDiagnostics';
 import { shouldPublishSalesSnapshot } from './salesStorePolicy';
 
 export type SalesRecord = Record<string, any> & {
@@ -21,7 +22,7 @@ type Resource = {
   cachedRecords: SalesRecord[];
   hasPublished: boolean;
   listener: Unsubscribe | null;
-  refreshPromise: Promise<void> | null;
+  nextServerSnapshotReason: FirestoreReadReason;
   stopTimer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -33,7 +34,7 @@ function resource(collectionName: Resource['collectionName']): Resource {
     cachedRecords: [],
     hasPublished: false,
     listener: null,
-    refreshPromise: null,
+    nextServerSnapshotReason: 'initial',
     stopTimer: null,
   };
 }
@@ -42,7 +43,7 @@ const salesResource = resource('sales');
 const returnsResource = resource('saleReturns');
 const resources = [salesResource, returnsResource];
 let lifecycleStarted = false;
-let lastFocusRefreshAt = 0;
+let lastLifecycleOnline: boolean | null = null;
 
 function documents(snapshot: any): SalesRecord[] {
   return snapshot.docs.map((item: any) => ({ ...item.data(), id: item.id }));
@@ -62,14 +63,17 @@ function publish(target: Resource, records: SalesRecord[]) {
   notify(target);
 }
 
-async function refreshFromServer(target: Resource) {
-  if (!isCloudOnline() || target.subscribers.size === 0) return;
-  if (target.refreshPromise) return target.refreshPromise;
-  target.refreshPromise = getDocsFromServer(collection(db, target.collectionName))
-    .then(snapshot => publish(target, documents(snapshot)))
-    .catch(error => reportError(target, error))
-    .finally(() => { target.refreshPromise = null; });
-  return target.refreshPromise;
+function changedDocumentCount(snapshot: any, reason: FirestoreReadReason) {
+  // The first server snapshot represents the listener's initial result set.
+  // Later snapshots normally read only changed documents, which Firestore
+  // exposes through docChanges. Fall back to the full result for compatible
+  // test doubles or SDK shapes that do not expose docChanges.
+  if (reason === 'initial' || typeof snapshot.docChanges !== 'function') return snapshot.docs.length;
+  try {
+    return snapshot.docChanges({ includeMetadataChanges: false }).length;
+  } catch {
+    return snapshot.docChanges().length;
+  }
 }
 
 function startListener(target: Resource) {
@@ -80,6 +84,16 @@ function startListener(target: Resource) {
     snapshot => {
       const nextRecords = documents(snapshot);
       target.cachedRecords = nextRecords;
+      if (!snapshot.metadata.fromCache) {
+        const reason = target.nextServerSnapshotReason;
+        recordFirestoreRead({
+          collection: target.collectionName,
+          source: 'listener',
+          reason,
+          documents: changedDocumentCount(snapshot, reason),
+        });
+        target.nextServerSnapshotReason = 'incremental';
+      }
       // While cloud-online, only a server-confirmed snapshot may replace the
       // shared data. This prevents one laptop's stale cache from reporting a
       // different daily total. Offline devices still receive cached changes.
@@ -87,7 +101,6 @@ function startListener(target: Resource) {
     },
     error => reportError(target, error),
   );
-  if (isCloudOnline()) void refreshFromServer(target);
 }
 
 function stopWhenIdle(target: Resource) {
@@ -99,6 +112,7 @@ function stopWhenIdle(target: Resource) {
     target.records = [];
     target.cachedRecords = [];
     target.hasPublished = false;
+    target.nextServerSnapshotReason = 'initial';
     target.stopTimer = null;
   }, 30_000);
 }
@@ -107,21 +121,16 @@ function startLifecycle() {
   if (lifecycleStarted || typeof window === 'undefined') return;
   lifecycleStarted = true;
   subscribeLanStatus(status => {
+    const reconnected = lastLifecycleOnline === false && status.online;
+    lastLifecycleOnline = status.online;
     for (const target of resources) {
       if (target.subscribers.size === 0) continue;
-      if (status.online) void refreshFromServer(target);
-      else if (target.cachedRecords.length > 0 || !target.hasPublished) publish(target, target.cachedRecords);
+      if (reconnected) target.nextServerSnapshotReason = 'reconnect';
+      if (!status.online && (target.cachedRecords.length > 0 || !target.hasPublished)) {
+        publish(target, target.cachedRecords);
+      }
     }
   });
-  const refreshActive = () => {
-    if (!isCloudOnline()) return;
-    const now = performance.now();
-    if (now - lastFocusRefreshAt < 30_000) return;
-    lastFocusRefreshAt = now;
-    resources.forEach(target => { if (target.subscribers.size > 0) void refreshFromServer(target); });
-  };
-  window.addEventListener('focus', refreshActive);
-  window.addEventListener('alfateh:auth-sync-ready', refreshActive);
 }
 
 function subscribe(target: Resource, onData: Subscriber['onData'], onError?: Subscriber['onError']): Unsubscribe {
