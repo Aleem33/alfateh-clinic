@@ -1,5 +1,7 @@
 import type { LanActivity, LanStatus } from '../types/electron';
 import { trustedNowISO } from './trustedClock';
+import { getActiveAuthSession } from './offlineAuth';
+import { isOfflineMirrorReady } from './mirrorReadiness';
 
 const listeners = new Set<(status: LanStatus) => void>();
 const activityListeners = new Set<(activity: LanActivity) => void>();
@@ -91,6 +93,11 @@ export async function ensureLanWriteAccess() {
     return;
   }
   if (typeof window === 'undefined' || !window.electronAPI) return;
+  const cachedRole = typeof localStorage === 'undefined' ? null : localStorage.getItem('alfateh.cachedUserRole');
+  const role = getActiveAuthSession()?.profile.role || cachedRole;
+  if (!isOfflineMirrorReady(role)) {
+    throw new OfflineViewerWriteError('Initial synchronization is required on this device. Reconnect to the internet and wait until all offline data is ready before creating entries.');
+  }
   const result = await window.electronAPI.acquireLanWriteAccess();
   if (result?.status) updateStatus(result.status);
   if (!result?.allowed) {

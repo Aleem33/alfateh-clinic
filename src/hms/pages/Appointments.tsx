@@ -217,7 +217,7 @@ export function Appointments() {
       try {
         const billsQ = query(collection(db, 'bills'), where('appointmentId', '==', id));
         const snap = await getDocs(billsQ);
-        for (const b of snap.docs) {
+        for (const b of snap.docs.filter(document => document.data().deleted !== true)) {
           await updateDoc(doc(db, 'bills', b.id), { paymentStatus: status, updatedAt: nowISO() });
         }
       } catch (e) { console.error('Bill update failed:', e); }

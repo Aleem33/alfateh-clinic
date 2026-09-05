@@ -23,7 +23,8 @@
     "bump:patch": "npm version patch --no-git-tag-version",
     "bump:minor": "npm version minor --no-git-tag-version",
     "bump:major": "npm version major --no-git-tag-version",
-    "test:rules": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic \"npm test -- src/lib/firestore.rules.integration.test.ts\""
+    "test:rules": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic \"npm test -- src/lib/firestore.rules.integration.test.ts\"",
+    "test:smoke": "npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic \"node scripts/renderer-smoke.mjs\""
   },
   "build": {
     "appId": "com.alfateh.clinic",

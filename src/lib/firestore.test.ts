@@ -54,6 +54,7 @@ import {
   addDoc,
   deleteDoc,
   hardDeleteDoc,
+  runTransaction,
   setDoc,
   updateDoc,
   writeBatch,
@@ -278,5 +279,64 @@ describe('Firestore sync metadata gateway', () => {
     expect(lanMock.publishLanActivity).toHaveBeenCalledWith(expect.objectContaining({
       action: 'permanently deleted',
     }));
+  });
+
+  it('never queues an administrative reset as if it had completed offline', async () => {
+    lanMock.online = false;
+    const batch = writeHardDeleteBatch({} as any);
+    batch.delete(medicineRef);
+    await expect(batch.commit()).rejects.toThrow('online connection');
+    expect(firestoreMock.batches[0].commit).not.toHaveBeenCalled();
+  });
+
+  it('adds revision metadata to transaction writes without changing transaction reads', async () => {
+    const transaction = {
+      get: vi.fn().mockResolvedValue({ exists: () => true }),
+      set: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    };
+    firestoreMock.runTransaction.mockImplementation(async (_database: unknown, callback: (value: unknown) => unknown) => callback(transaction));
+
+    await runTransaction({} as any, async syncedTransaction => {
+      await syncedTransaction.get(medicineRef);
+      syncedTransaction.set(medicineRef, { stock: 4 }, { merge: true });
+      syncedTransaction.update(medicineRef, { costPrice: 20 });
+      syncedTransaction.delete(medicineRef);
+    });
+
+    expect(transaction.get).toHaveBeenCalledWith(medicineRef);
+    expect(transaction.set).toHaveBeenCalledWith(medicineRef, {
+      stock: 4,
+      syncUpdatedAt: firestoreMock.timestamp,
+      syncProtocolVersion: 2,
+    }, { merge: true });
+    expect(transaction.update).toHaveBeenNthCalledWith(1, medicineRef, {
+      costPrice: 20,
+      syncUpdatedAt: firestoreMock.timestamp,
+      syncProtocolVersion: 2,
+    });
+    expect(transaction.update).toHaveBeenNthCalledWith(2, medicineRef, expect.objectContaining({
+      deleted: true,
+      deletedBy: 'admin-1',
+      syncUpdatedAt: firestoreMock.timestamp,
+      syncProtocolVersion: 2,
+    }));
+    expect(transaction.delete).not.toHaveBeenCalled();
+  });
+
+  it('emits a local recovery event when Firestore rejects a write', async () => {
+    const appWindow = new EventTarget();
+    vi.stubGlobal('window', appWindow);
+    const rejected = vi.fn();
+    appWindow.addEventListener('alfateh:firestore-write-rejected', rejected);
+    firestoreMock.addDoc.mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(addDoc(collectionRef, { name: 'Protected entry' })).rejects.toThrow('permission denied');
+    expect(rejected).toHaveBeenCalledOnce();
+    expect((rejected.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
+      message: 'permission denied',
+      activities: [expect.objectContaining({ collection: 'medicines' })],
+    });
   });
 });

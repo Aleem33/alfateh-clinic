@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, limit } from '@/lib/firestore';
-import { db } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Users, CalendarDays, BedDouble, FlaskConical, DollarSign, AlertTriangle, Clock, TrendingUp, Plus, UserPlus, ArrowRight, ShoppingCart, Package } from 'lucide-react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
@@ -55,9 +53,11 @@ export function Dashboard() {
       setLoading(false);
     });
     const u7 = subscribeToSales(setPosSales);
-    const u8 = onSnapshot(query(collection(db, 'auditLogs'), orderBy('createdAt', 'desc'), limit(8)),
-      snap => setRecentActivity(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
+    const u8 = subscribeToLocalCollection('auditLogs', records => setRecentActivity(
+      records
+        .sort((left, right) => String(right.createdAt || right.timestamp || '').localeCompare(String(left.createdAt || left.timestamp || '')))
+        .slice(0, 8),
+    ));
     const u9 = subscribeToSaleReturns(setPosReturns);
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); };
   }, [todayStr]);

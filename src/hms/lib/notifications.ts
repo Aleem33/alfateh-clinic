@@ -49,7 +49,7 @@ export function useAutoNotifications() {
         const existingSnap = await getDocs(
           query(collection(db, 'notifications'), where('createdAt', '>=', todayKey))
         );
-        const todayNotifTitles = new Set(existingSnap.docs.map(d => d.data().title));
+        const todayNotifTitles = new Set(existingSnap.docs.filter(d => d.data().deleted !== true).map(d => d.data().title));
 
         // Fire notifications
         if (outOfStock.length > 0) {
@@ -103,6 +103,7 @@ export function useAutoNotifications() {
           query(collection(db, 'labOrders'), where('status', '==', 'pending'))
         );
         const oldPending = labSnap.docs.filter(d => {
+          if (d.data().deleted === true) return false;
           const created = d.data().createdAt;
           if (!created) return false;
           try { return isBefore(parseISO(created), addDays(now, -1)); } catch { return false; }

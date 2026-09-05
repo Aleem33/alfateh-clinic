@@ -387,7 +387,10 @@ export async function softDeleteLocalRecord(
   }], options);
 }
 
-async function readCollectionStatus(collectionName: string): Promise<LocalMirrorCollectionStatus> {
+export async function readLocalCollectionSnapshot<T = Record<string, unknown>>(
+  collectionName: string,
+  options: LocalMirrorQueryOptions<T> = {},
+): Promise<{ status: LocalMirrorCollectionStatus; records: LocalMirrorDocument<T>[] }> {
   assertCollectionName(collectionName);
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
@@ -404,13 +407,13 @@ async function readCollectionStatus(collectionName: string): Promise<LocalMirror
       closeDatabase(database);
       const resolved = metadata || defaultCollectionMetadata(collectionName);
       const deletedRecords = records.filter(record => record.deleted).length;
-      resolve({
+      resolve({ records: applyQueryOptions(records, options), status: {
         ...resolved,
         ready: resolved.seedComplete,
         totalRecords: records.length,
         activeRecords: records.length - deletedRecords,
         deletedRecords,
-      });
+      } });
     };
     transaction.onerror = () => {
       const error = transaction.error || new Error(`Could not read local sync status for ${collectionName}.`);
@@ -421,8 +424,8 @@ async function readCollectionStatus(collectionName: string): Promise<LocalMirror
   });
 }
 
-export function getLocalSyncStatus(collectionName: string) {
-  return readCollectionStatus(collectionName);
+export async function getLocalSyncStatus(collectionName: string) {
+  return (await readLocalCollectionSnapshot(collectionName)).status;
 }
 
 function nextRevision(collectionName: string) {
@@ -444,7 +447,7 @@ async function deliverCollectionListener(collectionName: string, subscription: C
 
 async function deliverStatusListener(collectionName: string, subscription: StatusListener, revision: number) {
   try {
-    const status = await readCollectionStatus(collectionName);
+    const status = await getLocalSyncStatus(collectionName);
     if (!subscription.active || revision < subscription.lastRevision) return;
     subscription.lastRevision = revision;
     subscription.listener(status);
@@ -530,4 +533,3 @@ export async function resetLocalMirrorForTests() {
     request.onblocked = () => reject(new Error('Resetting the local data mirror was blocked.'));
   });
 }
-

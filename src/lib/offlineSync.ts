@@ -5,7 +5,7 @@ import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
 import { completeLanCloudSync, getLanStatus, subscribeLanStatus } from './lanCoordinator';
 import { subscribeOfflineCache } from './offlineCache';
-import { GLOBAL_DATA_COLLECTIONS } from './dataSync';
+import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
 import { isCloudAuthReady } from './offlineAuth';
 import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
 import { waitForSyncStep } from './syncTiming';
@@ -49,6 +49,15 @@ let pendingCount = 0;
 let issueCount = 0;
 let lastError = '';
 let started = false;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSafeRetry() {
+  if (retryTimer || typeof window === 'undefined') return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (online) void runOfflineSyncNow();
+  }, 15_000);
+}
 
 function currentSnapshot(): SyncSnapshot {
   return { online, syncing, pendingCount, issueCount, lastError, devicePrefix: device.prefix };
@@ -81,15 +90,16 @@ function openOfflineDb(): Promise<IDBDatabase> {
 async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   const database = await openOfflineDb();
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(LAB_STORE, mode);
+    const transaction = database.transaction(LAB_STORE, mode, { durability: mode === 'readwrite' ? 'strict' : 'default' });
     const request = run(transaction.objectStore(LAB_STORE));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    transaction.oncomplete = () => database.close();
+    let result: T;
+    request.onsuccess = () => { result = request.result; };
+    transaction.oncomplete = () => { database.close(); resolve(result); };
     transaction.onerror = () => {
       database.close();
-      reject(transaction.error);
+      reject(transaction.error || request.error || new Error('Could not save the offline upload.'));
     };
+    transaction.onabort = transaction.onerror;
   });
 }
 
@@ -204,8 +214,9 @@ async function replayPendingPosSales() {
 
 async function checkStockConflicts() {
   const medicines = await getDocs(query(collection(db, 'medicines'), where('stock', '<', 0)));
-  issueCount = medicines.size;
-  for (const medicine of medicines.docs) {
+  const activeMedicines = medicines.docs.filter(medicine => medicine.data().deleted !== true);
+  issueCount = activeMedicines.length;
+  for (const medicine of activeMedicines) {
     const data = medicine.data();
     await setDoc(doc(db, 'syncIssues', `stock-${medicine.id}`), {
       type: 'stock-negative',
@@ -241,7 +252,13 @@ export async function runOfflineSyncNow() {
       await waitForSyncStep(waitForPendingWrites(db), 15_000, 'Queued cloud writes');
     } catch (error: any) {
       lastError = error?.message || 'Queued cloud writes could not be confirmed yet.';
-      console.warn('A queued Firestore write was rejected or timed out; durable sales will still be verified:', error);
+      console.warn('Queued Firestore writes are still unresolved; durable sales remain in the outbox and will be verified on the next pass:', error);
+      // Never replay the durable sale outbox while the SDK's original offline
+      // batch may still commit. Both batches contain stock increments, so racing
+      // them could deduct the same stock twice. Keeping the outbox is lossless;
+      // a later pass first drains/rejects the SDK queue, then checks saleId.
+      scheduleSafeRetry();
+      throw error;
     }
     await replayPendingPosSales();
     await checkStockConflicts();

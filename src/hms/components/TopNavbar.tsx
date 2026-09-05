@@ -47,7 +47,7 @@ export function TopNavbar({ userEmail, userRole }: { userEmail: string; userRole
   useEffect(() => {
     const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(20));
     const unsub = onSnapshot(q, snap =>
-      setNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setNotifs(snap.docs.filter(d => d.data().deleted !== true).map(d => ({ id: d.id, ...d.data() })))
     );
     return () => unsub();
   }, []);

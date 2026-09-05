@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, increment, query, getDocs, where, writeBatch
+  doc, increment, writeBatch
 } from '@/lib/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -16,7 +16,7 @@ import {
 import { subscribeToSales } from '../../lib/salesStore';
 import { trustedNowISO } from '../../lib/trustedClock';
 import { recordClinicDateTimeLabel } from '../../lib/clinicDate';
-import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { getLocalCollectionOnce, subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export function Customers() {
   const [customers, setCustomers]       = useState<any[]>([]);
@@ -130,9 +130,9 @@ export function Customers() {
       if (editingId) {
         await updateDoc(doc(db, 'customers', editingId), data);
         // Propagate name/phone change to all sales that reference this customer
-        const salesSnap = await getDocs(query(collection(db, 'sales'), where('customerId', '==', editingId)));
-        await Promise.all(salesSnap.docs.map(d =>
-          updateDoc(d.ref, { customerName: formData.name, customerPhone: formData.phone })
+        const allSales = await getLocalCollectionOnce('sales');
+        await Promise.all(allSales.filter(sale => sale.customerId === editingId).map(sale =>
+          updateDoc(doc(db, 'sales', sale.id), { customerName: formData.name, customerPhone: formData.phone })
         ));
       } else {
         await addDoc(collection(db, 'customers'), { ...data, createdAt: trustedNowISO() });

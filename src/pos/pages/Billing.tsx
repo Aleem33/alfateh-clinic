@@ -22,6 +22,7 @@ import { isCloudOnline } from '../../lib/lanCoordinator';
 import { clinicDateKey, clinicTimeLabel, recordClinicDateTimeLabel } from '../../lib/clinicDate';
 import { getTrustedClockReading, trustedNow, trustedNowISO } from '../../lib/trustedClock';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -425,7 +426,7 @@ export function Billing() {
         businessDate: clinicDateKey(saleTimestamp),
         timeSource: saleClock.source,
         customerType,
-        cashierId: auth.currentUser?.uid,
+        cashierId: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
       };
       if (selectedCustomer) {
         saleData.customerId    = selectedCustomer.id;
