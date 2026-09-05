@@ -38,6 +38,8 @@ createRoot(document.getElementById('root')!).render(<POSApp userRole="admin" onS
 
 const ready = async () => {
   await waitFor(() => { const status = getOfflineCacheStatus(); return status.totalCollections > 0 && status.readyCollections === status.totalCollections; }, 'complete mirror');
+  const expectedMode = new URLSearchParams(location.search).get('mode') || 'legacy';
+  if (getOfflineCacheStatus().mode !== expectedMode) throw new Error(`Expected ${expectedMode} sync mode`);
   await waitFor(() => document.body.innerText.includes('Smoke Medicine'), 'billing medicine');
 };
 const checkout = async (expectedCount: number) => {
