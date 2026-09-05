@@ -28,15 +28,24 @@ function openDatabase(): Promise<IDBDatabase> {
 async function useStore<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, mode);
-    const request = operation(transaction.objectStore(STORE_NAME));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    transaction.oncomplete = () => database.close();
-    transaction.onerror = () => {
+    const transaction = database.transaction(STORE_NAME, mode, { durability: 'strict' });
+    let result: T;
+    transaction.oncomplete = () => {
       database.close();
-      reject(transaction.error);
+      resolve(result);
     };
+    transaction.onerror = transaction.onabort = () => {
+      database.close();
+      reject(transaction.error || new DOMException('Offline sale storage transaction was aborted.', 'AbortError'));
+    };
+    try {
+      const request = operation(transaction.objectStore(STORE_NAME));
+      request.onsuccess = () => { result = request.result; };
+    } catch (error) {
+      transaction.abort();
+      database.close();
+      reject(error);
+    }
   });
 }
 

@@ -41,11 +41,25 @@ async function restoreFirestoreNetwork() {
 }
 
 async function revokeSession(session: AuthSession, hooks: Hooks, message: string) {
+  if (getActiveAuthSession() !== session) return;
   await keepFirestoreOffline();
-  await signOut(auth).catch(() => undefined);
+  if (getActiveAuthSession() !== session) return;
   await revokeOfflineCredential(session.profile.username).catch(() => false);
+  if (getActiveAuthSession() !== session) return;
   setActiveAuthSession(null);
   hooks.onRevoked?.(message);
+  if (!getActiveAuthSession() && auth.currentUser?.uid === session.profile.uid) {
+    await signOut(auth).catch(() => undefined);
+  }
+}
+
+async function abandonStaleCloudLogin(session: AuthSession) {
+  const current = getActiveAuthSession();
+  if (current?.profile.uid === auth.currentUser?.uid) return;
+  await keepFirestoreOffline();
+  if (!getActiveAuthSession() && auth.currentUser?.uid === session.profile.uid) {
+    await signOut(auth).catch(() => undefined);
+  }
 }
 
 async function reconnectAuthenticatedSession(hooks: Hooks) {
@@ -60,9 +74,12 @@ async function reconnectAuthenticatedSession(hooks: Hooks) {
     return;
   }
   reconnecting = true;
+  const isCurrent = () => getActiveAuthSession() === session;
   try {
     await keepFirestoreOffline();
+    if (!isCurrent()) return;
     const stored = await window.electronAPI?.getOfflineCloudCredential(session.profile.username);
+    if (!isCurrent()) return;
     if (!stored || stored.uid !== session.profile.uid) {
       await revokeSession(session, hooks, 'Offline access for this account must be renewed with an online login.');
       return;
@@ -73,13 +90,22 @@ async function reconnectAuthenticatedSession(hooks: Hooks) {
       usernameToEmail(stored.username),
       stored.password,
     );
+    if (!isCurrent()) {
+      await abandonStaleCloudLogin(session);
+      return;
+    }
     if (credential.user.uid !== session.profile.uid) {
       await revokeSession(session, hooks, 'The cached account identity no longer matches Firebase. Sign in online again.');
       return;
     }
 
     await restoreFirestoreNetwork();
+    if (!isCurrent()) {
+      await abandonStaleCloudLogin(session);
+      return;
+    }
     const snapshot = await getDocFromServer(doc(db, 'users', credential.user.uid));
+    if (!isCurrent()) return;
     if (!snapshot.exists()) {
       await revokeSession(session, hooks, 'This account was removed by an administrator. Offline access has been revoked.');
       return;
@@ -94,11 +120,13 @@ async function reconnectAuthenticatedSession(hooks: Hooks) {
       return;
     }
     await updateCachedAuthProfile(profile);
+    if (!isCurrent()) return;
     const refreshed: AuthSession = { mode: 'online', profile };
     setActiveAuthSession(refreshed);
     setCloudAuthReady(true);
     hooks.onSession?.(refreshed);
   } catch (error: any) {
+    if (!isCurrent()) return;
     const code = String(error?.code || '');
     if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-disabled') || code.includes('user-not-found')) {
       if (session) await revokeSession(session, hooks, 'The account password or status changed. Sign in online again to renew offline access.');
