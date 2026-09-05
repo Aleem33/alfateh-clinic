@@ -15,12 +15,15 @@ const firestore = vi.hoisted(() => {
   return {
     Timestamp,
     getDocsFromServer: vi.fn(),
+    getDocFromServer: vi.fn(),
+    doc: vi.fn((_database: unknown, name: string, id: string) => ({ name, id })),
     onSnapshot: vi.fn(() => vi.fn()),
     collection: vi.fn((_database: unknown, name: string) => ({ name })),
     documentId: vi.fn(() => '__name__'),
     orderBy: vi.fn((field: string, direction: string) => ({ type: 'orderBy', field, direction })),
     limit: vi.fn((count: number) => ({ type: 'limit', count })),
     startAfter: vi.fn((...values: unknown[]) => ({ type: 'startAfter', values })),
+    startAt: vi.fn((...values: unknown[]) => ({ type: 'startAt', values })),
     query: vi.fn((reference: unknown, ...constraints: unknown[]) => ({ reference, constraints })),
   };
 });
@@ -48,8 +51,9 @@ vi.mock('./syncProtocol', () => ({
   subscribeSyncControl: vi.fn(() => vi.fn()),
 }));
 
-import { __offlineCacheInternals } from './offlineCache';
+import { __offlineCacheInternals, stopFullOfflineCache } from './offlineCache';
 import { getLocalSyncStatus, queryLocalRecords, resetLocalMirrorForTests, upsertLocalRecords } from './localMirror';
+import * as mirror from './localMirror';
 
 const control = {
   protocolVersion: 2,
@@ -77,7 +81,13 @@ beforeEach(async () => {
   vi.clearAllMocks();
 });
 
-afterEach(resetLocalMirrorForTests);
+afterEach(async () => {
+  stopFullOfflineCache();
+  await __offlineCacheInternals.waitForPersistence('sales');
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  await resetLocalMirrorForTests();
+});
 
 describe('incremental mirror bootstrap', () => {
   it('uses document ID as the deterministic tie-breaker for identical timestamps', () => {
@@ -159,7 +169,8 @@ describe('incremental mirror bootstrap', () => {
       document('sale-251', { total: 251, deleted: true }),
     ]));
     await expect(__offlineCacheInternals.bootstrapCollection('sales', control)).resolves.toMatchObject({
-      seedComplete: true,
+      seedComplete: false,
+      pending: { bootstrapInProgress: true, bootstrapPagesComplete: true },
       totalRecords: 252,
       activeRecords: 251,
       deletedRecords: 1,
@@ -173,5 +184,191 @@ describe('incremental mirror bootstrap', () => {
       collection: 'sales',
       source: 'bootstrap',
     }));
+  });
+});
+
+describe('bounded incremental delivery', () => {
+  const revision = { seconds: 100, nanoseconds: 2 };
+  async function seeded() {
+    await upsertLocalRecords('sales', [
+      { id: 'historical', data: { total: 50 } },
+      { id: 'z', data: { total: 100, syncUpdatedAt: revision } },
+    ], { seedComplete: true, generation: 7, checkpoint: { syncUpdatedAt: revision, documentId: 'z' } });
+    await __offlineCacheInternals.startIncrementalListener('sales', control);
+    return (firestore.onSnapshot.mock.calls as any).at(-1)[2] as (value: unknown) => void;
+  }
+  function snapshot(docs: ReturnType<typeof document>[], fromCache = false,
+    changes = docs.map(doc => ({ type: 'added', doc }))) {
+    return { ...result(docs), metadata: { fromCache, hasPendingWrites: docs.some(doc => doc.metadata.hasPendingWrites) },
+      docChanges: () => changes };
+  }
+  async function flush() {
+    await __offlineCacheInternals.waitForPersistence('sales');
+  }
+
+  it('overlaps equal timestamps and preserves history outside the delta query', async () => {
+    const deliver = await seeded();
+    const target = (firestore.onSnapshot.mock.calls as any).at(-1)[0];
+    expect(target.constraints).toContainEqual({ type: 'startAt', values: [new firestore.Timestamp(100, 2)] });
+    expect(target.constraints.some((constraint: any) => constraint.type === 'limit')).toBe(false);
+    deliver(snapshot([document('a', { total: 20, syncUpdatedAt: revision })]));
+    await flush();
+    expect((await queryLocalRecords('sales')).map(record => record.id)).toEqual(['a', 'historical', 'z']);
+    expect((await getLocalSyncStatus('sales')).checkpoint?.documentId).toBe('z');
+    expect(firestore.getDocsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale cache data but persists first server docs even without data changes', async () => {
+    const deliver = await seeded();
+    deliver(snapshot([document('z', { total: 1 })], true));
+    await flush();
+    expect((await queryLocalRecords('sales')).find(record => record.id === 'z')?.data.total).toBe(100);
+    deliver(snapshot([document('z', { total: 200, syncUpdatedAt: revision })], false, []));
+    await flush();
+    expect((await queryLocalRecords('sales')).find(record => record.id === 'z')?.data.total).toBe(200);
+  });
+
+  it('resumes completed paging and only exposes readiness after server catch-up', async () => {
+    firestore.getDocsFromServer
+      .mockResolvedValueOnce(result([document('z', { syncUpdatedAt: revision })]))
+      .mockResolvedValueOnce(result([document('legacy', { total: 20 })]));
+    await __offlineCacheInternals.bootstrapCollection('sales', control);
+    expect((await getLocalSyncStatus('sales')).seedComplete).toBe(false);
+    await __offlineCacheInternals.startIncrementalListener('sales', control);
+    expect(firestore.getDocsFromServer).toHaveBeenCalledTimes(2);
+    const deliver = (firestore.onSnapshot.mock.calls as any).at(-1)[2];
+    deliver(snapshot([], true));
+    await flush();
+    expect((await getLocalSyncStatus('sales')).seedComplete).toBe(false);
+    deliver(snapshot([document('legacy', { total: 30, syncUpdatedAt: { seconds: 101, nanoseconds: 0 } })]));
+    await flush();
+    expect((await getLocalSyncStatus('sales')).seedComplete).toBe(true);
+    expect((await queryLocalRecords('sales'))[0].data.total).toBe(30);
+  });
+
+  it('does not advance the checkpoint for pending writes', async () => {
+    const deliver = await seeded();
+    const pending = document('new', { total: 30, syncUpdatedAt: { seconds: 999, nanoseconds: 0 } });
+    pending.metadata.hasPendingWrites = true;
+    deliver(snapshot([pending]));
+    await flush();
+    expect((await getLocalSyncStatus('sales')).checkpoint?.syncUpdatedAt).toEqual(revision);
+    expect((await queryLocalRecords('sales')).find(record => record.id === 'new')?.pending).toBe(true);
+  });
+
+  it('restores a rejected update that fell before the cursor and retains the attempted edit', async () => {
+    const deliver = await seeded();
+    await upsertLocalRecords('sales', [{ id: 'z', data: { total: 900 }, pending: true }]);
+    firestore.getDocFromServer.mockResolvedValueOnce({ exists: () => true, metadata: { hasPendingWrites: false }, data: () => ({ total: 100 }) });
+    deliver(snapshot([], false, [{ type: 'removed', doc: document('z') }]));
+    await flush();
+    expect((await queryLocalRecords('sales')).find(record => record.id === 'z')?.data.total).toBe(100);
+    expect((await getLocalSyncStatus('sales')).pending.recoveryRecords).toEqual([
+      expect.objectContaining({ id: 'z', data: { total: 900 } }),
+    ]);
+    expect(firestore.getDocFromServer).toHaveBeenCalledWith({ name: 'sales', id: 'z' });
+  });
+
+  it('retains a rejected create for recovery without counting it as a real sale', async () => {
+    const deliver = await seeded();
+    await upsertLocalRecords('sales', [{ id: 'rejected', data: { total: 900 }, pending: true }]);
+    firestore.getDocFromServer.mockResolvedValueOnce({ exists: () => false, metadata: { hasPendingWrites: false } });
+    deliver(snapshot([], false, [{ type: 'removed', doc: document('rejected') }]));
+    await flush();
+    expect((await queryLocalRecords('sales')).some(record => record.id === 'rejected')).toBe(false);
+    expect((await getLocalSyncStatus('sales')).pending.recoveryRecords).toEqual([
+      expect.objectContaining({ id: 'rejected', data: { total: 900 } }),
+    ]);
+  });
+
+  it('does not advance past a failed removal reconciliation or open a full listener', async () => {
+    const deliver = await seeded();
+    firestore.getDocFromServer.mockRejectedValueOnce(new Error('offline'));
+    deliver(snapshot([document('new', { syncUpdatedAt: { seconds: 200, nanoseconds: 0 } })], false,
+      [{ type: 'removed', doc: document('z') }]));
+    await flush();
+    expect((await getLocalSyncStatus('sales')).checkpoint?.syncUpdatedAt).toEqual(revision);
+    expect((await getLocalSyncStatus('sales')).pending.reconcileRecordIds).toEqual(['z']);
+    expect(firestore.onSnapshot).toHaveBeenCalledTimes(1);
+    expect(firestore.getDocsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('rebases reconnects from the persisted cursor and ignores retired callbacks', async () => {
+    const deliver = await seeded();
+    const newer = { seconds: 200, nanoseconds: 0 };
+    deliver(snapshot([document('new', { total: 300, syncUpdatedAt: newer })]));
+    await flush();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    deliver(snapshot([], true));
+    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(firestore.onSnapshot).toHaveBeenCalledTimes(2));
+    const target = (firestore.onSnapshot.mock.calls as any).at(-1)[0];
+    expect(target.constraints).toContainEqual({ type: 'startAt', values: [new firestore.Timestamp(200, 0)] });
+    deliver(snapshot([document('new', { total: 1 })]));
+    await flush();
+    expect((await queryLocalRecords('sales')).find(record => record.id === 'new')?.data.total).toBe(300);
+    expect(firestore.getDocsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('retries a removed record after restart even if it is absent from later query changes', async () => {
+    const deliver = await seeded();
+    firestore.getDocFromServer.mockRejectedValueOnce(new Error('offline'));
+    deliver(snapshot([], false, [{ type: 'removed', doc: document('z') }]));
+    await flush();
+    stopFullOfflineCache();
+    await __offlineCacheInternals.startIncrementalListener('sales', control);
+    firestore.getDocFromServer.mockResolvedValueOnce({ exists: () => true,
+      metadata: { hasPendingWrites: false }, data: () => ({ total: 10 }) });
+    const afterRestart = (firestore.onSnapshot.mock.calls as any).at(-1)[2];
+    afterRestart(snapshot([], false, []));
+    await flush();
+    expect((await queryLocalRecords('sales')).find(record => record.id === 'z')?.data.total).toBe(10);
+    expect((await getLocalSyncStatus('sales')).pending.reconcileRecordIds).toEqual([]);
+    expect(firestore.getDocsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a pending server-source read as an authoritative rejection', async () => {
+    const deliver = await seeded();
+    firestore.getDocFromServer.mockResolvedValueOnce({ exists: () => true,
+      metadata: { hasPendingWrites: true }, data: () => ({ total: 999 }) });
+    deliver(snapshot([], false, [{ type: 'removed', doc: document('z') }]));
+    await flush();
+    expect((await queryLocalRecords('sales')).find(record => record.id === 'z')?.data.total).toBe(100);
+    expect((await getLocalSyncStatus('sales')).pending.reconcileRecordIds).toEqual(['z']);
+  });
+
+  it('rotates a busy listener without limiting results or repeating the equal-time boundary forever', async () => {
+    const deliver = await seeded();
+    const nextRevision = { seconds: 300, nanoseconds: 0 };
+    const docs = Array.from({ length: 250 }, (_, index) => document(`new-${index}`, { syncUpdatedAt: nextRevision }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    deliver(snapshot(docs));
+    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(firestore.onSnapshot).toHaveBeenCalledTimes(2));
+    const afterRotation = (firestore.onSnapshot.mock.calls as any).at(-1)[2];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    afterRotation(snapshot(docs));
+    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(firestore.onSnapshot).toHaveBeenCalledTimes(2);
+    expect((await queryLocalRecords('sales')).length).toBe(252);
+  });
+
+  it('never advances a later queued snapshot past a failed local commit', async () => {
+    const deliver = await seeded();
+    vi.spyOn(mirror, 'upsertLocalRecords').mockRejectedValueOnce(new Error('disk full'));
+    const first = document('first', { syncUpdatedAt: { seconds: 400, nanoseconds: 0 } });
+    const second = document('second', { syncUpdatedAt: { seconds: 500, nanoseconds: 0 } });
+    deliver(snapshot([first]));
+    deliver(snapshot([first, second], false, [{ type: 'added', doc: second }]));
+    await flush();
+    expect((await getLocalSyncStatus('sales')).checkpoint?.syncUpdatedAt).toEqual(revision);
+    expect((await queryLocalRecords('sales')).map(record => record.id)).toEqual(['historical', 'z']);
+    expect(firestore.onSnapshot).toHaveBeenCalledTimes(1);
+    expect(firestore.getDocsFromServer).not.toHaveBeenCalled();
   });
 });

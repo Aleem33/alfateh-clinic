@@ -14,7 +14,9 @@ const createDevice = async (name, offline = false) => {
   });
   const window = new BrowserWindow({ show: false, width: 1500, height: 1000, webPreferences: { session: deviceSession, contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 2) console.log(`[${name}] ${message}`); });
-  await window.loadURL(url + (offline ? '?offline=1' : ''));
+  const deviceUrl = new URL(url);
+  if (offline) deviceUrl.searchParams.set('offline', '1');
+  await window.loadURL(deviceUrl.href);
   for (let attempt = 0; attempt < 400; attempt += 1) {
     if (await window.webContents.executeJavaScript('Boolean(window.smoke)')) return window;
     await delay(100);

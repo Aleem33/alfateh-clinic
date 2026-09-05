@@ -8,12 +8,17 @@ import { createRequire } from 'node:module';
 if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Run this script inside firebase emulators:exec.');
 const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
 const projectId = 'demo-alfateh-renderer-smoke';
+const incremental = process.argv.includes('--incremental');
 const environment = await initializeTestEnvironment({ projectId, firestore: {
   host, port: Number(port), rules: await readFile('firestore.rules', 'utf8'),
 } });
 await environment.clearFirestore();
 await environment.withSecurityRulesDisabled(async context => {
   const database = context.firestore();
+  if (incremental) await setDoc(doc(database, 'syncControl', 'current'), {
+    protocolVersion: 2, minimumProtocolVersion: 2, datasetGeneration: 2,
+    incrementalEnabled: true, trackedWritesRequired: true, rollbackToLegacy: false,
+  });
   await setDoc(doc(database, 'users', 'smoke-admin'), { role: 'admin', active: true });
   await setDoc(doc(database, 'medicines', 'smoke-med'), {
     name: 'Smoke Medicine', category: 'Injection', unitsPerBox: 1, stock: 20,
@@ -25,6 +30,11 @@ await environment.withSecurityRulesDisabled(async context => {
 const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, plugins: [{
   name: 'isolated-emulator-smoke', enforce: 'pre',
   transform(source, id) {
+    // Only this emulator fixture bypasses the build gate. Shipping code stays
+    // disabled until rules enforcement and customer-device readiness are verified.
+    if (incremental && id.replaceAll('\\', '/').endsWith('/src/lib/syncProtocol.ts')) {
+      return source.replace('INCREMENTAL_ROLLOUT_READY = false', 'INCREMENTAL_ROLLOUT_READY = true');
+    }
     if (id.replaceAll('\\', '/').endsWith('/src/pos/lib/nativeUtils.ts')) {
       return source.replace('iframePrint(slipHtml);', 'void slipHtml;');
     }
@@ -38,7 +48,7 @@ const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, plug
 try {
   await server.listen();
   const address = server.httpServer.address();
-  const url = `http://127.0.0.1:${address.port}/scripts/renderer-smoke.html`;
+  const url = `http://127.0.0.1:${address.port}/scripts/renderer-smoke.html?mode=${incremental ? 'incremental' : 'legacy'}`;
   const require = createRequire(import.meta.url);
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   const exitCode = await new Promise((resolve, reject) => {

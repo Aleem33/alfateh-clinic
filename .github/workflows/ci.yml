@@ -54,5 +54,8 @@ jobs:
       - name: Online and offline billing smoke test
         run: npm run test:smoke
 
+      - name: Prepared incremental sync smoke test (emulator only)
+        run: npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic "node scripts/renderer-smoke.mjs --incremental"
+
       - name: Build Vite app (verify it compiles)
         run: npm run build
