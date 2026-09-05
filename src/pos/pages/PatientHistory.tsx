@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy } from '@/lib/firestore';
-import { db } from '../../firebase';
 import { Search, User, Pill, ClipboardList, ChevronDown, ChevronUp, Calendar, Stethoscope } from 'lucide-react';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 interface RxItem { name: string; dosage: string; frequency: string; duration: string; scheduleText?: string; }
 interface Order {
@@ -18,10 +17,12 @@ export function PatientHistory() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'pharmacyOrders'), orderBy('createdAt', 'desc')),
-      snap => {
-        setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
+    const unsub = subscribeToLocalCollection<Order>(
+      'pharmacyOrders',
+      records => {
+        setOrders([...records].sort((a, b) =>
+          String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+        ));
         setLoading(false);
       },
       err => { console.error(err); setLoading(false); }

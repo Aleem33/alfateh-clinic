@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit } from '@/lib/firestore';
-import { db } from '../../firebase';
 import { formatDate, today } from '../lib/utils';
 import { Shield, Search, User, FileText, Trash2, Edit2, Plus, Printer, LogIn, Download } from 'lucide-react';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const ACTION_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
   create:  { icon: Plus,      color: 'bg-green-100 text-green-700',  label: 'Created'  },
@@ -33,9 +32,8 @@ export function AuditLogs() {
   const [dateTo, setDateTo]         = useState('');
 
   useEffect(() => {
-    const q = query(collection(db, 'auditLogs'), orderBy('createdAt', 'desc'), limit(500));
-    const unsub = onSnapshot(q, snap => {
-      setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsub = subscribeToLocalCollection('auditLogs', records => {
+      setLogs(records.sort((left, right) => String(right.createdAt || right.timestamp || '').localeCompare(String(left.createdAt || left.timestamp || ''))));
       setLoading(false);
     });
     return () => unsub();

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, doc } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
@@ -7,6 +7,7 @@ import { Plus, Search, X, CheckCircle, Clock, BookOpen, Printer, FileText, Uploa
 import { queueLabReportUpload } from '../../lib/offlineSync';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import { isCloudOnline } from '../../lib/lanCoordinator';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const CATEGORIES = ['Hematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Imaging', 'Pathology', 'Other'];
 
@@ -38,15 +39,13 @@ export function Lab() {
   const [orderError, setOrderError] = useState('');
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'labOrders'), snap =>
-      setLabOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
+    const u1 = subscribeToLocalCollection('labOrders', records =>
+      setLabOrders(records.sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
-    const u2 = onSnapshot(collection(db, 'labTests'), snap =>
-      setLabTests(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => a.name > b.name ? 1 : -1))
+    const u2 = subscribeToLocalCollection('labTests', records =>
+      setLabTests(records.sort((a: any, b: any) => a.name > b.name ? 1 : -1))
     );
-    const u3 = onSnapshot(collection(db, 'patients'), snap =>
-      setPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
+    const u3 = subscribeToLocalCollection('patients', setPatients);
     return () => { u1(); u2(); u3(); };
   }, []);
 

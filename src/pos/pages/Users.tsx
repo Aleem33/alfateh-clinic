@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from '@/lib/firestore';
+import { doc, setDoc, deleteDoc, updateDoc } from '@/lib/firestore';
 import { db, registerSecondaryUser, usernameToEmail, handleFirestoreError, OperationType } from '../../firebase';
 import { Plus, Trash2, Shield, User as UserIcon, Edit2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { trustedNowISO } from '../../lib/trustedClock';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const ROLES = [
   { value: 'cashier', label: 'Cashier (Billing Only)' },
@@ -23,8 +24,8 @@ export function Users() {
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<any | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'users'), snap =>
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => a.name > b.name ? 1 : -1)),
+    const unsub = subscribeToLocalCollection('users', records =>
+      setUsers(records.sort((a: any, b: any) => a.name > b.name ? 1 : -1)),
       error => handleFirestoreError(error, OperationType.GET, 'users')
     );
     return () => unsub();

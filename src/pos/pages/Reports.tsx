@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot } from '@/lib/firestore';
-import { db, handleFirestoreError, OperationType } from '../../firebase';
+import { handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import {
   format, isBefore, addDays,
@@ -15,6 +14,7 @@ import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { isExpenseInScope } from '../../lib/expenseScope';
 import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../lib/salesFinancials';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 type PeriodFilter = 'daily' | 'weekly' | 'monthly' | 'custom' | 'all';
 
@@ -33,7 +33,7 @@ export function Reports() {
   useEffect(() => {
     const u1 = subscribeToSales(setSales, e => handleFirestoreError(e, OperationType.GET, 'sales'));
     const u2 = subscribeToMedicines(setMedicines, e => handleFirestoreError(e, OperationType.GET, 'medicines'));
-    const u3 = onSnapshot(collection(db, 'expenses'), s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => handleFirestoreError(e, OperationType.GET, 'expenses'));
+    const u3 = subscribeToLocalCollection('expenses', setExpenses, e => handleFirestoreError(e, OperationType.GET, 'expenses'));
     const u4 = subscribeToSaleReturns(setReturns, e => handleFirestoreError(e, OperationType.GET, 'saleReturns'));
     return () => { u1(); u2(); u3(); u4(); };
   }, []);

@@ -42,7 +42,7 @@ export function useMedicineCategories() {
   useEffect(() => onSnapshot(
     CATEGORY_SETTINGS_DOC,
     snapshot => {
-      const configured = snapshot.exists()
+      const configured = snapshot.exists() && snapshot.data()?.deleted !== true
         ? normalizeMedicineCategories(snapshot.data()?.categories)
         : [];
       setCategories(configured.length ? configured : DEFAULT_MEDICINE_CATEGORIES);

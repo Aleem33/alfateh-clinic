@@ -1,43 +1,24 @@
-import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from '@/lib/firestore';
+import {
+  collection,
+  doc,
+  getDocFromServer,
+  getDocsFromServer,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  writeBatch,
+  writeHardDeleteBatch,
+} from '@/lib/firestore';
 import { auth, db } from '../firebase';
 import { isCloudOnline } from './lanCoordinator';
+import { getLocalSyncStatus, queryLocalRecords } from './localMirror';
+import { recordFirestoreRead } from './readDiagnostics';
+import { getSyncControl } from './syncProtocol';
 import { trustedNowISO } from './trustedClock';
+import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
+import { getActiveAuthSession } from './offlineAuth';
 
-export const GLOBAL_DATA_COLLECTIONS = [
-  'settings',
-  'counters',
-  'schedules',
-  'users',
-  'patients',
-  'appointments',
-  'consultations',
-  'prescriptionTemplates',
-  'admissions',
-  'wards',
-  'rooms',
-  'beds',
-  'bedTreatments',
-  'labOrders',
-  'labTests',
-  'bills',
-  'staff',
-  'medicines',
-  'suppliers',
-  'purchases',
-  'purchaseReturns',
-  'sales',
-  'heldBills',
-  'saleReturns',
-  'stockMovements',
-  'syncIssues',
-  'posSales',
-  'customers',
-  'customerPayments',
-  'expenses',
-  'pharmacyOrders',
-  'auditLogs',
-  'notifications',
-];
+export { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
 
 export type BackupFile = {
   exportedAt: string;
@@ -104,11 +85,24 @@ function getRestoreCollections(collections: Record<string, any[]>) {
 async function commitInChunks<T>(
   docs: T[],
   writeChunk: (batch: ReturnType<typeof writeBatch>, item: T) => void,
+  createBatch: typeof writeBatch = writeBatch,
+  onChunkCommitted?: (count: number) => void,
 ) {
   for (let i = 0; i < docs.length; i += 400) {
-    const batch = writeBatch(db);
+    const batch = createBatch(db);
     docs.slice(i, i + 400).forEach(item => writeChunk(batch, item));
     await batch.commit();
+    onChunkCommitted?.(Math.min(400, docs.length - i));
+  }
+}
+
+async function canExportCompleteLocalMirror() {
+  const generation = getSyncControl().datasetGeneration;
+  try {
+    const statuses = await Promise.all(GLOBAL_DATA_COLLECTIONS.map(getLocalSyncStatus));
+    return statuses.every(status => status.seedComplete && String(status.generation) === String(generation));
+  } catch {
+    return false;
   }
 }
 
@@ -127,6 +121,9 @@ function isCounterInScope(id: string, scope: ResetScope) {
 }
 
 export async function exportAllAppData(onProgress?: ProgressFn): Promise<BackupFile> {
+  if (getActiveAuthSession()?.profile.role !== 'admin') {
+    throw new Error('Only an admin account can export the complete application database.');
+  }
   const backup: BackupFile = {
     exportedAt: trustedNowISO(),
     version: '2.0',
@@ -134,10 +131,21 @@ export async function exportAllAppData(onProgress?: ProgressFn): Promise<BackupF
     collections: {},
   };
 
+  const useLocalMirror = await canExportCompleteLocalMirror();
+  if (!useLocalMirror && typeof navigator !== 'undefined' && !isCloudOnline()) {
+    throw new Error('Initial synchronization is incomplete. Connect this device to the internet before exporting a full backup.');
+  }
+
   for (const collectionName of GLOBAL_DATA_COLLECTIONS) {
     onProgress?.(`Exporting ${collectionName}...`);
-    const snap = await getDocs(collection(db, collectionName));
-    backup.collections[collectionName] = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
+    if (useLocalMirror) {
+      const records = await queryLocalRecords(collectionName, { includeDeleted: true });
+      backup.collections[collectionName] = records.map(record => ({ _id: record.id, ...record.data }));
+      continue;
+    }
+    const snap = await getDocsFromServer(collection(db, collectionName));
+    recordFirestoreRead({ collection: collectionName, source: 'query', reason: 'manual', documents: snap.size });
+    backup.collections[collectionName] = snap.docs.map(document => ({ _id: document.id, ...document.data() }));
   }
 
   return backup;
@@ -177,12 +185,12 @@ export async function deleteAppDataScope(scope: ResetScope, onProgress?: Progres
   }
 
   const currentUserRef = doc(db, 'users', currentUser.uid);
-  const currentUserSnap = await getDoc(currentUserRef);
+  const currentUserSnap = await getDocFromServer(currentUserRef);
   const currentUserData = currentUserSnap.exists() ? currentUserSnap.data() : null;
-  const isCurrentAdmin = currentUserData?.role === 'admin';
+  const isCurrentAdmin = currentUserData?.role === 'admin' && currentUserData?.deleted !== true;
   const isBootstrapAdmin = currentUser.email === BOOTSTRAP_ADMIN_EMAIL;
 
-  if (!isCurrentAdmin && !isBootstrapAdmin) {
+  if (!isCurrentAdmin && !(isBootstrapAdmin && !currentUserSnap.exists())) {
     throw new Error('Only an admin account can reset app data.');
   }
 
@@ -198,40 +206,94 @@ export async function deleteAppDataScope(scope: ResetScope, onProgress?: Progres
     }, { merge: true });
   }
 
-  for (const collectionName of RESET_COLLECTIONS[scope]) {
-    try {
-      onProgress?.(`Deleting ${collectionName}...`);
-      const snap = await getDocs(collection(db, collectionName));
-      const docs = snap.docs.filter(document => {
-        if (collectionName === 'users') return false;
-        if (collectionName === 'counters') return isCounterInScope(document.id, scope);
-        if (collectionName === 'expenses') return isExpenseInScope(document.data(), scope);
-        return true;
-      });
-      if (!docs.length) continue;
-
-      await commitInChunks(docs, (batch, document) => batch.delete(document.ref));
-      totalDocs += docs.length;
-    } catch (error: any) {
-      throw new Error(`Failed deleting ${collectionName}: ${error?.message || error}`);
+  const controlRef = doc(db, 'syncControl', 'current');
+  const resetOperationId = crypto.randomUUID();
+  onProgress?.('Preparing synchronized reset...');
+  await runTransaction(db, async transaction => {
+    const controlSnapshot = await transaction.get(controlRef);
+    const controlData = controlSnapshot.data() || {};
+    if (controlData.resetInProgress === true) {
+      throw new Error('Another reset is already in progress or requires administrator recovery. No records were deleted by this request.');
     }
+    transaction.set(controlRef, {
+      datasetGeneration: nextDatasetGeneration(controlData.datasetGeneration),
+      incrementalEnabled: false,
+      rollbackToLegacy: true,
+      resetInProgress: true,
+      resetOperationId,
+      resetStatus: 'running',
+      lastResetScope: scope,
+      lastResetAt: serverTimestamp(),
+      lastResetBy: currentUser.uid,
+    }, { merge: true });
+  });
+
+  let resetFailure: unknown;
+  try {
+    for (const collectionName of RESET_COLLECTIONS[scope]) {
+      try {
+        onProgress?.(`Deleting ${collectionName}...`);
+        const snap = await getDocsFromServer(collection(db, collectionName));
+        recordFirestoreRead({ collection: collectionName, source: 'query', reason: 'manual', documents: snap.size });
+        const docs = snap.docs.filter(document => {
+          if (collectionName === 'users') return false;
+          if (collectionName === 'counters') return isCounterInScope(document.id, scope);
+          if (collectionName === 'expenses') return isExpenseInScope(document.data(), scope);
+          return true;
+        });
+        if (!docs.length) continue;
+
+        await commitInChunks(docs, (batch, document) => batch.delete(document.ref), writeHardDeleteBatch,
+          count => { totalDocs += count; });
+      } catch (error: any) {
+        throw new Error(`Failed deleting ${collectionName}: ${error?.message || error}`);
+      }
+    }
+
+    onProgress?.('Verifying admin access...');
+    const adminSnap = await getDocFromServer(currentUserRef);
+    const adminData = adminSnap.exists() ? adminSnap.data() : null;
+    if (adminData?.role !== 'admin' || adminData?.deleted === true) {
+      throw new Error('Admin access changed during the reset. Administrator review is required.');
+    }
+  } catch (error) {
+    resetFailure = error;
   }
 
-  onProgress?.('Verifying admin access...');
-  const adminSnap = await getDoc(currentUserRef);
-  const adminData = adminSnap.exists() ? adminSnap.data() : null;
-  if (adminData?.role !== 'admin') {
-    await setDoc(currentUserRef, {
-      name: currentUserData?.name || 'Admin',
-      username: currentUserData?.username || 'admin',
-      email: currentUserData?.email || 'admin',
-      role: 'admin',
-      app: currentUserData?.app || 'hms',
-      repairedAt: trustedNowISO(),
-    }, { merge: true });
+  onProgress?.('Finalizing synchronized reset...');
+  try {
+    await runTransaction(db, async transaction => {
+      const controlSnapshot = await transaction.get(controlRef);
+      const controlData = controlSnapshot.data() || {};
+      if (controlData.resetOperationId !== resetOperationId) {
+        throw new Error('Reset ownership changed. Administrator recovery is required.');
+      }
+      // Invalidate after the last deletion even when only part of a reset worked.
+      // A complete legacy snapshot is required before incremental mode resumes.
+      transaction.set(controlRef, {
+        datasetGeneration: nextDatasetGeneration(controlData.datasetGeneration),
+        incrementalEnabled: false,
+        rollbackToLegacy: true,
+        resetInProgress: false,
+        resetStatus: resetFailure ? 'failed' : 'completed',
+        resetDeletedRecords: totalDocs,
+        resetFinishedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+  } catch (finalizationError) {
+    const detail = resetFailure instanceof Error ? resetFailure.message : 'Reset writes have finished.';
+    throw new Error(`${detail} Reset synchronization could not be finalized. Legacy synchronization remains selected; an administrator must check the reset marker before another reset. ${finalizationError instanceof Error ? finalizationError.message : String(finalizationError)}`);
   }
+  if (resetFailure) throw resetFailure;
 
   return totalDocs;
+}
+
+function nextDatasetGeneration(value: unknown) {
+  const generation = Number(value);
+  if (!Number.isSafeInteger(generation) || generation < 1) return 2;
+  if (generation === Number.MAX_SAFE_INTEGER) throw new Error('Dataset generation requires administrator recovery.');
+  return generation + 1;
 }
 
 export function summarizeBackup(backup: Pick<BackupFile, 'collections'>) {

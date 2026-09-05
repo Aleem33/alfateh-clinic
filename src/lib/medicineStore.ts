@@ -1,5 +1,5 @@
-import { collection, onSnapshot, type Unsubscribe } from '@/lib/firestore';
-import { db } from '../firebase';
+import type { Unsubscribe } from 'firebase/firestore';
+import { subscribeToLocalCollection } from './collectionRepository';
 import { indexMedicine, partitionMedicines, type MedicineRecord } from './medicineIndex';
 
 type Subscriber = {
@@ -20,8 +20,7 @@ const subscribers = new Set<Subscriber>();
 let cachedAllMedicines: MedicineRecord[] = [];
 let hasLoaded = false;
 let fromCache = true;
-let firestoreUnsubscribe: Unsubscribe | null = null;
-let stopTimer: ReturnType<typeof setTimeout> | null = null;
+let localUnsubscribe: Unsubscribe | null = null;
 
 function currentSnapshot(): MedicineStoreSnapshot {
   const { active, archived } = partitionMedicines(cachedAllMedicines);
@@ -34,45 +33,37 @@ function notifySubscribers() {
 }
 
 function startListener() {
-  if (firestoreUnsubscribe) return;
-  firestoreUnsubscribe = onSnapshot(
-    collection(db, 'medicines'),
-    snapshot => {
-      // The Firestore document ID is authoritative. Some legacy documents have
-      // an `id` field in their payload, which must not overwrite the real ID.
-      cachedAllMedicines = snapshot.docs.map(item => indexMedicine({ ...item.data(), id: item.id }));
+  if (localUnsubscribe) return;
+  // The complete mirror is the operational source in both rollout stages.
+  // Firestore's own cache can evict documents and is not a complete inventory.
+  localUnsubscribe = subscribeToLocalCollection(
+    'medicines',
+    records => {
+      cachedAllMedicines = records.map(item => indexMedicine(item));
       hasLoaded = true;
-      fromCache = snapshot.metadata.fromCache;
+      fromCache = true;
       notifySubscribers();
     },
     error => {
       for (const subscriber of subscribers) subscriber.onError?.(error);
     },
+    { includeDeleted: false },
   );
 }
 
 function stopListenerWhenIdle() {
-  if (stopTimer) clearTimeout(stopTimer);
-  stopTimer = setTimeout(() => {
-    if (subscribers.size > 0) return;
-    firestoreUnsubscribe?.();
-    firestoreUnsubscribe = null;
-    cachedAllMedicines = [];
-    hasLoaded = false;
-    fromCache = true;
-    stopTimer = null;
-  }, 30_000);
+  if (subscribers.size > 0) return;
+  localUnsubscribe?.();
+  localUnsubscribe = null;
+  cachedAllMedicines = [];
+  hasLoaded = false;
+  fromCache = true;
 }
 
 export function subscribeToMedicines(
   onData: (medicines: MedicineRecord[]) => void,
   onError?: (error: unknown) => void,
 ): Unsubscribe {
-  if (stopTimer) {
-    clearTimeout(stopTimer);
-    stopTimer = null;
-  }
-
   const subscriber: Subscriber = { onData, onError, select: 'active' };
   subscribers.add(subscriber);
   if (hasLoaded) onData(currentSnapshot().active);
@@ -88,11 +79,6 @@ export function subscribeToArchivedMedicines(
   onData: (medicines: MedicineRecord[]) => void,
   onError?: (error: unknown) => void,
 ): Unsubscribe {
-  if (stopTimer) {
-    clearTimeout(stopTimer);
-    stopTimer = null;
-  }
-
   const subscriber: Subscriber = { onData, onError, select: 'archived' };
   subscribers.add(subscriber);
   if (hasLoaded) onData(currentSnapshot().archived);

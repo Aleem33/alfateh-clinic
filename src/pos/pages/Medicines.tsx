@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, doc } from '@/lib/firestore';
 import { downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -27,6 +27,7 @@ import {
   MedicineConflictError,
   restoreMedicine,
 } from '../../lib/medicineOperations';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const emptyMedicineForm = {
   name: '', form: 'Tablet', unitsPerBox: '1',
@@ -73,9 +74,11 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
       setArchivedMedicines,
       err => setFormError(handleFirestoreError(err, OperationType.GET, 'medicines')),
     );
-    const unsubSuppliers = onSnapshot(collection(db, 'suppliers'), snap => {
-      setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'suppliers'));
+    const unsubSuppliers = subscribeToLocalCollection(
+      'suppliers',
+      setSuppliers,
+      err => handleFirestoreError(err, OperationType.GET, 'suppliers'),
+    );
     return () => { unsubMedicines(); unsubArchived(); unsubSuppliers(); };
   }, []);
 

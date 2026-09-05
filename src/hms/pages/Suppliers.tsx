@@ -1,10 +1,11 @@
 import { Fragment, useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { Plus, Search, Edit2, Trash2, X, Truck, Phone, Mail, MapPin, ChevronDown, Package } from 'lucide-react';
 import { useAppDialog } from '../../components/AppDialog';
 import { SupplierMedicinesPanel } from '../../components/SupplierMedicinesPanel';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const CATEGORIES = ['Medicines', 'Medical Equipment', 'Surgical Supplies', 'Lab Supplies', 'Other'];
 
@@ -36,8 +37,8 @@ export function Suppliers() {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'suppliers'), snap =>
-      setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => a.name > b.name ? 1 : -1))
+    const unsub = subscribeToLocalCollection('suppliers', records =>
+      setSuppliers(records.sort((a: any, b: any) => a.name > b.name ? 1 : -1))
     );
     return () => unsub();
   }, []);

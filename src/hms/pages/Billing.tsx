@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, getDoc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, doc, getDoc } from '@/lib/firestore';
 import { db, auth, getNextBillNo } from '../../firebase';
 import { formatCurrency, formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Search, X, Printer, CheckCircle } from 'lucide-react';
 import { printBill } from '../lib/pdf';
 import { useAppDialog } from '../../components/AppDialog';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const PAYMENT_METHODS = ['Cash', 'Card', 'Online Transfer', 'Cheque'];
 const ITEM_CATEGORIES = ['Consultation', 'Lab Test', 'Medicine', 'IPD Charges', 'Procedure', 'Other'];
@@ -31,10 +32,10 @@ export function Billing() {
   const [newItem, setNewItem] = useState({ description: '', category: 'Consultation', quantity: '1', rate: '' });
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'bills'), snap =>
-      setBills(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
+    const u1 = subscribeToLocalCollection('bills', records =>
+      setBills(records.sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
-    const u2 = onSnapshot(collection(db, 'patients'), snap => setPatients(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const u2 = subscribeToLocalCollection('patients', setPatients);
     getDoc(doc(db, 'settings', 'hospital')).then(snap => {
       if (snap.exists()) setHospitalSettings(s => ({ ...s, ...snap.data() }));
     });

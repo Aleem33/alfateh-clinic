@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
+import { collection, addDoc, deleteDoc, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare, printPageOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosReceiptNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -21,6 +21,8 @@ import { allocateCartBonusCost } from '../lib/bonusInventory';
 import { isCloudOnline } from '../../lib/lanCoordinator';
 import { clinicDateKey, clinicTimeLabel, recordClinicDateTimeLabel } from '../../lib/clinicDate';
 import { getTrustedClockReading, trustedNow, trustedNowISO } from '../../lib/trustedClock';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -68,20 +70,20 @@ export function Billing() {
       setMedicines,
       err => handleFirestoreError(err, OperationType.GET, 'medicines'),
     );
-    const unsub2 = onSnapshot(collection(db, 'customers'), snap => {
-      setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, err => handleFirestoreError(err, OperationType.GET, 'customers'));
-    const unsub3 = onSnapshot(collection(db, 'pharmacyOrders'), snap => {
+    const unsub2 = subscribeToLocalCollection(
+      'customers',
+      setCustomers,
+      err => handleFirestoreError(err, OperationType.GET, 'customers'),
+    );
+    const unsub3 = subscribeToLocalCollection('pharmacyOrders', records => {
       setPharmacyOrders(
-        snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
+        records
           .filter((o: any) => o.status === 'pending')
           .sort((a: any, b: any) => (b.createdAt > a.createdAt ? 1 : -1))
       );
     }, err => handleFirestoreError(err, OperationType.GET, 'pharmacyOrders'));
-    const unsub4 = onSnapshot(collection(db, 'heldBills'), snap => {
-      setHeldBills(snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
+    const unsub4 = subscribeToLocalCollection('heldBills', records => {
+      setHeldBills(records
         .sort((a: any, b: any) =>
           String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
         ));
@@ -424,7 +426,7 @@ export function Billing() {
         businessDate: clinicDateKey(saleTimestamp),
         timeSource: saleClock.source,
         customerType,
-        cashierId: auth.currentUser?.uid,
+        cashierId: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
       };
       if (selectedCustomer) {
         saleData.customerId    = selectedCustomer.id;

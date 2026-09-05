@@ -6,7 +6,19 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { disableNetwork, doc, enableNetwork, getDocFromServer, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import {
+  deleteDoc,
+  deleteField,
+  disableNetwork,
+  doc,
+  enableNetwork,
+  getDoc,
+  getDocFromServer,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore';
 
 const emulatorAddress = process.env.FIRESTORE_EMULATOR_HOST || '';
 const integrationDescribe = emulatorAddress ? describe : describe.skip;
@@ -64,6 +76,45 @@ integrationDescribe('Firestore offline operational rules', () => {
     batch.update(doc(database, 'medicines', 'batch-a'), { stock: 90, bonusStockUnits: 5 });
     batch.update(doc(database, 'customers', 'customer-1'), { creditBalance: 100 });
     await assertSucceeds(batch.commit());
+  });
+
+  it('accepts validated protocol-v2 metadata on permitted medicine stock and cost writes', async () => {
+    const cashierDatabase = environment.authenticatedContext('cashier-1').firestore();
+    await assertSucceeds(updateDoc(doc(cashierDatabase, 'medicines', 'batch-a'), {
+      stock: 99,
+      bonusStockUnits: 9,
+      syncUpdatedAt: serverTimestamp(),
+      syncProtocolVersion: 2,
+    }));
+
+    const pharmacistDatabase = environment.authenticatedContext('pharmacist-1').firestore();
+    await assertSucceeds(updateDoc(doc(pharmacistDatabase, 'medicines', 'batch-a'), {
+      stock: 119,
+      costPrice: 320,
+      syncUpdatedAt: serverTimestamp(),
+      syncProtocolVersion: 2,
+    }));
+  });
+
+  it('rejects forged sync metadata and still blocks unauthorized medicine fields', async () => {
+    const cashierDatabase = environment.authenticatedContext('cashier-1').firestore();
+    await assertFails(updateDoc(doc(cashierDatabase, 'medicines', 'batch-a'), {
+      stock: 99,
+      syncUpdatedAt: 'not-a-server-timestamp',
+      syncProtocolVersion: 2,
+    }));
+    await assertFails(updateDoc(doc(cashierDatabase, 'medicines', 'batch-a'), {
+      stock: 99,
+      syncUpdatedAt: serverTimestamp(),
+      syncProtocolVersion: 99,
+    }));
+
+    const pharmacistDatabase = environment.authenticatedContext('pharmacist-1').firestore();
+    await assertFails(updateDoc(doc(pharmacistDatabase, 'medicines', 'batch-a'), {
+      retailPrice: 1,
+      syncUpdatedAt: serverTimestamp(),
+      syncProtocolVersion: 2,
+    }));
   });
 
   it('blocks a cashier from making the bonus bucket negative or larger than stock', async () => {
@@ -180,6 +231,157 @@ integrationDescribe('Firestore offline operational rules', () => {
     await assertSucceeds(pendingCommit);
     const confirmed = await getDocFromServer(doc(database, 'sales', 'sale-offline'));
     if (!confirmed.exists()) throw new Error('Queued offline sale did not reach the server after reconnect.');
+  });
+
+  it('allows authenticated sync-control reads but only administrators can write control', async () => {
+    const adminDatabase = environment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(setDoc(doc(adminDatabase, 'syncControl', 'current'), {
+      incrementalEnabled: false,
+      rollbackToLegacy: false,
+      minimumProtocolVersion: 2,
+      datasetGeneration: 1,
+    }));
+
+    const cashierDatabase = environment.authenticatedContext('cashier-1').firestore();
+    await assertSucceeds(getDoc(doc(cashierDatabase, 'syncControl', 'current')));
+    await assertFails(updateDoc(doc(cashierDatabase, 'syncControl', 'current'), {
+      incrementalEnabled: true,
+    }));
+
+    const publicDatabase = environment.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(publicDatabase, 'syncControl', 'current')));
+  });
+
+  it('allows users to register their own sync client while reserving administration to admins', async () => {
+    const cashierDatabase = environment.authenticatedContext('cashier-1').firestore();
+    const clientRef = doc(cashierDatabase, 'syncClients', 'device-r001');
+    await assertSucceeds(setDoc(clientRef, {
+      deviceId: 'device-r001',
+      uid: 'cashier-1',
+      role: 'cashier',
+      protocolVersion: 2,
+      mirrorReady: false,
+    }));
+    await assertSucceeds(getDoc(clientRef));
+    await assertSucceeds(updateDoc(clientRef, {
+      uid: 'cashier-1',
+      deviceId: 'device-r001',
+      mirrorReady: true,
+    }));
+
+    await assertFails(setDoc(doc(cashierDatabase, 'syncClients', 'device-spoofed'), {
+      deviceId: 'device-spoofed',
+      uid: 'pharmacist-1',
+      protocolVersion: 2,
+    }));
+    await assertFails(setDoc(doc(cashierDatabase, 'syncClients', 'wrong-path'), {
+      deviceId: 'different-device',
+      uid: 'cashier-1',
+      protocolVersion: 2,
+    }));
+    await assertFails(deleteDoc(clientRef));
+
+    const pharmacistDatabase = environment.authenticatedContext('pharmacist-1').firestore();
+    await assertFails(getDoc(doc(pharmacistDatabase, 'syncClients', 'device-r001')));
+
+    const adminDatabase = environment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(getDoc(doc(adminDatabase, 'syncClients', 'device-r001')));
+    await assertSucceeds(deleteDoc(doc(adminDatabase, 'syncClients', 'device-r001')));
+  });
+
+  it('revokes a tombstoned user role immediately', async () => {
+    const adminDatabase = environment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(updateDoc(doc(adminDatabase, 'users', 'cashier-1'), {
+      deleted: true,
+      deletedBy: 'admin-1',
+    }));
+
+    const cashierDatabase = environment.authenticatedContext('cashier-1').firestore();
+    await assertFails(setDoc(doc(cashierDatabase, 'sales', 'sale-after-revocation'), {
+      receiptNo: 'REVOKED-1',
+      total: 100,
+    }));
+  });
+
+  it('keeps soft deletion and restoration admin-only where non-admins may edit records', async () => {
+    const cases = [
+      ['cashier', 'sales'], ['cashier', 'saleReturns'], ['cashier', 'customers'],
+      ['cashier', 'customerPayments'], ['cashier', 'bills'], ['cashier', 'payments'],
+      ['pharmacist', 'posSales'], ['pharmacist', 'purchaseReturns'],
+      ['pharmacist', 'posExpenses'], ['pharmacist', 'pharmacyOrders'],
+      ['receptionist', 'patients'], ['doctor', 'consultations'],
+      ['doctor', 'admissions'], ['nurse', 'bedTreatments'], ['lab', 'labOrders'],
+      ['accountant', 'expenses'], ['cashier', 'syncIssues'], ['cashier', 'notifications'],
+    ];
+    await environment.withSecurityRulesDisabled(async context => {
+      const database = context.firestore();
+      for (const [role, collectionName] of cases) {
+        await setDoc(doc(database, 'users', `${role}-1`), { role, active: true });
+        await setDoc(doc(database, collectionName, 'editable'), {
+          value: 1, userId: `${role}-1`, deleted: false,
+        });
+        await setDoc(doc(database, collectionName, 'deleted'), {
+          value: 1, userId: `${role}-1`, deleted: true, deletedBy: 'admin-1',
+        });
+      }
+    });
+    for (const [role, collectionName] of cases) {
+      const database = environment.authenticatedContext(`${role}-1`).firestore();
+      await assertSucceeds(updateDoc(doc(database, collectionName, 'editable'), { value: 2 }));
+      await assertFails(updateDoc(doc(database, collectionName, 'editable'), {
+        deleted: true, deletedAt: serverTimestamp(), deletedBy: `${role}-1`,
+      }));
+      await assertFails(updateDoc(doc(database, collectionName, 'deleted'), { deleted: false }));
+      await assertFails(updateDoc(doc(database, collectionName, 'deleted'), {
+        deleted: deleteField(), deletedBy: deleteField(),
+      }));
+    }
+  });
+
+  it('blocks creating already-hidden operational records without deletion authority', async () => {
+    const cases = [
+      ['cashier', 'sales'], ['cashier', 'saleReturns'], ['cashier', 'customers'],
+      ['cashier', 'customerPayments'], ['cashier', 'stockMovements'],
+      ['pharmacist', 'purchases'], ['pharmacist', 'posPurchases'],
+      ['pharmacist', 'purchaseReturns'], ['pharmacist', 'medicines'],
+      ['cashier', 'auditLogs'], ['cashier', 'notifications'], ['cashier', 'syncIssues'],
+    ];
+    for (const [role, collectionName] of cases) {
+      const database = environment.authenticatedContext(`${role}-1`).firestore();
+      await assertFails(setDoc(doc(database, collectionName, 'hidden-on-create'), {
+        archived: false, deleted: true, deletedBy: `${role}-1`,
+      }));
+    }
+  });
+
+  it('retains recoverable deletion for roles that already had deletion permission', async () => {
+    const cases = [
+      ['cashier', 'heldBills'], ['cashier', 'counters'],
+      ['receptionist', 'appointments'], ['receptionist', 'schedules'],
+      ['doctor', 'prescriptionTemplates'], ['doctor', 'wards'], ['doctor', 'rooms'], ['doctor', 'beds'],
+      ['pharmacist', 'suppliers'], ['lab', 'labTests'],
+    ];
+    await environment.withSecurityRulesDisabled(async context => {
+      for (const [role, collectionName] of cases) {
+        await setDoc(doc(context.firestore(), 'users', `${role}-1`), { role });
+        await setDoc(doc(context.firestore(), collectionName, 'recoverable'), { value: 1 });
+      }
+    });
+    for (const [role, collectionName] of cases) {
+      const database = environment.authenticatedContext(`${role}-1`).firestore();
+      await assertSucceeds(updateDoc(doc(database, collectionName, 'recoverable'), {
+        deleted: true, deletedAt: serverTimestamp(), deletedBy: `${role}-1`,
+      }));
+      await assertSucceeds(updateDoc(doc(database, collectionName, 'recoverable'), { deleted: false }));
+    }
+  });
+
+  it('keeps admin tombstone, restore and intentional permanent reset authority', async () => {
+    const database = environment.authenticatedContext('admin-1').firestore();
+    const reference = doc(database, 'medicines', 'batch-a');
+    await assertSucceeds(updateDoc(reference, { deleted: true, deletedAt: serverTimestamp(), deletedBy: 'admin-1' }));
+    await assertSucceeds(updateDoc(reference, { deleted: false }));
+    await assertSucceeds(deleteDoc(reference));
   });
 
   it('rejects an unauthenticated sale write', async () => {

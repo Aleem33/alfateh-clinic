@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
-import { collection, doc, onSnapshot, orderBy, query, updateDoc } from '@/lib/firestore';
+import { doc, updateDoc } from '@/lib/firestore';
 import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { db } from '../firebase';
 import { runOfflineSyncNow } from '../lib/offlineSync';
 import { isCloudOnline } from '../lib/lanCoordinator';
 import { trustedNowISO } from '../lib/trustedClock';
+import { subscribeToLocalCollection } from '../lib/collectionRepository';
 
 export function SyncIssuesPage() {
   const [issues, setIssues] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
-    const q = query(collection(db, 'syncIssues'), orderBy('updatedAt', 'desc'));
-    return onSnapshot(q, snap => setIssues(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return subscribeToLocalCollection('syncIssues', records => setIssues(
+      records.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))),
+    ));
   }, []);
 
   const openIssues = issues.filter(i => i.status !== 'resolved');

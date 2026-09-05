@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, getDoc, query, where, getDocs, setDoc } from '@/lib/firestore';
+import { collection, addDoc, doc, updateDoc, getDoc, query, where, getDocs, setDoc } from '@/lib/firestore';
 import { db, auth, getNextBillNo } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
@@ -31,6 +31,7 @@ import { useAppDialog } from '../../components/AppDialog';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import { normalizeMedicineText, searchMedicines } from '../../lib/medicineIndex';
 import { subscribeToMedicines } from '../../lib/medicineStore';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const DEPARTMENTS = ['General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Dermatology', 'Cardiology', 'Neurology', 'Ophthalmology', 'Anesthesia'];
 const FOLLOW_UP_DAYS = Array.from({ length: 14 }, (_, i) => i + 1);
@@ -116,21 +117,21 @@ export function OPD() {
   const [batchPrinting, setBatchPrinting] = useState(false);
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'consultations'), snap =>
-      setConsultations(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
+    const u1 = subscribeToLocalCollection('consultations', records =>
+      setConsultations(records.sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
-    const u2 = onSnapshot(collection(db, 'patients'), snap => setPatients(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u3 = onSnapshot(collection(db, 'staff'), snap => setStaff(snap.docs.filter(d => d.data().role === 'doctor').map(d => ({ id: d.id, ...d.data() }))));
-    const u4 = onSnapshot(collection(db, 'labTests'), snap => setLabTests(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const u2 = subscribeToLocalCollection('patients', setPatients);
+    const u3 = subscribeToLocalCollection('staff', records => setStaff(records.filter(record => record.role === 'doctor')));
+    const u4 = subscribeToLocalCollection('labTests', setLabTests);
     const u5 = subscribeToMedicines(setMedicines);
-    const u6 = onSnapshot(collection(db, 'prescriptionTemplates'), snap => setTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u8 = onSnapshot(collection(db, 'appointments'), snap =>
-      setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) =>
+    const u6 = subscribeToLocalCollection('prescriptionTemplates', setTemplates);
+    const u8 = subscribeToLocalCollection('appointments', records =>
+      setAppointments(records.sort((a: any, b: any) =>
         `${a.date || ''}${a.time || ''}` > `${b.date || ''}${b.time || ''}` ? 1 : -1
       ))
     );
-    const u9 = onSnapshot(collection(db, 'labOrders'), snap =>
-      setPatientLabOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) =>
+    const u9 = subscribeToLocalCollection('labOrders', records =>
+      setPatientLabOrders(records.sort((a: any, b: any) =>
         (b.createdAt || b.date || '') > (a.createdAt || a.date || '') ? 1 : -1
       ))
     );
@@ -182,8 +183,8 @@ export function OPD() {
     }
 
     // Track which consultations already sent to pharmacy
-    const u7 = onSnapshot(collection(db, 'pharmacyOrders'), snap => {
-      setPharmacySentIds(new Set(snap.docs.map(d => d.data().consultationId).filter(Boolean)));
+    const u7 = subscribeToLocalCollection('pharmacyOrders', records => {
+      setPharmacySentIds(new Set(records.map(record => record.consultationId).filter(Boolean)));
     });
 
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); };

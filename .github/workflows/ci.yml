@@ -42,5 +42,17 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Setup Java for Firestore emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Firestore permission tests
+        run: npm run test:rules
+
+      - name: Online and offline billing smoke test
+        run: npm run test:smoke
+
       - name: Build Vite app (verify it compiles)
         run: npm run build

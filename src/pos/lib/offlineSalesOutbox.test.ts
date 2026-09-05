@@ -32,6 +32,7 @@ function deleteOutboxDatabase() {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await deleteOutboxDatabase();
 });
 
@@ -57,6 +58,18 @@ describe('offline sales outbox', () => {
     const record = sampleSale();
     await queuePendingPosSale(record);
     await expect(listPendingPosSales()).resolves.toEqual([record]);
+  });
+
+  it('does not confirm a saved sale if its transaction aborts after the request succeeds', async () => {
+    const originalPut = IDBObjectStore.prototype.put;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+      const request = originalPut.call(this, value, key);
+      request.addEventListener('success', () => this.transaction.abort());
+      return request;
+    });
+    await expect(queuePendingPosSale(sampleSale())).rejects.toMatchObject({ name: 'AbortError' });
+    vi.restoreAllMocks();
+    await expect(listPendingPosSales()).resolves.toEqual([]);
   });
 
   it('does not replay a sale that already reached the cloud', async () => {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, getDoc, query, where, getDocs, setDoc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, doc, getDoc, query, where, getDocs, setDoc } from '@/lib/firestore';
 import { db, auth, getNextMRN } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
@@ -15,6 +15,7 @@ import {
 } from 'date-fns';
 import { cn } from '../lib/utils';
 import { waitForOnlineWrite } from '../../lib/offlineWrite';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const DEPARTMENTS = ['General Medicine','Surgery','Gynecology','Pediatrics','ENT','Orthopedics','Dermatology','Cardiology','Neurology','Ophthalmology','Dentistry','Radiology','Anesthesia'];
 const TYPES = ['OPD','Follow-up','Emergency','Procedure'];
@@ -92,13 +93,13 @@ export function Appointments() {
   const [vitals, setVitals] = useState({ bp: '', temperature: '', weight: '', pulse: '', spo2: '' });
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'appointments'), snap =>
-      setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) =>
+    const u1 = subscribeToLocalCollection('appointments', records =>
+      setAppointments(records.sort((a: any, b: any) =>
         (b.date + b.time) > (a.date + a.time) ? -1 : 1))
     );
-    const u2 = onSnapshot(collection(db, 'patients'), snap => setPatients(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u3 = onSnapshot(collection(db, 'staff'), snap => {
-      const doctors = snap.docs.filter(d => d.data().role === 'doctor').map(d => ({ id: d.id, ...d.data() }));
+    const u2 = subscribeToLocalCollection('patients', setPatients);
+    const u3 = subscribeToLocalCollection('staff', records => {
+      const doctors = records.filter(record => record.role === 'doctor');
       setStaff(doctors as any[]);
     });
     getDoc(doc(db, 'settings', 'hospital')).then(snap => {
@@ -216,7 +217,7 @@ export function Appointments() {
       try {
         const billsQ = query(collection(db, 'bills'), where('appointmentId', '==', id));
         const snap = await getDocs(billsQ);
-        for (const b of snap.docs) {
+        for (const b of snap.docs.filter(document => document.data().deleted !== true)) {
           await updateDoc(doc(db, 'bills', b.id), { paymentStatus: status, updatedAt: nowISO() });
         }
       } catch (e) { console.error('Bill update failed:', e); }

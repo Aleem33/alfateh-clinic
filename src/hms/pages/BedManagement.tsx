@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Edit2, Trash2, X, BedDouble, Building2, DoorOpen, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAppDialog } from '../../components/AppDialog';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const BED_TYPES = ['General', 'Private', 'Semi-Private', 'ICU', 'CCU', 'Isolation', 'VIP'];
 
@@ -39,10 +40,10 @@ export function BedManagement() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'wards'), s => setWards(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => a.name > b.name ? 1 : -1)));
-    const u2 = onSnapshot(collection(db, 'rooms'), s => setRooms(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u3 = onSnapshot(collection(db, 'beds'), s => setBeds(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const u4 = onSnapshot(collection(db, 'admissions'), s => setAdmissions(s.docs.filter(d => d.data().status === 'admitted').map(d => ({ id: d.id, ...d.data() }))));
+    const u1 = subscribeToLocalCollection('wards', records => setWards(records.sort((a: any, b: any) => a.name > b.name ? 1 : -1)));
+    const u2 = subscribeToLocalCollection('rooms', setRooms);
+    const u3 = subscribeToLocalCollection('beds', setBeds);
+    const u4 = subscribeToLocalCollection('admissions', records => setAdmissions(records.filter(record => record.status === 'admitted')));
     return () => { u1(); u2(); u3(); u4(); };
   }, []);
 

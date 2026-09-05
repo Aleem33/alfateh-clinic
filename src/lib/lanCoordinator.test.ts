@@ -1,4 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mirror = vi.hoisted(() => ({ ready: true }));
+
+vi.mock('./mirrorReadiness', () => ({ isOfflineMirrorReady: () => mirror.ready }));
+vi.mock('./offlineAuth', () => ({
+  getActiveAuthSession: () => ({ profile: { role: 'cashier' } }),
+}));
+
 import { ensureLanWriteAccess, OfflineViewerWriteError, publishLanActivity } from './lanCoordinator';
 
 describe('LAN offline write coordination', () => {
@@ -8,6 +16,7 @@ describe('LAN offline write coordination', () => {
   beforeEach(() => {
     acquireLanWriteAccess.mockReset();
     publishActivity.mockReset();
+    mirror.ready = true;
     vi.stubGlobal('navigator', { onLine: false });
     vi.stubGlobal('window', {
       electronAPI: {
@@ -28,6 +37,17 @@ describe('LAN offline write coordination', () => {
       name: OfflineViewerWriteError.name,
       message: 'Pharmacy-PC-2 is the active offline device.',
     }));
+  });
+
+  it('blocks all offline writes until the local dataset is completely synchronized', async () => {
+    mirror.ready = false;
+    acquireLanWriteAccess.mockResolvedValue({ allowed: true });
+
+    await expect(ensureLanWriteAccess()).rejects.toEqual(expect.objectContaining({
+      name: OfflineViewerWriteError.name,
+      message: expect.stringContaining('Initial synchronization is required'),
+    }));
+    expect(acquireLanWriteAccess).not.toHaveBeenCalled();
   });
 
   it('broadcasts primary activity with a unique event identity', async () => {

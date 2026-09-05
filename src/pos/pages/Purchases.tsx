@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, increment, writeBatch } from '@/lib/firestore';
+import { collection, doc, increment, writeBatch } from '@/lib/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Search, Truck, PackagePlus, X, ChevronDown, CheckCircle, Edit2, AlertCircle, Trash2 } from 'lucide-react';
@@ -10,6 +10,7 @@ import { ensureMedicinePurchaseBatch, findMedicinePurchaseBatch } from '../../li
 import { calculatePurchaseQuantities, getEditedBatchSellingPriceUpdate, hasDuplicatePurchaseInvoiceLine, validateExistingBatchPurchase } from '../lib/purchaseInvoice';
 import { clinicDateKey } from '../../lib/clinicDate';
 import { getTrustedClockReading, trustedNow } from '../../lib/trustedClock';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const today = () => clinicDateKey(trustedNow());
 const emptyPurchaseForm = () => ({
@@ -41,10 +42,10 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   useEffect(() => {
     const u1 = subscribeToMedicines(setMedicines,
       e => handleFirestoreError(e, OperationType.GET, 'medicines'));
-    const u2 = onSnapshot(collection(db, 'suppliers'), s => setSuppliers(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+    const u2 = subscribeToLocalCollection('suppliers', setSuppliers,
       e => handleFirestoreError(e, OperationType.GET, 'suppliers'));
-    const u3 = onSnapshot(collection(db, 'purchases'), s => {
-      const list = s.docs.map(d => ({ id: d.id, ...d.data() }));
+    const u3 = subscribeToLocalCollection('purchases', records => {
+      const list = [...records];
       list.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setPurchases(list);
     }, e => handleFirestoreError(e, OperationType.GET, 'purchases'));

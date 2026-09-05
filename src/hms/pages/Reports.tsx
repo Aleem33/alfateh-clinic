@@ -1,6 +1,4 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot } from '@/lib/firestore';
-import { db } from '../../firebase';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
 import { format, subDays, subMonths, startOfMonth, endOfMonth, differenceInDays, parseISO } from 'date-fns';
@@ -11,6 +9,7 @@ import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../../pos/lib/salesFinancials';
 import { getBonusAwareStockValue } from '../../pos/lib/bonusInventory';
+import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 function exportCSV(filename: string, rows: any[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
@@ -61,12 +60,12 @@ export function Reports() {
 
   useEffect(() => {
     const u = [
-      onSnapshot(collection(db, 'bills'),         s => setBills(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'patients'),       s => setPatients(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'consultations'),  s => setConsultations(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'admissions'),     s => setAdmissions(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'labOrders'),      s => setLabOrders(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'expenses'),       s => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() })))),
+      subscribeToLocalCollection('bills', setBills),
+      subscribeToLocalCollection('patients', setPatients),
+      subscribeToLocalCollection('consultations', setConsultations),
+      subscribeToLocalCollection('admissions', setAdmissions),
+      subscribeToLocalCollection('labOrders', setLabOrders),
+      subscribeToLocalCollection('expenses', setExpenses),
       subscribeToMedicines(setMedicines),
       subscribeToSales(setPosSales),
       subscribeToSaleReturns(setPosReturns),

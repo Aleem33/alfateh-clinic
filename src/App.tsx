@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db, logout } from './firebase';
-import { doc, getDoc } from '@/lib/firestore';
+import { auth, logout } from './firebase';
 import { AppSelector } from './landing/AppSelector';
 import { HMSApp } from './hms/HMSApp';
 import { POSApp } from './pos/POSApp';
 import { GlobalAppNotifications } from './components/GlobalAppNotifications';
 import { AppDialogProvider } from './components/AppDialog';
 import { DesktopTitleBar } from './components/DesktopTitleBar';
+import { InitialSyncGate } from './components/InitialSyncGate';
 import { startOfflineSyncService } from './lib/offlineSync';
 import { isCloudOnline, startLanCoordinator } from './lib/lanCoordinator';
 import { startFullOfflineCache, stopFullOfflineCache } from './lib/offlineCache';
 import {
-  profileFromUserDocument,
+  getActiveAuthSession,
   setActiveAuthSession,
-  updateCachedAuthProfile,
+  subscribeActiveAuthSession,
   type AuthSession,
 } from './lib/offlineAuth';
 import { startOfflineAuthSync } from './lib/offlineAuthSync';
@@ -33,20 +33,30 @@ export default function App() {
   // Starts false every launch, so always shows AppSelector → Login → App.
   const [sessionAuthed, setSessionAuthed] = useState(false);
 
+  useEffect(() => subscribeActiveAuthSession(session => {
+    if (session) {
+      localStorage.setItem('alfateh.cachedUserRole', session.profile.role);
+      startFullOfflineCache(session.profile.role);
+      setUserRole(session.profile.role);
+      setUserEmail(session.profile.email);
+      setUser({ uid: session.profile.uid, email: session.profile.email });
+    } else {
+      stopFullOfflineCache();
+      localStorage.removeItem('alfateh.cachedUserRole');
+      setUserRole(null);
+      setUserEmail('');
+      setSessionAuthed(false);
+    }
+  }), []);
+
   useEffect(() => {
     startLanCoordinator();
     startOfflineAuthSync({
-      onSession: session => {
-        setUserRole(session.profile.role);
-        setUserEmail(session.profile.email);
-        setUser({ uid: session.profile.uid, email: session.profile.email });
-        localStorage.setItem('alfateh.cachedUserRole', session.profile.role);
-      },
+      onSession: () => setAuthError(''),
       onRevoked: message => {
+        setActiveAuthSession(null);
         setAuthError(message);
-        setSessionAuthed(false);
-        setUserRole(null);
-        setUserEmail('');
+        setUser(null);
         setAppMode(null);
       },
       onSyncError: message => setAuthError(message),
@@ -55,51 +65,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setAuthError('');
-      if (u) {
-        startFullOfflineCache();
-        setUserEmail(u.email || '');
-        try {
-          const snap = await getDoc(doc(db, 'users', u.uid));
-          if (!snap.exists()) {
-            setAuthError('Your account has not been configured yet. Please contact your administrator.');
-            await logout();
-            setUserRole(null);
-            setUserEmail('');
-          } else {
-            const profile = profileFromUserDocument(u.uid, u.email || '', snap.data());
-            setUserRole(profile.role);
-            localStorage.setItem('alfateh.cachedUserRole', profile.role);
-            void updateCachedAuthProfile(profile);
-          }
-        } catch {
-          if (!isCloudOnline()) {
-            setAuthError('Using cached login. Some cloud-only actions will sync when internet returns.');
-            setUserRole(localStorage.getItem('alfateh.cachedUserRole') || 'cashier');
-          } else {
-            setAuthError('Failed to load your account. Please try again.');
-            await logout();
-          }
-        }
-      } else {
-        stopFullOfflineCache();
-        setUserRole(null);
-        setUserEmail('');
-        setUser(null);
-        // Only go back to selector if we're not in the middle of switching apps
-        // (handleSwitchApp / handleSelectApp manage appMode themselves)
-        setSessionAuthed(false);
-        return;
-      }
-      setUser(u);
+    const unsub = onAuthStateChanged(auth, u => {
+      const session = getActiveAuthSession();
+      // Login validates the profile; the verified local session owns permissions.
+      // Firebase may temporarily sign out while an offline account reconnects.
+      if (session?.mode === 'offline') return;
+      if (!u && session) setActiveAuthSession(null);
+      if (!getActiveAuthSession()) setUser(u);
     });
-    return () => unsub();
+    return () => {
+      unsub();
+      stopFullOfflineCache();
+    };
   }, []);
 
   // Called when user picks an app from the selector
   const handleSelectApp = async (mode: AppMode) => {
-    setSessionAuthed(false);
+    setActiveAuthSession(null);
     setAppMode(mode);
     // Sign out any persisted Firebase session silently (don't let
     // onAuthStateChanged reset appMode — we set it right after)
@@ -112,31 +94,23 @@ export default function App() {
 
   // Called by HMS / POS login page after successful Firebase login
   const handleLoginSuccess = (session: AuthSession) => {
-    startFullOfflineCache();
     setActiveAuthSession(session);
-    setUserRole(session.profile.role);
-    setUserEmail(session.profile.email);
-    setUser({ uid: session.profile.uid, email: session.profile.email });
-    localStorage.setItem('alfateh.cachedUserRole', session.profile.role);
+    setAuthError('');
     setSessionAuthed(true);
   };
 
   // Called by the Switch App button inside HMS or POS
   const handleSwitchApp = async (targetMode: AppMode) => {
-    if (isCloudOnline()) await logout();
     setActiveAuthSession(null);
-    setSessionAuthed(false);
-    setUserRole(null);
     setAppMode(targetMode);     // go straight to target app's login
+    if (isCloudOnline()) await logout();
   };
 
   // Plain logout — go all the way back to AppSelector
   const handleLogout = async () => {
-    if (isCloudOnline()) await logout();
     setActiveAuthSession(null);
-    setSessionAuthed(false);
-    setUserRole(null);
     setAppMode(null);
+    if (isCloudOnline()) await logout();
   };
 
   // ── Loading (Firebase resolving persisted auth) ─────────────────────────────
@@ -191,18 +165,18 @@ export default function App() {
 
   // ── Step 3: Inside the app ──────────────────────────────────────────────────
   if (appMode === 'hms') {
-    return withShell(<HMSApp
+    return withShell(<InitialSyncGate key={`${user?.uid}:${userRole}`} onLogout={handleLogout}><HMSApp
       userRole={userRole}
       userEmail={userEmail}
       onSwitchApp={handleSwitchApp}
       onLoginSuccess={handleLoginSuccess}
       onLogout={handleLogout}
-    />);
+    /></InitialSyncGate>);
   }
-  return withShell(<POSApp
+  return withShell(<InitialSyncGate key={`${user?.uid}:${userRole}`} onLogout={handleLogout}><POSApp
     userRole={userRole}
     onSwitchApp={handleSwitchApp}
     onLoginSuccess={handleLoginSuccess}
     onLogout={handleLogout}
-  />);
+  /></InitialSyncGate>);
 }

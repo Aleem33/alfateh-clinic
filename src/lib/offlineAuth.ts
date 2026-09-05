@@ -26,7 +26,7 @@ export function profileFromUserDocument(uid: string, email: string, data: Record
     permissions: Array.isArray(data.permissions)
       ? data.permissions.map(String)
       : (data.permissions && typeof data.permissions === 'object' ? data.permissions : []),
-    active: data.active !== false && data.disabled !== true,
+    active: data.active !== false && data.disabled !== true && data.deleted !== true,
     profileUpdatedAt: String(data.updatedAt || trustedNowISO()),
   };
 }
