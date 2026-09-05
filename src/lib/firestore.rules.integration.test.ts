@@ -8,6 +8,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   deleteDoc,
+  deleteField,
   disableNetwork,
   doc,
   enableNetwork,
@@ -286,6 +287,101 @@ integrationDescribe('Firestore offline operational rules', () => {
     const adminDatabase = environment.authenticatedContext('admin-1').firestore();
     await assertSucceeds(getDoc(doc(adminDatabase, 'syncClients', 'device-r001')));
     await assertSucceeds(deleteDoc(doc(adminDatabase, 'syncClients', 'device-r001')));
+  });
+
+  it('revokes a tombstoned user role immediately', async () => {
+    const adminDatabase = environment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(updateDoc(doc(adminDatabase, 'users', 'cashier-1'), {
+      deleted: true,
+      deletedBy: 'admin-1',
+    }));
+
+    const cashierDatabase = environment.authenticatedContext('cashier-1').firestore();
+    await assertFails(setDoc(doc(cashierDatabase, 'sales', 'sale-after-revocation'), {
+      receiptNo: 'REVOKED-1',
+      total: 100,
+    }));
+  });
+
+  it('keeps soft deletion and restoration admin-only where non-admins may edit records', async () => {
+    const cases = [
+      ['cashier', 'sales'], ['cashier', 'saleReturns'], ['cashier', 'customers'],
+      ['cashier', 'customerPayments'], ['cashier', 'bills'], ['cashier', 'payments'],
+      ['pharmacist', 'posSales'], ['pharmacist', 'purchaseReturns'],
+      ['pharmacist', 'posExpenses'], ['pharmacist', 'pharmacyOrders'],
+      ['receptionist', 'patients'], ['doctor', 'consultations'],
+      ['doctor', 'admissions'], ['nurse', 'bedTreatments'], ['lab', 'labOrders'],
+      ['accountant', 'expenses'], ['cashier', 'syncIssues'], ['cashier', 'notifications'],
+    ];
+    await environment.withSecurityRulesDisabled(async context => {
+      const database = context.firestore();
+      for (const [role, collectionName] of cases) {
+        await setDoc(doc(database, 'users', `${role}-1`), { role, active: true });
+        await setDoc(doc(database, collectionName, 'editable'), {
+          value: 1, userId: `${role}-1`, deleted: false,
+        });
+        await setDoc(doc(database, collectionName, 'deleted'), {
+          value: 1, userId: `${role}-1`, deleted: true, deletedBy: 'admin-1',
+        });
+      }
+    });
+    for (const [role, collectionName] of cases) {
+      const database = environment.authenticatedContext(`${role}-1`).firestore();
+      await assertSucceeds(updateDoc(doc(database, collectionName, 'editable'), { value: 2 }));
+      await assertFails(updateDoc(doc(database, collectionName, 'editable'), {
+        deleted: true, deletedAt: serverTimestamp(), deletedBy: `${role}-1`,
+      }));
+      await assertFails(updateDoc(doc(database, collectionName, 'deleted'), { deleted: false }));
+      await assertFails(updateDoc(doc(database, collectionName, 'deleted'), {
+        deleted: deleteField(), deletedBy: deleteField(),
+      }));
+    }
+  });
+
+  it('blocks creating already-hidden operational records without deletion authority', async () => {
+    const cases = [
+      ['cashier', 'sales'], ['cashier', 'saleReturns'], ['cashier', 'customers'],
+      ['cashier', 'customerPayments'], ['cashier', 'stockMovements'],
+      ['pharmacist', 'purchases'], ['pharmacist', 'posPurchases'],
+      ['pharmacist', 'purchaseReturns'], ['pharmacist', 'medicines'],
+      ['cashier', 'auditLogs'], ['cashier', 'notifications'], ['cashier', 'syncIssues'],
+    ];
+    for (const [role, collectionName] of cases) {
+      const database = environment.authenticatedContext(`${role}-1`).firestore();
+      await assertFails(setDoc(doc(database, collectionName, 'hidden-on-create'), {
+        archived: false, deleted: true, deletedBy: `${role}-1`,
+      }));
+    }
+  });
+
+  it('retains recoverable deletion for roles that already had deletion permission', async () => {
+    const cases = [
+      ['cashier', 'heldBills'], ['cashier', 'counters'],
+      ['receptionist', 'appointments'], ['receptionist', 'schedules'],
+      ['doctor', 'prescriptionTemplates'], ['doctor', 'wards'], ['doctor', 'rooms'], ['doctor', 'beds'],
+      ['pharmacist', 'suppliers'], ['lab', 'labTests'],
+    ];
+    await environment.withSecurityRulesDisabled(async context => {
+      for (const [role, collectionName] of cases) {
+        await setDoc(doc(context.firestore(), 'users', `${role}-1`), { role });
+        await setDoc(doc(context.firestore(), collectionName, 'recoverable'), { value: 1 });
+      }
+    });
+    for (const [role, collectionName] of cases) {
+      const database = environment.authenticatedContext(`${role}-1`).firestore();
+      await assertSucceeds(updateDoc(doc(database, collectionName, 'recoverable'), {
+        deleted: true, deletedAt: serverTimestamp(), deletedBy: `${role}-1`,
+      }));
+      await assertSucceeds(updateDoc(doc(database, collectionName, 'recoverable'), { deleted: false }));
+    }
+  });
+
+  it('keeps admin tombstone, restore and intentional permanent reset authority', async () => {
+    const database = environment.authenticatedContext('admin-1').firestore();
+    const reference = doc(database, 'medicines', 'batch-a');
+    await assertSucceeds(updateDoc(reference, { deleted: true, deletedAt: serverTimestamp(), deletedBy: 'admin-1' }));
+    await assertSucceeds(updateDoc(reference, { deleted: false }));
+    await assertSucceeds(deleteDoc(reference));
   });
 
   it('rejects an unauthenticated sale write', async () => {
