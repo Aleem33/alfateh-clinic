@@ -48,6 +48,8 @@ Set `FIREBASE_TOOLS_PATH` to the installed `firebase-tools` package directory an
 
 Only after all PCs are confirmed ready, run the same command with `--activate --confirm-all-devices-ready`. It rejects incomplete/old/stale clients, a rules mismatch, a reset, or missing explicit confirmation. It changes one control document with an update-time precondition and server timestamps, incrementing generation for a fresh baseline. A failed or uncertain mutation is not automatically retried. Inspect control state first.
 
+If the operator explicitly identifies retired/test installations, pass their exact comma-separated IDs with `--exclude-test-devices`. Unknown IDs and excluding every device are rejected. Exclusions are saved in the control audit metadata; no device or business records are deleted or rewritten. Never infer that a not-ready device is retired.
+
 For explicit rollback, use `--rollback`: it selects full legacy listeners without deleting cloud records, mirrors, or outboxes and leaves tracked-write enforcement intact. Reactivation requires a fresh generation and another readiness audit. Never replace enforced rules with legacy rules while incremental mode remains enabled.
 
 The target of changed-record-only reconnect reads is a release-2 acceptance target, not a claim about release 1: legacy full listeners can still incur initial and reconnect query costs.

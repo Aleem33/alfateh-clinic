@@ -23,6 +23,18 @@ describe('guarded rollout policy', () => {
       incrementalEnabled: true, trackedWritesRequired: true, rulesEnforcementVersion: 2 });
     expect(inputs.control).toEqual({ datasetGeneration: 1 });
   });
+  it('excludes only explicitly identified old test installations without deleting their records', () => {
+    const testDevice = { ...client, id: 'old-test', mirrorReady: false };
+    const clients = [client, testDevice];
+    expect(() => activationFields({ ...inputs, clients })).toThrow();
+    expect(activationFields({ ...inputs, clients, excludedTestDeviceIds: ['old-test'] })).toMatchObject({
+      confirmedDeviceIds: ['device-1'], excludedTestDeviceIds: ['old-test'],
+    });
+    expect(clients.length).toBe(2);
+    expect(testDevice.mirrorReady).toBe(false);
+    expect(() => activationFields({ ...inputs, clients, excludedTestDeviceIds: ['typo'] })).toThrow();
+    expect(() => activationFields({ ...inputs, clients, excludedTestDeviceIds: ['device-1', 'old-test'] })).toThrow();
+  });
   it('blocks resets, repeated activation and invalid generations', () => {
     for (const control of [{ datasetGeneration: 1, resetInProgress: true },
       { datasetGeneration: 1, incrementalEnabled: true }, { datasetGeneration: NaN },

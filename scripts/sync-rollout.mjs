@@ -4,13 +4,18 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { activationFields, clientBlockers, decodeFields } from './sync-rollout-policy.mjs';
+import { activationFields, clientBlockers, decodeFields, operationalClients } from './sync-rollout-policy.mjs';
 
 const args = process.argv.slice(2);
 const project = args[args.indexOf('--project') + 1];
 if (!args.includes('--project') || !/^[a-z][a-z0-9-]+$/.test(project || '')) throw new Error('Specify --project <firebase-project-id>.');
 const activate = args.includes('--activate');
 const rollback = args.includes('--rollback');
+const excludeIndex = args.indexOf('--exclude-test-devices');
+const excludedTestDeviceIds = excludeIndex < 0 ? [] : (args[excludeIndex + 1] || '').split(',').filter(Boolean);
+if (excludeIndex >= 0 && (!excludedTestDeviceIds.length || excludedTestDeviceIds.some(id => id.startsWith('--')))) {
+  throw new Error('Provide exact comma-separated device IDs after --exclude-test-devices.');
+}
 if (activate && rollback) throw new Error('Choose activation OR rollback.');
 if (!process.env.FIREBASE_TOOLS_PATH) throw new Error('Set FIREBASE_TOOLS_PATH to the installed firebase-tools package directory.');
 const require = createRequire(import.meta.url);
@@ -44,16 +49,16 @@ const localRulesHash = hash(await readFile(new URL('../firestore.rules', import.
 const release = await request(`https://firebaserules.googleapis.com/v1/projects/${project}/releases/cloud.firestore`);
 const ruleset = await request(`https://firebaserules.googleapis.com/v1/${release.rulesetName}`);
 const rulesMatch = (ruleset.source?.files || []).some(file => hash(file.content || '') === localRulesHash);
-const blockers = clientBlockers(clients);
+const blockers = clientBlockers(operationalClients(clients, excludedTestDeviceIds));
 console.log(JSON.stringify({ project, incrementalEnabled: control.incrementalEnabled === true,
   trackedWritesRequired: control.trackedWritesRequired === true, datasetGeneration: control.datasetGeneration,
-  rulesMatch, rulesHash: localRulesHash,
+  rulesMatch, rulesHash: localRulesHash, excludedTestDeviceIds,
   clients: clients.map(({ id, devicePrefix, appVersion, protocolVersion, mirrorReady, lastSeenAt }) =>
     ({ id, devicePrefix, appVersion, protocolVersion, mirrorReady, lastSeenAt })), blockers,
 }, null, 2));
 
 if (activate || rollback) {
-  const values = activate ? activationFields({ control, clients, rulesMatch,
+  const values = activate ? activationFields({ control, clients, rulesMatch, excludedTestDeviceIds,
     operatorConfirmed: args.includes('--confirm-all-devices-ready'),
   }) : { incrementalEnabled: false, rollbackToLegacy: true, syncProtocolVersion: 2 };
   const encode = value => typeof value === 'boolean' ? { booleanValue: value }

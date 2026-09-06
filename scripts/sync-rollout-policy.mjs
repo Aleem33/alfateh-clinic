@@ -30,11 +30,19 @@ export function clientBlockers(clients, now = Date.now()) {
   });
 }
 
-export function activationFields({ control, clients, operatorConfirmed, rulesMatch, now = Date.now() }) {
+export function operationalClients(clients, excludedTestDeviceIds = []) {
+  if (excludedTestDeviceIds.some(id => !clients.some(client => client.id === id))) {
+    throw new Error('An excluded test-device ID was not found; no ambiguous exclusions are allowed.');
+  }
+  return clients.filter(client => !excludedTestDeviceIds.includes(client.id));
+}
+
+export function activationFields({ control, clients, operatorConfirmed, rulesMatch, excludedTestDeviceIds = [], now = Date.now() }) {
   if (!operatorConfirmed) throw new Error('Explicit confirmation that ALL PCs have uploaded ALL pending entries is required.');
   if (!rulesMatch) throw new Error('Deployed rules do not match the locally tested rules.');
   if (control.resetInProgress === true) throw new Error('An admin reset is in progress.');
-  const blockers = clientBlockers(clients, now);
+  const activeClients = operationalClients(clients, excludedTestDeviceIds);
+  const blockers = clientBlockers(activeClients, now);
   if (blockers.length) throw new Error(blockers.join('\n'));
   const generation = control.datasetGeneration;
   if (!Number.isSafeInteger(generation) || generation < 1 || generation >= Number.MAX_SAFE_INTEGER) {
@@ -45,7 +53,8 @@ export function activationFields({ control, clients, operatorConfirmed, rulesMat
     datasetGeneration: generation + 1,
     protocolVersion: 2, minimumProtocolVersion: 2, rulesEnforcementVersion: 2,
     trackedWritesRequired: true, incrementalEnabled: true, rollbackToLegacy: false,
-    confirmedDeviceIds: clients.map(client => client.id).sort(),
+    confirmedDeviceIds: activeClients.map(client => client.id).sort(),
+    excludedTestDeviceIds: [...new Set(excludedTestDeviceIds)].sort(),
     syncProtocolVersion: 2,
   };
 }
