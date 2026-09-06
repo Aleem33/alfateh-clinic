@@ -32,6 +32,7 @@ app.whenReady().then(async () => {
     primary = await createDevice('primary', true);
     const reconnected = await primary.webContents.executeJavaScript('window.smoke.reconnectAfterOfflineRestart()');
     const second = await replica.webContents.executeJavaScript('window.smoke.verifyReplica()');
+    const transitions = await primary.webContents.executeJavaScript('window.smoke.verifyTransitions()');
     const reloaded = new Promise(resolve => primary.webContents.once('did-finish-load', resolve));
     primary.reload();
     await reloaded;
@@ -40,7 +41,7 @@ app.whenReady().then(async () => {
       await delay(100);
     }
     const restarted = await primary.webContents.executeJavaScript('window.smoke.verifyReplica()');
-    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, restarted }));
+    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted }));
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });

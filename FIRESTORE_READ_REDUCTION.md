@@ -14,22 +14,22 @@ The application keeps Firestore authoritative and records complete, role-permitt
 
 `syncClients/{deviceId}` records protocol, app version, role, and mirror readiness. `syncControl/current` defaults to generation 1 with incremental mode disabled. Creation is server-confirmed and transaction-protected so a new device cannot overwrite an existing control document.
 
-## Release 2: activation prerequisites
+## Release 2: v3.1.91 capability and activation prerequisites
 
-`INCREMENTAL_ROLLOUT_READY` is deliberately false in this release. Remote flags alone cannot enable the new protocol. The paged bootstrap and incremental checkpoint implementation are included for testing, not active production use.
+The v3.1.91 build supports incremental mode. Installing it does **not** activate the mode: server-confirmed control must enable it, require protocol 2 writes, confirm enforcement version 2, and not be in rollback/reset. Existing disabled control remains disabled. Pending local control edits cannot activate it.
 
 Before activation:
 
 1. Every operational PC must install the compatibility release and finish its initial synchronization. Compare permitted collection counts and sales, stock, purchase, return, and customer balances with Firestore. Review pending/rejected changes.
-2. Deploy and emulator-test rules requiring tracked metadata for every write, including all admin allow paths, and preventing ordinary physical deletion. Verify old clients actually receive a rejection for untracked writes. The proposed all-collection enforcement was not applied in this change because automatic approval review rejected its authorization scope.
+2. Deploy the emulator-tested conditional rules requiring current server revision metadata for every write, including all admin allow paths, and preventing ordinary physical deletion while enforcement is enabled. With the flag off, existing write permissions remain compatible. Permanent deletion in enforced mode requires an admin-owned, scope-matching reset marker. Tracked writes in the same server millisecond remain valid; the mirror overlaps that timestamp boundary.
 3. Validate the incremental listener across long reconnects and reset generations, including bounded cursor reattachment and timestamp ties. Run multi-device billing tests in incremental mode and check read diagnostics against actual Firebase usage.
-4. Publish a second release enabling the build gate. Set `trackedWritesRequired`, `incrementalEnabled`, and `minimumProtocolVersion` only after server enforcement is effective and client compatibility is confirmed. Activation must also increment `datasetGeneration` to establish a fresh baseline: older clients could have changed records without advancing their revision before enforcement began. This changes sync metadata, not historical business documents.
+4. Publish the second release. Set `trackedWritesRequired`, `incrementalEnabled`, `minimumProtocolVersion`, and `rulesEnforcementVersion` only after deployed rules and client readiness are verified. Activation must also increment `datasetGeneration` to establish a fresh baseline: older clients could have changed records without advancing their revision before enforcement began. This changes sync metadata, not historical business documents.
 
 The incremental prototype bootstraps in 250-document pages, persists each page and cursor transactionally, and captures a revision watermark before paging. Local checkpoints never use pending server-timestamp estimates. Interrupted pages resume from the last successful transaction. Rebuilding pauses for unresolved local writes.
 
-## Stage 2 preparation branch (not activated)
+## Stage 2 runtime safeguards
 
-Customer-PC upgrade, initial-sync, and pending-entry readiness is **not confirmed**. The shipping build gate remains false; production rules and server flags have not been changed. Do not tag this preparation as a completed stage 2 rollout.
+Publishing capability and activating it are separate steps. The operator's readiness confirmation must agree with current server device reports. Do not override incomplete/stale device reports or clear caches to pass the readiness checks. Client registration now serializes reports to prevent a delayed not-ready result from overwriting ready, and ignores old-account/old-generation results.
 
 - A paged download stays incomplete until the first authoritative delta delivery catches changes made during paging. Restart after the last page resumes catch-up without downloading the pages again.
 - Incremental queries retain document-ID ordering but overlap the saved timestamp boundary, including lower-ID records with the same revision. This deliberately rereads a small boundary set rather than risking a skipped update.
@@ -38,7 +38,17 @@ Customer-PC upgrade, initial-sync, and pending-entry readiness is **not confirme
 - Removed query records are reconciled individually against the server, because a rejected edit can revert to a revision before the query cursor. Unresolved IDs survive restart, and rejected entries are retained in recovery metadata instead of counted in live totals.
 - Any failed local commit fences later deliveries from that attachment. A retry resumes from disk; a newer snapshot cannot advance the checkpoint past unpersisted records.
 
-The isolated smoke harness accepts `--incremental`. It enables the gate only through an emulator-only Vite transform and seeds only the demo project's control document. CI tests both modes. This verifies runtime behavior, **not** the still-pending tracked-write enforcement rules, customer PC readiness, or a live rollout.
+The isolated smoke harness accepts `--incremental`, seeds only the demo project's control document, and uses the real conditional rules and shipping build gate. CI tests both modes, including online/offline checkout, restart, synchronization to a second profile, and exact stock. The rules suite tests compatibility with enforcement off, every mirrored collection with enforcement on, cashier batches, admin catch-all, bulk writes, and reset/activation guards. These tests do not replace verification on customer PCs.
+
+## Guarded rollout audit
+
+Set `FIREBASE_TOOLS_PATH` to the installed `firebase-tools` package directory and use an existing Firebase CLI login with project administration access. Tokens are used only for the official APIs and are never printed. The tool reads only sync-control/client metadata and deployed rules, not business records.
+
+`node scripts/sync-rollout.mjs --project al-fateh-clinic` is read-only. It reports app/protocol versions, mirror readiness, freshness, activation blockers, and whether deployed rules exactly match the local tested file.
+
+Only after all PCs are confirmed ready, run the same command with `--activate --confirm-all-devices-ready`. It rejects incomplete/old/stale clients, a rules mismatch, a reset, or missing explicit confirmation. It changes one control document with an update-time precondition and server timestamps, incrementing generation for a fresh baseline. A failed or uncertain mutation is not automatically retried. Inspect control state first.
+
+For explicit rollback, use `--rollback`: it selects full legacy listeners without deleting cloud records, mirrors, or outboxes and leaves tracked-write enforcement intact. Reactivation requires a fresh generation and another readiness audit. Never replace enforced rules with legacy rules while incremental mode remains enabled.
 
 The target of changed-record-only reconnect reads is a release-2 acceptance target, not a claim about release 1: legacy full listeners can still incur initial and reconnect query costs.
 
@@ -56,7 +66,7 @@ No new composite indexes are deployed in release 1. Remaining bounded operationa
 - `npm test`
 - `npm run test:rules` (local demo Firestore emulator)
 - `npm run test:smoke` (two isolated Electron profiles, demo emulator only)
-- `npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic "node scripts/renderer-smoke.mjs --incremental"` (prepared stage 2 runtime; production gate remains off)
+- `npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic "node scripts/renderer-smoke.mjs --incremental"` (shipping stage 2 runtime; production control is unchanged)
 - `npm run build`
 
 The renderer smoke test bills online, bills offline, reopens billing and suppliers, reconnects, verifies two distinct sales and exact stock, confirms the second profile sees both sales, and reloads the first profile. It blocks non-local network requests, uses synthetic data, and suppresses printing. It does not validate physical printer output, a real Wi-Fi router, operating-system crashes, or customer PCs.

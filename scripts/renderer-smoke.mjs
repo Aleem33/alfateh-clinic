@@ -16,7 +16,7 @@ await environment.clearFirestore();
 await environment.withSecurityRulesDisabled(async context => {
   const database = context.firestore();
   if (incremental) await setDoc(doc(database, 'syncControl', 'current'), {
-    protocolVersion: 2, minimumProtocolVersion: 2, datasetGeneration: 2,
+    protocolVersion: 2, minimumProtocolVersion: 2, rulesEnforcementVersion: 2, datasetGeneration: 2,
     incrementalEnabled: true, trackedWritesRequired: true, rollbackToLegacy: false,
   });
   await setDoc(doc(database, 'users', 'smoke-admin'), { role: 'admin', active: true });
@@ -30,11 +30,6 @@ await environment.withSecurityRulesDisabled(async context => {
 const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, plugins: [{
   name: 'isolated-emulator-smoke', enforce: 'pre',
   transform(source, id) {
-    // Only this emulator fixture bypasses the build gate. Shipping code stays
-    // disabled until rules enforcement and customer-device readiness are verified.
-    if (incremental && id.replaceAll('\\', '/').endsWith('/src/lib/syncProtocol.ts')) {
-      return source.replace('INCREMENTAL_ROLLOUT_READY = false', 'INCREMENTAL_ROLLOUT_READY = true');
-    }
     if (id.replaceAll('\\', '/').endsWith('/src/pos/lib/nativeUtils.ts')) {
       return source.replace('iframePrint(slipHtml);', 'void slipHtml;');
     }

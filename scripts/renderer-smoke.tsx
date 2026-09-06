@@ -8,6 +8,7 @@ import { setActiveAuthSession } from '../src/lib/offlineAuth';
 import { getLocalCollectionOnce } from '../src/lib/collectionRepository';
 import { listPendingPosSales, replayPendingPosSaleRecords, removePendingPosSale } from '../src/pos/lib/offlineSalesOutbox';
 import { getFirestoreReadDiagnostics } from '../src/lib/readDiagnostics';
+import { setDoc as trackedSetDoc, updateDoc as trackedUpdateDoc, serverTimestamp } from '../src/lib/firestore';
 import '../src/index.css';
 
 const waitFor = async (check: () => any, label: string) => {
@@ -95,5 +96,33 @@ const checkout = async (expectedCount: number) => {
     const medicines = await getLocalCollectionOnce('medicines');
     if (medicines[0]?.stock !== 18) throw new Error('Replica stock differs');
     return { mirroredSales: 2, stock: medicines[0].stock };
+  },
+  async verifyTransitions() {
+    if (getOfflineCacheStatus().mode !== 'incremental') return { mode: 'legacy' };
+    const temporary = doc(db, 'suppliers', 'smoke-transient');
+    await trackedSetDoc(temporary, { name: 'Temporary supplier' });
+    await waitFor(async () => (await getLocalCollectionOnce('suppliers')).some(item => item.id === 'smoke-transient'), 'new delta record');
+    await trackedUpdateDoc(temporary, { deleted: true, deletedBy: 'smoke-admin' });
+    await waitFor(async () => !(await getLocalCollectionOnce('suppliers')).some(item => item.id === 'smoke-transient'), 'tombstone hidden');
+    await trackedUpdateDoc(temporary, { deleted: false });
+    await waitFor(async () => (await getLocalCollectionOnce('suppliers')).some(item => item.id === 'smoke-transient'), 'tombstone restored');
+    const reference = doc(db, 'syncControl', 'current');
+    await trackedUpdateDoc(reference, { incrementalEnabled: false, rollbackToLegacy: true });
+    await waitFor(() => {
+      const status = getOfflineCacheStatus();
+      return status.mode === 'legacy' && status.readyCollections === status.totalCollections;
+    }, 'rollback without clearing local data');
+    const previous = (await getDocFromServer(reference)).data()!;
+    await trackedUpdateDoc(reference, { incrementalEnabled: true, rollbackToLegacy: false,
+      datasetGeneration: previous.datasetGeneration + 1, activationVerifiedAt: serverTimestamp(),
+      confirmedDeviceIds: ['smoke-primary', 'smoke-replica'] });
+    await waitFor(() => {
+      const status = getOfflineCacheStatus();
+      return status.mode === 'incremental' && status.readyCollections === status.totalCollections;
+    }, 'fresh baseline after generation change');
+    if ((await getLocalCollectionOnce('sales')).length !== 2 || (await getLocalCollectionOnce('medicines'))[0]?.stock !== 18) {
+      throw new Error('Generation/rollback changed sales or stock');
+    }
+    return { tombstoneRestored: true, generation: previous.datasetGeneration + 1, sales: 2, stock: 18 };
   },
 };
