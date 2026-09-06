@@ -48,66 +48,132 @@ service cloud.firestore {
         && request.resource.data.role == 'admin';
     }
 
+    // Stage 2 is opt-in. Missing/disabled control leaves compatible old writes
+    // unchanged. Read the post-batch control so activation cannot race a write
+    // in the same batch. This guard must intersect EVERY write allow path.
+    function trackedWritesEnforced() {
+      return existsAfter(/databases/$(database)/documents/syncControl/current) &&
+        getAfter(/databases/$(database)/documents/syncControl/current).data.get('trackedWritesRequired', false) == true;
+    }
+    function trackedRevision() {
+      return request.resource != null &&
+        request.resource.data.get('syncUpdatedAt', null) == request.time &&
+        request.resource.data.get('syncProtocolVersion', 0) == 2;
+    }
+    function resetIncludesCollection(scope, name) {
+      return (scope == 'pharmacy' && name in [
+        'counters', 'medicines', 'suppliers', 'purchases', 'purchaseReturns',
+        'sales', 'heldBills', 'saleReturns', 'stockMovements', 'syncIssues',
+        'posSales', 'customers', 'customerPayments', 'expenses', 'pharmacyOrders'
+      ]) || (scope == 'lab' && name in ['labOrders', 'labTests']) ||
+        (scope == 'hms' && name in [
+          'settings', 'counters', 'schedules', 'patients', 'appointments',
+          'consultations', 'prescriptionTemplates', 'admissions', 'wards',
+          'rooms', 'beds', 'bedTreatments', 'bills', 'staff', 'expenses',
+          'auditLogs', 'notifications'
+        ]);
+    }
+    function intentionalResetDelete(name) {
+      let control = getAfter(/databases/$(database)/documents/syncControl/current).data;
+      return isAdmin() && control.get('resetInProgress', false) == true &&
+        control.get('incrementalEnabled', false) == false &&
+        control.get('rollbackToLegacy', false) == true &&
+        control.get('lastResetBy', '') == request.auth.uid &&
+        control.get('resetOperationId', '') is string &&
+        control.get('resetOperationId', '').size() > 0 &&
+        resetIncludesCollection(control.get('lastResetScope', ''), name);
+    }
+    function validSyncControlWrite() {
+      let previous = resource == null ? {} : resource.data;
+      let next = request.resource == null ? {} : request.resource.data;
+      let oldGeneration = previous.get('datasetGeneration', 0);
+      let generation = next.get('datasetGeneration', 1);
+      let incremental = next.get('incrementalEnabled', false) == true && next.get('rollbackToLegacy', false) != true;
+      let activation = (incremental && (previous.get('incrementalEnabled', false) != true ||
+        previous.get('rollbackToLegacy', false) == true)) ||
+        (next.get('trackedWritesRequired', false) == true && previous.get('trackedWritesRequired', false) != true);
+      let resetTransition = next.get('resetInProgress', false) != previous.get('resetInProgress', false);
+      return request.resource != null && next.get('deleted', false) == false &&
+        generation is int && generation >= 1 && generation >= oldGeneration &&
+        (!incremental || (next.get('trackedWritesRequired', false) == true &&
+          next.get('protocolVersion', 0) == 2 && next.get('minimumProtocolVersion', 0) == 2 &&
+          next.get('rulesEnforcementVersion', 0) == 2 && next.get('resetInProgress', false) == false)) &&
+        (!activation || (generation > oldGeneration &&
+          next.get('activationVerifiedAt', null) == request.time &&
+          next.get('confirmedDeviceIds', []) is list && next.get('confirmedDeviceIds', []).size() > 0)) &&
+        (!(previous.get('trackedWritesRequired', false) == true && next.get('trackedWritesRequired', false) != true) ||
+          (!incremental && next.get('rollbackToLegacy', false) == true && generation > oldGeneration)) &&
+        (!resetTransition || (generation > oldGeneration && !incremental &&
+          next.get('rollbackToLegacy', false) == true &&
+          next.get('lastResetBy', '') == request.auth.uid &&
+          (previous.get('resetInProgress', false) != true || previous.get('lastResetBy', '') == request.auth.uid)));
+    }
+    function syncMutationAllowed(name) {
+      return name == 'syncControl' ? validSyncControlWrite() :
+        (!trackedWritesEnforced() || (request.resource == null ?
+          (name == 'syncClients' ? isAdmin() : intentionalResetDelete(name)) : trackedRevision()));
+    }
+
     // ── Users ──────────────────────────────────────────────────────────────────
     match /users/{uid} {
       allow read: if isAuth() && (request.auth.uid == uid || isAdmin());
-      allow create: if isAdmin() || isBootstrapAdmin(uid);
-      allow update, delete: if isAdmin();
+      allow create: if syncMutationAllowed("users") && (isAdmin() || isBootstrapAdmin(uid));
+      allow update, delete: if syncMutationAllowed("users") && (isAdmin());
     }
 
     // ── Settings ───────────────────────────────────────────────────────────────
     match /settings/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin();
+      allow write: if syncMutationAllowed("settings") && (isAdmin());
     }
 
     // ── Plans ──────────────────────────────────────────────────────────────────
     match /plans/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin();
+      allow write: if syncMutationAllowed("plans") && (isAdmin());
     }
 
     // ── Patients ───────────────────────────────────────────────────────────────
     match /patients/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isReceptionist() || isClinical()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isReceptionist() || isClinical()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("patients") && (isAdmin() || ((isReceptionist() || isClinical()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("patients") && (isAdmin() || ((isReceptionist() || isClinical()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("patients") && (isAdmin());
     }
 
     // ── Appointments ───────────────────────────────────────────────────────────
     match /appointments/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || isReceptionist() || (isClinical() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || isReceptionist() || (isClinical() && preservesTombstone());
-      allow delete: if isAdmin() || isReceptionist();
+      allow create: if syncMutationAllowed("appointments") && (isAdmin() || isReceptionist() || (isClinical() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("appointments") && (isAdmin() || isReceptionist() || (isClinical() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("appointments") && (isAdmin() || isReceptionist());
     }
 
     // ── Consultations (OPD) ────────────────────────────────────────────────────
     match /consultations/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isClinical() || isReceptionist()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("consultations") && (isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("consultations") && (isAdmin() || ((isClinical() || isReceptionist()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("consultations") && (isAdmin());
     }
 
     // Prescription templates
     match /prescriptionTemplates/{doc} {
       allow read: if isAuth();
-      allow create, update: if isAdmin() || isDoctor();
-      allow delete: if isAdmin() || isDoctor();
+      allow create, update: if syncMutationAllowed("prescriptionTemplates") && (isAdmin() || isDoctor());
+      allow delete: if syncMutationAllowed("prescriptionTemplates") && (isAdmin() || isDoctor());
     }
 
     // ── Staff ──────────────────────────────────────────────────────────────────
     match /staff/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin();
+      allow write: if syncMutationAllowed("staff") && (isAdmin());
     }
 
     // ── Medicines ──────────────────────────────────────────────────────────────
     match /medicines/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || (
+      allow create: if syncMutationAllowed("medicines") && (isAdmin() || (
         isPharmacist() &&
         hasNoTombstoneOnCreate() &&
         request.resource.data.archived != true &&
@@ -117,8 +183,8 @@ service cloud.firestore {
           'restoredAt',
           'restoredBy'
         ])
-      );
-      allow update: if isAdmin() || (
+      ));
+      allow update: if syncMutationAllowed("medicines") && (isAdmin() || (
         isPharmacist() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'stock',
@@ -147,184 +213,185 @@ service cloud.firestore {
         request.resource.data.get('bonusStockUnits', 0) is number &&
         request.resource.data.get('bonusStockUnits', 0) >= 0 &&
         request.resource.data.get('bonusStockUnits', 0) <= request.resource.data.stock
-      );
-      allow delete: if isAdmin();
+      ));
+      allow delete: if syncMutationAllowed("medicines") && (isAdmin());
     }
 
     // ── Pharmacy Orders ────────────────────────────────────────────────────────
     match /pharmacyOrders/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isPharmacist() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("pharmacyOrders") && (isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("pharmacyOrders") && (isAdmin() || (isPharmacist() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("pharmacyOrders") && (isAdmin());
     }
 
     // ── Lab Tests (definitions) ────────────────────────────────────────────────
     match /labTests/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin() || isLab();
+      allow write: if syncMutationAllowed("labTests") && (isAdmin() || isLab());
     }
 
     // ── Lab Orders ─────────────────────────────────────────────────────────────
     match /labOrders/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isLab() || isClinical()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("labOrders") && (isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("labOrders") && (isAdmin() || ((isLab() || isClinical()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("labOrders") && (isAdmin());
     }
 
     // ── Billing ────────────────────────────────────────────────────────────────
     match /bills/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isReceptionist() || isAccountant() || isCashier() || isClinical()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isReceptionist() || isAccountant() || isCashier() || isClinical()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("bills") && (isAdmin() || ((isReceptionist() || isAccountant() || isCashier() || isClinical()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("bills") && (isAdmin() || ((isReceptionist() || isAccountant() || isCashier() || isClinical()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("bills") && (isAdmin());
     }
 
     // ── Payments ───────────────────────────────────────────────────────────────
     match /payments/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isReceptionist() || isAccountant() || isCashier()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isReceptionist() || isAccountant() || isCashier()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("payments") && (isAdmin() || ((isReceptionist() || isAccountant() || isCashier()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("payments") && (isAdmin() || ((isReceptionist() || isAccountant() || isCashier()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("payments") && (isAdmin());
     }
 
     // ── Expenses ───────────────────────────────────────────────────────────────
     match /expenses/{doc} {
       allow read: if isAdmin() || isAccountant() || isReceptionist();
-      allow create: if isAdmin() || (isAccountant() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isAccountant() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("expenses") && (isAdmin() || (isAccountant() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("expenses") && (isAdmin() || (isAccountant() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("expenses") && (isAdmin());
     }
 
     // ── Suppliers ──────────────────────────────────────────────────────────────
     match /suppliers/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin() || isAccountant() || isPharmacist();
+      allow write: if syncMutationAllowed("suppliers") && (isAdmin() || isAccountant() || isPharmacist());
     }
 
     // ── IPD ────────────────────────────────────────────────────────────────────
     match /admissions/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isClinical() || isReceptionist()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("admissions") && (isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("admissions") && (isAdmin() || ((isClinical() || isReceptionist()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("admissions") && (isAdmin());
     }
 
     match /wards/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin() || isClinical() || isReceptionist();
+      allow write: if syncMutationAllowed("wards") && (isAdmin() || isClinical() || isReceptionist());
     }
 
     match /rooms/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin() || isClinical() || isReceptionist();
+      allow write: if syncMutationAllowed("rooms") && (isAdmin() || isClinical() || isReceptionist());
     }
 
     match /beds/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin() || isClinical() || isReceptionist();
+      allow write: if syncMutationAllowed("beds") && (isAdmin() || isClinical() || isReceptionist());
     }
 
     match /bedTreatments/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isClinical() || isReceptionist()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("bedTreatments") && (isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("bedTreatments") && (isAdmin() || ((isClinical() || isReceptionist()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("bedTreatments") && (isAdmin());
     }
 
     // ── Audit Logs (append-only) ───────────────────────────────────────────────
     match /auditLogs/{doc} {
       allow read: if isAdmin();
-      allow create: if isAuth() && hasNoTombstoneOnCreate();
-      allow update: if false;
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("auditLogs") && (isAuth() && hasNoTombstoneOnCreate());
+      allow update: if syncMutationAllowed("auditLogs") && (false);
+      allow delete: if syncMutationAllowed("auditLogs") && (isAdmin());
     }
 
     // ── Notifications ──────────────────────────────────────────────────────────
     match /notifications/{doc} {
       allow read: if isAuth();
-      allow create: if isAuth() && hasNoTombstoneOnCreate();
-      allow update: if isAdmin() || (resource.data.userId == request.auth.uid && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("notifications") && (isAuth() && hasNoTombstoneOnCreate());
+      allow update: if syncMutationAllowed("notifications") && (isAdmin() || (resource.data.userId == request.auth.uid && preservesTombstone()));
+      allow delete: if syncMutationAllowed("notifications") && (isAdmin());
     }
 
     // ── Schedules ──────────────────────────────────────────────────────────────
     match /schedules/{doc} {
       allow read: if isAuth();
-      allow write: if isAdmin() || isReceptionist();
+      allow write: if syncMutationAllowed("schedules") && (isAdmin() || isReceptionist());
     }
 
     // ── Counters (MRN, bill number sequences) ──────────────────────────────────
     match /counters/{doc} {
-      allow read, write: if isAuth();
+      allow read: if isAuth();
+      allow write: if syncMutationAllowed("counters") && (isAuth());
     }
 
     // ── POS collections ────────────────────────────────────────────────────────
     match /posSales/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isPharmacist() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("posSales") && (isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("posSales") && (isAdmin() || (isPharmacist() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("posSales") && (isAdmin());
     }
 
     match /sales/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isPharmacist() || isCashier()) && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || ((isPharmacist() || isCashier()) && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("sales") && (isAdmin() || ((isPharmacist() || isCashier()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("sales") && (isAdmin() || ((isPharmacist() || isCashier()) && preservesTombstone()));
+      allow delete: if syncMutationAllowed("sales") && (isAdmin());
     }
     match /heldBills/{doc} {
       allow read: if isAuth();
-      allow create, update, delete: if isAdmin() || isCashier();
+      allow create, update, delete: if syncMutationAllowed("heldBills") && (isAdmin() || isCashier());
     }
 
 
     match /posPurchases/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("posPurchases") && (isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("posPurchases") && (isAdmin());
+      allow delete: if syncMutationAllowed("posPurchases") && (isAdmin());
     }
 
     match /purchases/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("purchases") && (isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("purchases") && (isAdmin());
+      allow delete: if syncMutationAllowed("purchases") && (isAdmin());
     }
 
     match /purchaseReturns/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isPharmacist() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("purchaseReturns") && (isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("purchaseReturns") && (isAdmin() || (isPharmacist() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("purchaseReturns") && (isAdmin());
     }
 
     match /saleReturns/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || (isCashier() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isCashier() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("saleReturns") && (isAdmin() || (isCashier() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("saleReturns") && (isAdmin() || (isCashier() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("saleReturns") && (isAdmin());
     }
 
     match /stockMovements/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || ((isPharmacist() || isCashier()) && hasNoTombstoneOnCreate());
-      allow update, delete: if isAdmin();
+      allow create: if syncMutationAllowed("stockMovements") && (isAdmin() || ((isPharmacist() || isCashier()) && hasNoTombstoneOnCreate()));
+      allow update, delete: if syncMutationAllowed("stockMovements") && (isAdmin());
     }
 
     match /syncIssues/{doc} {
       allow read: if isAdmin();
-      allow create: if isAuth() && hasNoTombstoneOnCreate();
-      allow update: if isAuth() && preservesTombstone();
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("syncIssues") && (isAuth() && hasNoTombstoneOnCreate());
+      allow update: if syncMutationAllowed("syncIssues") && (isAuth() && preservesTombstone());
+      allow delete: if syncMutationAllowed("syncIssues") && (isAdmin());
     }
 
     // ── Incremental sync compatibility ────────────────────────────────────────
     match /syncControl/current {
       allow read: if isAuth();
-      allow write: if isAdmin();
+      allow write: if syncMutationAllowed("syncControl") && (isAdmin());
     }
 
     match /syncClients/{deviceId} {
@@ -332,39 +399,40 @@ service cloud.firestore {
         isAuth() &&
         resource.data.uid == request.auth.uid
       );
-      allow create: if isAuth() && hasNoTombstoneOnCreate() &&
+      allow create: if syncMutationAllowed("syncClients") && (isAuth() && hasNoTombstoneOnCreate() &&
         request.resource.data.uid == request.auth.uid &&
-        request.resource.data.deviceId == deviceId;
-      allow update: if isAuth() && preservesTombstone() &&
+        request.resource.data.deviceId == deviceId);
+      allow update: if syncMutationAllowed("syncClients") && (isAuth() && preservesTombstone() &&
         request.resource.data.uid == request.auth.uid &&
-        request.resource.data.deviceId == deviceId;
-      allow delete: if isAdmin();
+        request.resource.data.deviceId == deviceId);
+      allow delete: if syncMutationAllowed("syncClients") && (isAdmin());
     }
 
     match /customers/{doc} {
       allow read: if isAuth();
-      allow create: if isAdmin() || (isCashier() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isCashier() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("customers") && (isAdmin() || (isCashier() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("customers") && (isAdmin() || (isCashier() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("customers") && (isAdmin());
     }
 
     match /customerPayments/{doc} {
       allow read: if isAdmin() || isCashier();
-      allow create: if isAdmin() || (isCashier() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isCashier() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("customerPayments") && (isAdmin() || (isCashier() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("customerPayments") && (isAdmin() || (isCashier() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("customerPayments") && (isAdmin());
     }
 
     match /posExpenses/{doc} {
       allow read: if isAdmin() || isAccountant() || isPharmacist();
-      allow create: if isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate());
-      allow update: if isAdmin() || (isPharmacist() && preservesTombstone());
-      allow delete: if isAdmin();
+      allow create: if syncMutationAllowed("posExpenses") && (isAdmin() || (isPharmacist() && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("posExpenses") && (isAdmin() || (isPharmacist() && preservesTombstone()));
+      allow delete: if syncMutationAllowed("posExpenses") && (isAdmin());
     }
 
     // ── Catch-all: only admin can touch anything not listed above ──────────────
     match /{collection}/{document=**} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if syncMutationAllowed(collection) && (isAdmin());
     }
 
   }

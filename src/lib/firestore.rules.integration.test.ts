@@ -19,6 +19,7 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
+import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
 
 const emulatorAddress = process.env.FIRESTORE_EMULATOR_HOST || '';
 const integrationDescribe = emulatorAddress ? describe : describe.skip;
@@ -382,6 +383,111 @@ integrationDescribe('Firestore offline operational rules', () => {
     await assertSucceeds(updateDoc(reference, { deleted: true, deletedAt: serverTimestamp(), deletedBy: 'admin-1' }));
     await assertSucceeds(updateDoc(reference, { deleted: false }));
     await assertSucceeds(deleteDoc(reference));
+  });
+
+  const revision = () => ({ syncUpdatedAt: serverTimestamp(), syncProtocolVersion: 2 });
+  const activatedControl = () => ({
+    protocolVersion: 2, minimumProtocolVersion: 2, rulesEnforcementVersion: 2,
+    datasetGeneration: 2, trackedWritesRequired: true, incrementalEnabled: true,
+    rollbackToLegacy: false, activationVerifiedAt: serverTimestamp(), confirmedDeviceIds: ['device-1'],
+  });
+  async function enforce() {
+    await environment.withSecurityRulesDisabled(context => setDoc(
+      doc(context.firestore(), 'syncControl', 'current'), activatedControl(),
+    ));
+  }
+
+  it.each([...GLOBAL_DATA_COLLECTIONS, 'unlistedAdminCollection'])(
+    'requires fresh tracked revisions on %s including the admin catch-all', async name => {
+      await enforce();
+      const database = environment.authenticatedContext('admin-1').firestore();
+      const reference = doc(database, name, 'tracked-check');
+      await assertFails(setDoc(reference, { value: 1 }));
+      await assertSucceeds(setDoc(reference, { value: 1, ...revision() }));
+      // REQUEST_TIME has millisecond precision. Move past the creation tick:
+      // two legitimate writes in one tick must not be rejected merely because
+      // their timestamps match (the mirror deliberately overlaps that boundary).
+      await new Promise(resolve => setTimeout(resolve, 5));
+      await assertFails(updateDoc(reference, { value: 2 }));
+      await assertFails(updateDoc(reference, { value: 2, syncUpdatedAt: 'forged', syncProtocolVersion: 2 }));
+      await assertSucceeds(updateDoc(reference, { value: 2, ...revision() }));
+      await assertFails(deleteDoc(reference));
+    },
+  );
+
+  it('allows a full tracked cashier batch but rejects its untracked equivalent', async () => {
+    await enforce();
+    const database = environment.authenticatedContext('cashier-1').firestore();
+    const batch = writeBatch(database);
+    batch.set(doc(database, 'sales', 'tracked-sale'), { total: 500, ...revision() });
+    batch.set(doc(database, 'stockMovements', 'tracked-movement'), { quantity: -1, ...revision() });
+    batch.update(doc(database, 'medicines', 'batch-a'), { stock: 99, ...revision() });
+    batch.update(doc(database, 'customers', 'customer-1'), { creditBalance: 500, ...revision() });
+    await assertSucceeds(batch.commit());
+    await assertFails(setDoc(doc(database, 'sales', 'old-client-sale'), { total: 500 }));
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { stock: 98 }));
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { retailPrice: 1, ...revision() }));
+  });
+
+  it('shares rule lookups across bulk tracked writes', async () => {
+    await enforce();
+    const database = environment.authenticatedContext('admin-1').firestore();
+    const batch = writeBatch(database);
+    for (let index = 0; index < 40; index++) batch.set(doc(database, 'purchases', `bulk-${index}`), { ...revision(), total: index });
+    await assertSucceeds(batch.commit());
+  });
+
+  it('keeps tracked tombstones recoverable and preserves cashier permissions', async () => {
+    await enforce();
+    const admin = environment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(updateDoc(doc(admin, 'medicines', 'batch-a'), { deleted: true, deletedBy: 'admin-1', ...revision() }));
+    await assertSucceeds(updateDoc(doc(admin, 'medicines', 'batch-a'), { deleted: false, ...revision() }));
+    const cashier = environment.authenticatedContext('cashier-1').firestore();
+    await assertFails(updateDoc(doc(cashier, 'medicines', 'batch-a'), { deleted: true, ...revision() }));
+    const held = doc(cashier, 'heldBills', 'held');
+    await assertSucceeds(setDoc(held, { items: [], ...revision() }));
+    await assertSucceeds(updateDoc(held, { deleted: true, ...revision() }));
+    await assertFails(deleteDoc(held));
+  });
+
+  it('permits permanent deletion only inside the admin-owned reset scope', async () => {
+    await enforce();
+    const admin = environment.authenticatedContext('admin-1').firestore();
+    const controlRef = doc(admin, 'syncControl', 'current');
+    await assertFails(deleteDoc(doc(admin, 'medicines', 'batch-a')));
+    await assertSucceeds(updateDoc(controlRef, {
+      datasetGeneration: 3, incrementalEnabled: false, rollbackToLegacy: true,
+      resetInProgress: true, resetOperationId: 'test-reset', lastResetBy: 'admin-1', lastResetScope: 'pharmacy',
+    }));
+    await assertSucceeds(deleteDoc(doc(admin, 'medicines', 'batch-a')));
+    await assertFails(deleteDoc(doc(admin, 'users', 'cashier-1')));
+    await assertFails(deleteDoc(doc(environment.authenticatedContext('cashier-1').firestore(), 'customers', 'customer-1')));
+    await assertSucceeds(updateDoc(controlRef, { datasetGeneration: 4, resetInProgress: false }));
+    await assertFails(deleteDoc(doc(admin, 'customers', 'customer-1')));
+  });
+
+  it('requires compatibility proof and a fresh generation for activation and reactivation', async () => {
+    const database = environment.authenticatedContext('admin-1').firestore();
+    const reference = doc(database, 'syncControl', 'current');
+    await assertSucceeds(setDoc(reference, { datasetGeneration: 1, incrementalEnabled: false, trackedWritesRequired: false }));
+    await assertFails(updateDoc(reference, { incrementalEnabled: true }));
+    await assertFails(setDoc(reference, { ...activatedControl(), datasetGeneration: 1 }));
+    await assertFails(setDoc(reference, { ...activatedControl(), confirmedDeviceIds: [] }));
+    await assertFails(setDoc(reference, { ...activatedControl(), rulesEnforcementVersion: 0 }));
+    await assertSucceeds(setDoc(reference, activatedControl()));
+    await assertFails(deleteDoc(reference));
+    await assertFails(updateDoc(reference, { datasetGeneration: 1 }));
+    await assertSucceeds(updateDoc(reference, { incrementalEnabled: false, rollbackToLegacy: true }));
+    await assertFails(updateDoc(reference, { incrementalEnabled: true, rollbackToLegacy: false }));
+    await assertSucceeds(updateDoc(reference, { ...activatedControl(), datasetGeneration: 3 }));
+  });
+
+  it('prevents activating and writing untracked documents in the same batch', async () => {
+    const database = environment.authenticatedContext('admin-1').firestore();
+    const batch = writeBatch(database);
+    batch.set(doc(database, 'syncControl', 'current'), activatedControl());
+    batch.set(doc(database, 'sales', 'untracked-in-activation'), { total: 100 });
+    await assertFails(batch.commit());
   });
 
   it('rejects an unauthenticated sale write', async () => {

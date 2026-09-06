@@ -14,6 +14,7 @@ describe('sync protocol control', () => {
     expect(isIncrementalControlCompatible(normalizeSyncControl({
       incrementalEnabled: true,
       trackedWritesRequired: true,
+      rulesEnforcementVersion: SYNC_PROTOCOL_VERSION,
       minimumProtocolVersion: SYNC_PROTOCOL_VERSION,
       datasetGeneration: 3,
     }))).toBe(true);
@@ -40,7 +41,17 @@ describe('sync protocol control', () => {
     }))).toBe(false);
   });
 
-  it('keeps the first release in verification mode even if a remote flag is enabled prematurely', () => {
+  it('does not activate if remote flags lack deployed-rule confirmation', () => {
     expect(shouldUseIncrementalMirror(normalizeSyncControl({ incrementalEnabled: true, trackedWritesRequired: true }))).toBe(false);
+  });
+
+  it('blocks activation without deployed-rule compatibility or during an admin reset', () => {
+    const enabled = normalizeSyncControl({ incrementalEnabled: true, trackedWritesRequired: true,
+      protocolVersion: 2, minimumProtocolVersion: 2, rulesEnforcementVersion: 2 });
+    expect(isIncrementalControlCompatible(enabled)).toBe(true);
+    expect(shouldUseIncrementalMirror(enabled)).toBe(true);
+    expect(isIncrementalControlCompatible({ ...enabled, rulesEnforcementVersion: 0 })).toBe(false);
+    expect(isIncrementalControlCompatible({ ...enabled, resetInProgress: true })).toBe(false);
+    expect(isIncrementalControlCompatible({ ...enabled, protocolVersion: 3 })).toBe(false);
   });
 });

@@ -1,13 +1,16 @@
 import {
   Timestamp,
   collection,
+  doc,
   documentId,
+  getDocFromServer,
   getDocsFromServer,
   limit,
   onSnapshot,
   orderBy,
   query,
   startAfter,
+  startAt,
   type QueryDocumentSnapshot,
   type Unsubscribe,
 } from '@/lib/firestore';
@@ -57,6 +60,8 @@ const pending = new Set<string>();
 const rejected = new Set<string>();
 const activeUnsubscribers = new Map<string, Unsubscribe>();
 const persistenceQueues = new Map<string, Promise<void>>();
+const incrementalEpochs = new Map<string, number>();
+const incrementalRestarts = new Map<string, ReturnType<typeof setTimeout>>();
 let controlUnsubscribe: (() => void) | null = null;
 let lanUnsubscribe: (() => void) | null = null;
 let lastOnline: boolean | null = null;
@@ -101,6 +106,9 @@ function notify() {
 }
 
 function stopCollectionListeners() {
+  incrementalRestarts.forEach(timer => clearTimeout(timer));
+  incrementalRestarts.clear();
+  incrementalEpochs.clear();
   activeUnsubscribers.forEach(unsubscribe => unsubscribe());
   activeUnsubscribers.clear();
   cached.clear();
@@ -182,9 +190,10 @@ function mirrorInputs(documents: QueryDocumentSnapshot[]): LocalMirrorRecordInpu
   });
 }
 
-async function markReadyFromLocal(collectionName: string, generation: number) {
+async function markReadyFromLocal(collectionName: string, generation: number, run = lifecycle) {
   await waitForPersistence(collectionName);
   const status = await getLocalSyncStatus(collectionName);
+  if (run !== lifecycle) return status;
   if (status.pending.lastError) {
     rejected.add(collectionName);
     lastError ||= String(status.pending.lastError);
@@ -356,6 +365,9 @@ async function bootstrapCollection(collectionName: string, control: SyncControl,
   }
   const sameGeneration = String(status.generation) === String(control.datasetGeneration);
   const resuming = sameGeneration && !status.seedComplete && status.pending.bootstrapInProgress === true;
+  // Paging is not a consistent snapshot. The delta listener must catch up from
+  // the pre-bootstrap watermark before consumers can treat the seed as ready.
+  if (resuming && status.pending.bootstrapPagesComplete === true) return status;
   let cursor = resuming && typeof status.pending.bootstrapCursor === 'string'
     ? status.pending.bootstrapCursor
     : '';
@@ -368,16 +380,17 @@ async function bootstrapCollection(collectionName: string, control: SyncControl,
   if (run !== lifecycle) return status;
 
   if (!resuming) {
-    await setLocalSyncMetadata(collectionName, {
+    await queuePersistence(collectionName, run, () => setLocalSyncMetadata(collectionName, {
       seedComplete: false,
       generation: control.datasetGeneration,
       checkpoint: highWater,
       pending: {
         bootstrapInProgress: true,
+        bootstrapPagesComplete: false,
         bootstrapCursor: null,
         bootstrapStartedAt,
       },
-    });
+    }));
     cursor = '';
   }
 
@@ -400,22 +413,23 @@ async function bootstrapCollection(collectionName: string, control: SyncControl,
     const complete = page.size < BOOTSTRAP_PAGE_SIZE;
     const nextCursor = page.docs.at(-1)?.id || cursor;
     const commitOptions = {
-      seedComplete: complete,
+      seedComplete: false,
       generation: control.datasetGeneration,
       checkpoint: highWater,
       pending: {
-        bootstrapInProgress: !complete,
-        bootstrapCursor: complete ? null : nextCursor,
-        bootstrapStartedAt: complete ? null : bootstrapStartedAt,
-        bootstrapCompletedAt: complete ? new Date().toISOString() : null,
+        bootstrapInProgress: true,
+        bootstrapPagesComplete: complete,
+        bootstrapCursor: nextCursor,
+        bootstrapStartedAt,
       },
     };
 
-    if (!cursor) await replaceLocalCollection(collectionName, mirrorInputs(page.docs), commitOptions);
-    else await upsertLocalRecords(collectionName, mirrorInputs(page.docs), commitOptions);
+    await queuePersistence(collectionName, run, async () => {
+      if (!cursor) await replaceLocalCollection(collectionName, mirrorInputs(page.docs), commitOptions);
+      else await upsertLocalRecords(collectionName, mirrorInputs(page.docs), commitOptions);
+    });
 
     if (complete) {
-      ready.add(collectionName);
       status = await getLocalSyncStatus(collectionName);
       notify();
       return status;
@@ -435,15 +449,23 @@ export const __offlineCacheInternals = {
     bootstrapCollection(collectionName, control, lifecycle)
   ),
   bootstrapPageSize: BOOTSTRAP_PAGE_SIZE,
+  startIncrementalListener: (collectionName: string, control: SyncControl) => (
+    startIncrementalListener(collectionName, control, lifecycle)
+  ),
+  waitForPersistence,
 };
 
 async function startIncrementalListener(collectionName: string, control: SyncControl, run: number) {
+  const epoch = (incrementalEpochs.get(collectionName) || 0) + 1;
+  incrementalEpochs.set(collectionName, epoch);
+  const isCurrent = () => run === lifecycle && incrementalEpochs.get(collectionName) === epoch;
   let status = await markReadyFromLocal(collectionName, control.datasetGeneration);
-  if (run !== lifecycle) return;
+  if (!isCurrent()) return;
   if (!status.seedComplete || String(status.generation) !== String(control.datasetGeneration)) {
     status = await bootstrapCollection(collectionName, control, run);
-    if (run !== lifecycle) return;
-    if (!status.seedComplete || String(status.generation) !== String(control.datasetGeneration)) {
+    if (!isCurrent()) return;
+    if ((!status.seedComplete && status.pending.bootstrapPagesComplete !== true)
+      || String(status.generation) !== String(control.datasetGeneration)) {
       throw new Error(`Initial synchronization for ${collectionName} did not complete.`);
     }
   }
@@ -453,20 +475,48 @@ async function startIncrementalListener(collectionName: string, control: SyncCon
     collection(db, collectionName),
     orderBy('syncUpdatedAt', 'asc'),
     orderBy(documentId(), 'asc'),
-    startAfter(firestoreCursor(checkpoint.syncUpdatedAt), checkpoint.documentId),
+    // Overlap the timestamp boundary: a later delivery with the same timestamp
+    // and a lower ID must not fall behind a strict (timestamp, ID) cursor.
+    startAt(firestoreCursor(checkpoint.syncUpdatedAt)),
   );
+  let confirmed = false;
+  let deliveryFailed = false;
+  let reconnectScheduled = false;
+  const retry = (error: unknown) => {
+    if (!isCurrent()) return;
+    deliveryFailed = true;
+    activeUnsubscribers.get(collectionName)?.();
+    activeUnsubscribers.delete(collectionName);
+    lastError = `Incremental sync for ${collectionName} needs retry: ${error instanceof Error ? error.message : error}`;
+    scheduleIncrementalRestart(collectionName, control, run, 30_000);
+    notify();
+  };
   const unsubscribe = onSnapshot(
     deltaQuery,
     { includeMetadataChanges: true },
     result => {
-      if (run !== lifecycle) return;
-      const changedDocuments = result.docChanges()
+      if (!isCurrent() || deliveryFailed) return;
+      const changes = result.docChanges({ includeMetadataChanges: true });
+      const firstConfirmation = !confirmed && !result.metadata.fromCache;
+      // A cached record may have no data change when confirmed by the server.
+      // Persist the whole bounded result on the first authoritative delivery.
+      let changedDocuments = firstConfirmation ? result.docs : changes
         .filter(change => change.type !== 'removed')
         .map(change => change.doc);
+      if (result.metadata.fromCache) {
+        changedDocuments = changedDocuments.filter(document => document.metadata.hasPendingWrites);
+      }
+      const removedIds = changes.filter(change => change.type === 'removed').map(change => change.doc.id);
       const hasPendingWrites = result.metadata.hasPendingWrites || result.docs.some(document => document.metadata.hasPendingWrites);
       if (hasPendingWrites) pending.add(collectionName);
       else pending.delete(collectionName);
-      if (result.metadata.fromCache) cached.add(collectionName);
+      if (result.metadata.fromCache) {
+        cached.add(collectionName);
+        if (confirmed && !reconnectScheduled) {
+          reconnectScheduled = true;
+          scheduleIncrementalRestart(collectionName, control, run);
+        }
+      }
       else {
         cached.delete(collectionName);
         const firstServerDelivery = !serverDelivered.has(collectionName);
@@ -480,47 +530,113 @@ async function startIncrementalListener(collectionName: string, control: SyncCon
           documents: readReason === 'initial' ? result.docs.length : changedDocuments.length,
         });
         serverDelivered.add(collectionName);
+        confirmed = true;
       }
 
       const nextCheckpoint = result.metadata.fromCache || hasPendingWrites
         ? undefined
         : checkpointFromDocuments(result.docs) || undefined;
       void queuePersistence(collectionName, run, async () => {
+        // After any failed commit, later snapshots from this attachment cannot
+        // advance past the missing records. Reattach and replay from disk.
+        if (deliveryFailed) return;
+        try {
         const currentStatus = await getLocalSyncStatus(collectionName);
+        const unresolvedIds = new Set<string>([
+          ...(Array.isArray(currentStatus.pending.reconcileRecordIds)
+            ? currentStatus.pending.reconcileRecordIds.map(String) : []),
+          ...removedIds,
+        ]);
+        const inputs = mirrorInputs(changedDocuments);
+        const recoveryRecords: unknown[] = [];
+        // Remember removals before a network read; interruption must not forget
+        // a rejected edit that has reverted to a revision before our cursor.
+        if (unresolvedIds.size) {
+          await setLocalSyncMetadata(collectionName, {
+            pending: { reconcileRecordIds: [...unresolvedIds] },
+          });
+        }
+        if (!result.metadata.fromCache) {
+          for (const id of unresolvedIds) {
+            const authoritative = await getDocFromServer(doc(db, collectionName, id));
+            if (run !== lifecycle) return;
+            if (authoritative.metadata.hasPendingWrites) {
+              throw new Error(`Pending ${collectionName}/${id} must be acknowledged before reconciliation.`);
+            }
+            recordFirestoreRead({ collection: collectionName, source: 'listener', reason: 'incremental', documents: 1 });
+            const local = await queryLocalRecords(collectionName, { includeDeleted: true, filter: record => record.id === id });
+            if (local[0]?.pending || !authoritative.exists()) recoveryRecords.push(...local);
+            if (authoritative.exists()) {
+              const data = authoritative.data();
+              inputs.push({ id, data, pending: false, deleted: data.deleted === true,
+                syncUpdatedAt: timestampParts(data.syncUpdatedAt) || undefined });
+            } else if (local[0]) {
+              // Preserve the rejected entry for recovery, but never count a
+              // server-confirmed nonexistent sale in operational totals.
+              inputs.push({ id, data: local[0].data, deleted: true, pending: false });
+            }
+          }
+        }
         const safeCheckpoint = nextCheckpoint && currentStatus.checkpoint
           && compareCheckpoint(nextCheckpoint, currentStatus.checkpoint) < 0
           ? currentStatus.checkpoint
           : nextCheckpoint;
-        await upsertLocalRecords(collectionName, mirrorInputs(changedDocuments), {
+        const caughtUp = !result.metadata.fromCache && !hasPendingWrites;
+        await upsertLocalRecords(collectionName, inputs, {
           checkpoint: safeCheckpoint,
+          ...(caughtUp ? { seedComplete: true, generation: control.datasetGeneration } : {}),
           pending: {
             hasPendingWrites,
             count: hasPendingWrites ? 1 : 0,
             ...(result.metadata.fromCache ? {} : { lastConfirmedAt: new Date().toISOString() }),
+            ...(caughtUp ? { bootstrapInProgress: false, bootstrapPagesComplete: false,
+              bootstrapCursor: null, bootstrapCompletedAt: new Date().toISOString() } : {}),
+            ...(!result.metadata.fromCache ? { reconcileRecordIds: [] } : {}),
+            ...(recoveryRecords.length ? { recoveryRecords: [
+              ...(Array.isArray(currentStatus.pending.recoveryRecords) ? currentStatus.pending.recoveryRecords : []),
+              ...recoveryRecords,
+            ] } : {}),
           },
         });
         if (run !== lifecycle) return;
-        ready.add(collectionName);
+        if (caughtUp) ready.add(collectionName);
+        if (caughtUp && lastError.startsWith(`Incremental sync for ${collectionName} needs retry:`)) lastError = '';
         notify();
-      }).catch(error => {
-        if (run !== lifecycle) return;
-        activeUnsubscribers.get(collectionName)?.();
-        activeUnsubscribers.delete(collectionName);
-        lastError = `Incremental sync for ${collectionName} fell back to the complete listener: ${error instanceof Error ? error.message : error}`;
-        startLegacyListener(collectionName, control, run);
-        notify();
-      });
+        // Bound the lifetime of an incremental query, not its results. Never
+        // limit the query itself: that could silently omit changed documents.
+        if (isCurrent() && caughtUp && result.size >= BOOTSTRAP_PAGE_SIZE
+          && safeCheckpoint && compareCheckpoint(safeCheckpoint, checkpoint) > 0) {
+          scheduleIncrementalRestart(collectionName, control, run);
+        }
+        } catch (error) {
+          deliveryFailed = true;
+          throw error;
+        }
+      }).catch(retry);
     },
-    error => {
-      if (run !== lifecycle) return;
-      activeUnsubscribers.delete(collectionName);
-      lastError = `Incremental sync for ${collectionName} fell back to the complete listener: ${error instanceof Error ? error.message : error}`;
-      startLegacyListener(collectionName, control, run);
-      notify();
-    },
+    retry,
   );
   activeUnsubscribers.set(collectionName, unsubscribe);
   notify();
+}
+
+function scheduleIncrementalRestart(collectionName: string, control: SyncControl, run: number, delay = 1_000) {
+  if (run !== lifecycle || incrementalRestarts.has(collectionName)) return;
+  incrementalRestarts.set(collectionName, setTimeout(() => {
+    incrementalRestarts.delete(collectionName);
+    if (run !== lifecycle) return;
+    activeUnsubscribers.get(collectionName)?.();
+    activeUnsubscribers.delete(collectionName);
+    incrementalEpochs.set(collectionName, (incrementalEpochs.get(collectionName) || 0) + 1);
+    reconnectPending.add(collectionName);
+    // startIncrementalListener waits for already queued transactions before
+    // reading the checkpoint. Late callbacks from the old listener are ignored.
+    void startIncrementalListener(collectionName, control, run).catch(error => {
+      if (run !== lifecycle) return;
+      handleError(error);
+      scheduleIncrementalRestart(collectionName, control, run, 30_000);
+    });
+  }, delay));
 }
 
 function handleError(error: unknown) {
@@ -548,7 +664,7 @@ async function restartForControl(control: SyncControl) {
       }
     } catch (error) {
       handleError(error);
-      if (run === lifecycle && mode === 'incremental') startLegacyListener(collectionName, control, run);
+      if (run === lifecycle && mode === 'incremental') scheduleIncrementalRestart(collectionName, control, run, 30_000);
     }
   }
   if (run === lifecycle) readinessAuditRun = null;
@@ -576,7 +692,10 @@ export function startFullOfflineCache(role?: string | null) {
   readinessAuditRun = null;
   if (!lanUnsubscribe) {
     lanUnsubscribe = subscribeLanStatus(status => {
-      if (lastOnline === false && status.online) activeCollections.forEach(name => reconnectPending.add(name));
+      if (lastOnline === false && status.online) activeCollections.forEach(name => {
+        reconnectPending.add(name);
+        if (mode === 'incremental') scheduleIncrementalRestart(name, getSyncControl(), lifecycle);
+      });
       lastOnline = status.online;
     });
   }

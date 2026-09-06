@@ -14,7 +14,9 @@ const createDevice = async (name, offline = false) => {
   });
   const window = new BrowserWindow({ show: false, width: 1500, height: 1000, webPreferences: { session: deviceSession, contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 2) console.log(`[${name}] ${message}`); });
-  await window.loadURL(url + (offline ? '?offline=1' : ''));
+  const deviceUrl = new URL(url);
+  if (offline) deviceUrl.searchParams.set('offline', '1');
+  await window.loadURL(deviceUrl.href);
   for (let attempt = 0; attempt < 400; attempt += 1) {
     if (await window.webContents.executeJavaScript('Boolean(window.smoke)')) return window;
     await delay(100);
@@ -30,6 +32,7 @@ app.whenReady().then(async () => {
     primary = await createDevice('primary', true);
     const reconnected = await primary.webContents.executeJavaScript('window.smoke.reconnectAfterOfflineRestart()');
     const second = await replica.webContents.executeJavaScript('window.smoke.verifyReplica()');
+    const transitions = await primary.webContents.executeJavaScript('window.smoke.verifyTransitions()');
     const reloaded = new Promise(resolve => primary.webContents.once('did-finish-load', resolve));
     primary.reload();
     await reloaded;
@@ -38,7 +41,7 @@ app.whenReady().then(async () => {
       await delay(100);
     }
     const restarted = await primary.webContents.executeJavaScript('window.smoke.verifyReplica()');
-    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, restarted }));
+    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted }));
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });
