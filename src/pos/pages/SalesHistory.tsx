@@ -329,7 +329,7 @@ export function SalesHistory() {
             {selectedSale.customerName && <p className="text-xs mt-1">Customer: {selectedSale.customerName}</p>}
           </div>
           <table className="w-full mb-3 text-[10px]">
-            <colgroup><col style={{ width: '42%' }} /><col style={{ width: '20%' }} /><col style={{ width: '12%' }} /><col style={{ width: '26%' }} /></colgroup>
+            <colgroup><col style={{ width: '39%' }} /><col style={{ width: '20%' }} /><col style={{ width: '12%' }} /><col style={{ width: '29%' }} /></colgroup>
             <thead><tr className="border-b border-black border-dashed"><th className="text-left pb-1">Item</th><th className="text-right pb-1">Price</th><th className="text-center pb-1">Qty</th><th className="text-right pb-1">Amount</th></tr></thead>
             <tbody>
               {selectedSale.items?.map((item: any) => (

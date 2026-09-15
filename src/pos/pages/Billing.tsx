@@ -1169,10 +1169,10 @@ export function Billing() {
         </div>
         <table className="w-full mb-3 text-[10px]">
           <colgroup>
-            <col style={{ width: '42%' }} />
+            <col style={{ width: '39%' }} />
             <col style={{ width: '20%' }} />
             <col style={{ width: '12%' }} />
-            <col style={{ width: '26%' }} />
+            <col style={{ width: '29%' }} />
           </colgroup>
           <thead>
             <tr className="border-b border-black border-dashed">
