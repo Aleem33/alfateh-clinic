@@ -167,7 +167,7 @@ export function SalesReturns() {
         </div>
         <div style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:6px 0;margin-bottom:6px">
           <table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:10px">
-            <colgroup><col style="width:40%"><col style="width:20%"><col style="width:13%"><col style="width:27%"></colgroup>
+            <colgroup><col style="width:37%"><col style="width:20%"><col style="width:13%"><col style="width:30%"></colgroup>
             <thead><tr>
               <th style="text-align:left;padding-bottom:4px">Item</th>
               <th style="text-align:right;padding-bottom:4px">Price</th>

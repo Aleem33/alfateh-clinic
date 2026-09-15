@@ -37,7 +37,7 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
       <div style="font-size:10px;margin-bottom:5px">Supplier: <strong>${data.supplierName || 'N/A'}</strong></div>
       <div style="border-top:1px dashed #000;padding:6px 0;border-bottom:1px dashed #000;margin-bottom:6px">
         <table style="width:100%;table-layout:fixed;font-size:10px;border-collapse:collapse">
-          <colgroup><col style="width:40%"><col style="width:20%"><col style="width:16%"><col style="width:24%"></colgroup>
+          <colgroup><col style="width:36%"><col style="width:20%"><col style="width:16%"><col style="width:28%"></colgroup>
           <thead><tr>
             <th style="text-align:left;padding-bottom:4px">Item</th>
             <th style="text-align:right;padding-bottom:4px">Price</th>

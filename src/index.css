@@ -47,10 +47,10 @@
 
 /* Print */
 @media print {
-  @page { size: 80mm auto; margin: 2mm 3mm; }
+  @page { size: 80mm auto; margin: 2mm 4mm 2mm 2mm; }
   html, body, #root {
-    width: 74mm !important;
-    min-width: 74mm !important;
+    width: 70mm !important;
+    min-width: 70mm !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #fff !important;
@@ -58,10 +58,10 @@
   .no-print { display: none !important; }
   .thermal-receipt {
     display: block !important;
-    width: 74mm !important;
-    max-width: 74mm !important;
+    width: 70mm !important;
+    max-width: 70mm !important;
     margin: 0 !important;
-    padding: 0 !important;
+    padding: 0 2mm 0 0 !important;
     overflow: visible !important;
     color: #000 !important;
     font-family: "Courier New", monospace !important;
@@ -83,5 +83,9 @@
   .thermal-receipt td {
     overflow-wrap: anywhere;
     vertical-align: top;
+  }
+  .thermal-receipt th:last-child,
+  .thermal-receipt td:last-child {
+    padding-right: 1mm !important;
   }
 }

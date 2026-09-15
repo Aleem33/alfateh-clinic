@@ -1,7 +1,7 @@
 const SLIP_STYLE = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  @page { size: 80mm auto; margin: 2mm 3mm; }
-  html, body { width: 74mm; min-width: 74mm; background: white; }
+  @page { size: 80mm auto; margin: 2mm 4mm 2mm 2mm; }
+  html, body { width: 70mm; min-width: 70mm; background: white; }
   body {
     color: #000;
     font-family: "Courier New", monospace;
@@ -11,15 +11,16 @@ const SLIP_STYLE = `
     print-color-adjust: exact;
   }
   .thermal-receipt {
-    width: 74mm !important;
-    max-width: 74mm !important;
-    padding: 0 !important;
+    width: 70mm !important;
+    max-width: 70mm !important;
+    padding: 0 2mm 0 0 !important;
     overflow: visible !important;
     font-weight: 700 !important;
   }
   .thermal-receipt * { font-weight: inherit !important; }
   .thermal-receipt table { width: 100%; table-layout: fixed; border-collapse: collapse; }
   .thermal-receipt th, .thermal-receipt td { overflow-wrap: anywhere; vertical-align: top; }
+  .thermal-receipt th:last-child, .thermal-receipt td:last-child { padding-right: 1mm !important; }
   .receipt-policy { font-family: "Noto Nastaliq Urdu", "Noto Naskh Arabic", "Segoe UI", Arial, sans-serif; direction: rtl; unicode-bidi: embed; }
 `;
 
