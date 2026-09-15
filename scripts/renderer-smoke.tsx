@@ -43,17 +43,18 @@ const ready = async () => {
   if (getOfflineCacheStatus().mode !== expectedMode) throw new Error(`Expected ${expectedMode} sync mode`);
   await waitFor(() => document.body.innerText.includes('Smoke Medicine'), 'billing medicine');
 };
-const checkout = async (expectedCount: number) => {
+const checkout = async (expectedCount: number, rapidPresses = 1) => {
   click('Add -');
   await waitFor(() => [...document.querySelectorAll('button')].some(node => node.textContent?.includes('Checkout & Print') && !node.disabled), 'cart ready');
-  click('Checkout & Print');
+  const checkoutButton = [...document.querySelectorAll('button')].find(node => node.textContent?.includes('Checkout & Print')) as HTMLButtonElement;
+  for (let press = 0; press < rapidPresses; press += 1) checkoutButton.click();
   await waitFor(async () => (await getLocalCollectionOnce('sales')).length === expectedCount, 'sale mirrored');
 };
 (window as any).smoke = {
   ready,
   async primary() {
     await ready();
-    await checkout(1);
+    await checkout(1, 5);
     await waitForPendingWrites(db);
     await disableNetwork(db);
     online = false; window.dispatchEvent(new Event('offline'));
