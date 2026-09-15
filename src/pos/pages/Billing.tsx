@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { collection, addDoc, deleteDoc, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare, printPageOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosReceiptNo } from '../../firebase';
@@ -23,6 +23,11 @@ import { clinicDateKey, clinicTimeLabel, recordClinicDateTimeLabel } from '../..
 import { getTrustedClockReading, trustedNow, trustedNowISO } from '../../lib/trustedClock';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 import { getActiveAuthSession } from '../../lib/offlineAuth';
+import { SyncTimeoutError, waitForSyncStep } from '../../lib/syncTiming';
+
+const INITIAL_MEDICINE_GROUPS = 120;
+const MEDICINE_GROUP_PAGE = 120;
+const SALE_ACK_TIMEOUT_MS = 6_000;
 
 export function Billing() {
   const [medicines, setMedicines]       = useState<any[]>([]);
@@ -46,6 +51,9 @@ export function Billing() {
   const [holdLabel, setHoldLabel] = useState('');
   const [isHoldingBill, setIsHoldingBill] = useState(false);
   const [billingNotice, setBillingNotice] = useState('');
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const checkoutInFlightRef = useRef(false);
+  const [visibleMedicineGroups, setVisibleMedicineGroups] = useState(INITIAL_MEDICINE_GROUPS);
 
   // Mobile: which tab is active
   const [mobileTab, setMobileTab] = useState<'medicines' | 'cart'>('medicines');
@@ -105,14 +113,24 @@ export function Billing() {
     };
   }, []);
 
-  const filteredMedicines = searchMedicines(medicines, search, { inStockOnly: true });
-
+  const deferredSearch = useDeferredValue(search);
+  const filteredMedicines = useMemo(
+    () => searchMedicines(medicines, deferredSearch, { inStockOnly: true }),
+    [medicines, deferredSearch],
+  );
   const medicineGroups = useMemo(() => groupMedicineBatches(filteredMedicines), [filteredMedicines]);
+  const renderedMedicineGroups = useMemo(
+    () => medicineGroups.slice(0, visibleMedicineGroups),
+    [medicineGroups, visibleMedicineGroups],
+  );
+  useEffect(() => { setVisibleMedicineGroups(INITIAL_MEDICINE_GROUPS); }, [deferredSearch]);
 
-  const filteredCustomers = customers.filter(c =>
-    c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-    (c.phone || '').includes(customerSearch)
-  ).slice(0, 8);
+  const filteredCustomers = useMemo(() => {
+    const query = customerSearch.toLowerCase();
+    return customers.filter(c =>
+      String(c.name || '').toLowerCase().includes(query) || String(c.phone || '').includes(customerSearch)
+    ).slice(0, 8);
+  }, [customers, customerSearch]);
 
   const getBoxPrice = (med: any): number => Number(med.retailPrice || med.price || med.costPrice || 0);
   const getUnitPrice = (med: any): number => {
@@ -401,10 +419,16 @@ export function Billing() {
   };
 
   const handleCheckout = async () => {
-    if (cart.length === 0) return;
+    // React state is not synchronous. The ref closes the same-tick gap so rapid
+    // clicks cannot start multiple receipt numbers, sale IDs or stock batches.
+    if (cart.length === 0 || checkoutInFlightRef.current) return;
+    checkoutInFlightRef.current = true;
+    setIsCheckingOut(true);
     const stockProblem = findCartStockProblem(cart, medicines);
     if (stockProblem) {
       setStockError(stockProblem);
+      checkoutInFlightRef.current = false;
+      setIsCheckingOut(false);
       return;
     }
     try {
@@ -477,15 +501,41 @@ export function Billing() {
           : {}),
         createdAt: saleTimestamp,
       });
-      await waitForOnlineWrite(batch.commit());
-      if (isCloudOnline()) await removePendingPosSale(docRef.id);
+      const startedOnline = isCloudOnline();
+      const commitPromise = waitForOnlineWrite(batch.commit());
+      let serverConfirmed = false;
+      try {
+        if (startedOnline) {
+          await waitForSyncStep(commitPromise, SALE_ACK_TIMEOUT_MS, 'Sale confirmation');
+          serverConfirmed = true;
+        } else {
+          await commitPromise;
+        }
+      } catch (error) {
+        // Once the outbox write succeeds, that exact sale ID owns recovery.
+        // Treat timeouts and transport failures as queued so another click
+        // cannot create a second receipt for the same cart.
+        if (error instanceof SyncTimeoutError) {
+          void commitPromise.catch(pendingError =>
+            handleFirestoreError(pendingError, OperationType.CREATE, `sales/${docRef.id}`));
+        } else {
+          handleFirestoreError(error, OperationType.CREATE, `sales/${docRef.id}`);
+        }
+      }
+      if (serverConfirmed) await removePendingPosSale(docRef.id);
       setLastReceipt({ ...saleData, id: docRef.id });
       setCart([]); setOrderDiscountType('rs'); setOrderDiscountValue(0); setAmountPaid('');
       setSelectedCustomer(null); setCustomerSearch('');
       setMobileTab('medicines');
+      showNotice(serverConfirmed
+        ? `Sale ${receiptNo} recorded successfully.`
+        : `Sale ${receiptNo} saved safely and queued for synchronization.`);
       setTimeout(handlePrint, 500);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'sales');
+    } finally {
+      checkoutInFlightRef.current = false;
+      setIsCheckingOut(false);
     }
   };
 
@@ -534,7 +584,7 @@ export function Billing() {
           <span>Medicine</span><span>Batch / Stock</span><span>Price</span><span className="text-center">Action</span>
         </div>
         <div className="divide-y divide-gray-100">
-          {medicineGroups.map(group => {
+          {renderedMedicineGroups.map(group => {
             const med = group.batches[0];
             const hasMultipleBatches = group.batches.length > 1;
             const retailPrices = group.batches.map((batch: any) => getBoxPrice(batch));
@@ -588,6 +638,16 @@ export function Billing() {
               </div>
             );
           })}
+          {renderedMedicineGroups.length < medicineGroups.length && (
+            <div className="p-3 text-center bg-gray-50">
+              <button type="button"
+                onClick={() => setVisibleMedicineGroups(count => count + MEDICINE_GROUP_PAGE)}
+                className="px-4 py-2 text-sm font-semibold text-blue-700 bg-white border border-blue-200 rounded-lg hover:bg-blue-50">
+                Show {Math.min(MEDICINE_GROUP_PAGE, medicineGroups.length - renderedMedicineGroups.length)} more
+              </button>
+              <p className="mt-1 text-xs text-gray-500">All {medicineGroups.length} medicines remain searchable.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -861,9 +921,11 @@ export function Billing() {
             <p className="text-xs text-gray-400 italic">Select a customer above to track this pending amount.</p>
           )}
         </div>
-        <button onClick={handleCheckout} disabled={cart.length === 0}
+        <button onClick={handleCheckout} disabled={cart.length === 0 || isCheckingOut}
+          aria-busy={isCheckingOut}
           className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed mt-1">
-          <Printer className="w-5 h-5" /> Checkout & Print
+          {isCheckingOut ? <><span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Recording sale…</>
+            : <><Printer className="w-5 h-5" /> Checkout & Print</>}
         </button>
       </div>
     </div>
