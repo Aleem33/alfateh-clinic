@@ -56,6 +56,8 @@
     background: #fff !important;
   }
   .no-print { display: none !important; }
+  /* Toasts and dialogs otherwise cover the receipt during automatic printing. */
+  #root .fixed { display: none !important; }
   .thermal-receipt {
     display: block !important;
     width: 70mm !important;

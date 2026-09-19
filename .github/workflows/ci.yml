@@ -59,3 +59,6 @@ jobs:
 
       - name: Build Vite app (verify it compiles)
         run: npm run build
+
+      - name: Thermal receipt print isolation
+        run: npx electron scripts/thermal-print-smoke.cjs
