@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
-import { collection, addDoc, deleteDoc, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
+import { collection, addDoc, deleteDoc, doc, updateDoc, increment, runTransaction, writeBatch } from '@/lib/firestore';
 import { printOrShare, printPageOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosReceiptNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
@@ -15,7 +15,7 @@ import { groupMedicineBatches, normalizeMedicineText, searchMedicines } from '..
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountType } from '../lib/billDiscount';
 import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
-import { cartItemUnits, findCartStockProblem } from '../lib/billingCart';
+import { cartItemUnits, findCartStockProblem, InsufficientStockError } from '../lib/billingCart';
 import { aggregateSaleStockAdjustments, queuePendingPosSale, removePendingPosSale } from '../lib/offlineSalesOutbox';
 import { allocateCartBonusCost } from '../lib/bonusInventory';
 import { isCloudOnline } from '../../lib/lanCoordinator';
@@ -502,11 +502,48 @@ export function Billing() {
         createdAt: saleTimestamp,
       });
       const startedOnline = isCloudOnline();
-      const commitPromise = waitForOnlineWrite(batch.commit());
+      let finalSaleData = saleData;
+      const commitPromise = startedOnline
+        ? runTransaction(db, async transaction => {
+          const medicineRefs = stockAdjustments.map(adjustment => doc(db, 'medicines', adjustment.medicineId));
+          const medicineSnapshots = await Promise.all(medicineRefs.map(reference => transaction.get(reference)));
+          const authoritativeMedicines: Array<{ id: string; stock?: number; bonusStockUnits?: number; [key: string]: unknown }> = medicineSnapshots.map((snapshot, index) => ({
+            id: stockAdjustments[index].medicineId,
+            ...(snapshot.exists() ? snapshot.data() : {}),
+          }));
+          const authoritativeProblem = findCartStockProblem(cart, authoritativeMedicines);
+          if (authoritativeProblem) throw new InsufficientStockError(authoritativeProblem);
+          const authoritativeItems = allocateCartBonusCost(cart, authoritativeMedicines);
+          const authoritativeAdjustments = aggregateSaleStockAdjustments(authoritativeItems);
+          const authoritativeSaleData = { ...saleData, items: authoritativeItems };
+
+          transaction.set(docRef, authoritativeSaleData);
+          authoritativeItems.forEach((item: any, index: number) => {
+            transaction.set(doc(db, 'stockMovements', movements[index].id), {
+              ...movements[index].data,
+              paidUnits: -Number(item.paidUnitsSold || 0),
+              bonusUnits: -Number(item.bonusUnitsSold || 0),
+            });
+          });
+          authoritativeAdjustments.forEach(adjustment => {
+            const medicine = authoritativeMedicines.find(entry => entry.id === adjustment.medicineId)!;
+            const nextStock = Number(medicine.stock || 0) - adjustment.units;
+            const nextBonus = Number(medicine.bonusStockUnits || 0) - Number(adjustment.bonusUnits || 0);
+            transaction.update(doc(db, 'medicines', adjustment.medicineId), {
+              stock: nextStock,
+              bonusStockUnits: nextBonus,
+            });
+          });
+          if (selectedCustomer && pendingAmount > 0) {
+            transaction.update(doc(db, 'customers', selectedCustomer.id), { creditBalance: increment(pendingAmount) });
+          }
+          return authoritativeSaleData;
+        })
+        : waitForOnlineWrite(batch.commit()).then(() => saleData);
       let serverConfirmed = false;
       try {
         if (startedOnline) {
-          await waitForSyncStep(commitPromise, SALE_ACK_TIMEOUT_MS, 'Sale confirmation');
+          finalSaleData = await waitForSyncStep(commitPromise, SALE_ACK_TIMEOUT_MS, 'Sale confirmation');
           serverConfirmed = true;
         } else {
           await commitPromise;
@@ -515,7 +552,11 @@ export function Billing() {
         // Once the outbox write succeeds, that exact sale ID owns recovery.
         // Treat timeouts and transport failures as queued so another click
         // cannot create a second receipt for the same cart.
-        if (error instanceof SyncTimeoutError) {
+        if (error instanceof InsufficientStockError) {
+          await removePendingPosSale(docRef.id);
+          setStockError(error.message);
+          return;
+        } else if (error instanceof SyncTimeoutError) {
           void commitPromise.catch(pendingError =>
             handleFirestoreError(pendingError, OperationType.CREATE, `sales/${docRef.id}`));
         } else {
@@ -523,7 +564,7 @@ export function Billing() {
         }
       }
       if (serverConfirmed) await removePendingPosSale(docRef.id);
-      setLastReceipt({ ...saleData, id: docRef.id });
+      setLastReceipt({ ...finalSaleData, id: docRef.id });
       setCart([]); setOrderDiscountType('rs'); setOrderDiscountValue(0); setAmountPaid('');
       setSelectedCustomer(null); setCustomerSearch('');
       setMobileTab('medicines');

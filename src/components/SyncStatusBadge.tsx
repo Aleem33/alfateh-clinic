@@ -36,10 +36,12 @@ const initialCacheStatus: OfflineCacheStatus = {
   active: false,
   mode: 'legacy',
   readyCollections: 0,
+  serverConfirmedCollections: 0,
   totalCollections: 0,
   fromCacheCollections: 0,
   pendingCollections: [],
   incompleteCollections: [],
+  unreconciledCollections: [],
   lastError: '',
 };
 
@@ -157,7 +159,7 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="rounded-lg bg-gray-50 p-3"><p className="text-gray-500">Connected devices</p><p className="font-bold text-gray-900 mt-1">{lan.peers.length + 1}</p></div>
               <div className="rounded-lg bg-gray-50 p-3"><p className="text-gray-500">Pending cloud changes</p><p className="font-bold text-gray-900 mt-1">{status.pendingCount}</p></div>
-              <div className="rounded-lg bg-gray-50 p-3"><p className="text-gray-500">Offline data ready</p><p className="font-bold text-gray-900 mt-1">{cache.readyCollections}/{cache.totalCollections}</p></div>
+              <div className="rounded-lg bg-gray-50 p-3"><p className="text-gray-500">Cloud data confirmed</p><p className="font-bold text-gray-900 mt-1">{cache.serverConfirmedCollections}/{cache.totalCollections}</p></div>
             </div>
             {cache.active && cache.readyCollections < cache.totalCollections && status.online && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2.5">

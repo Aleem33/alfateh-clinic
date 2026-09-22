@@ -51,7 +51,7 @@ vi.mock('./syncProtocol', () => ({
   subscribeSyncControl: vi.fn(() => vi.fn()),
 }));
 
-import { __offlineCacheInternals, stopFullOfflineCache } from './offlineCache';
+import { __offlineCacheInternals, getOfflineCacheStatus, stopFullOfflineCache } from './offlineCache';
 import { getLocalSyncStatus, queryLocalRecords, resetLocalMirrorForTests, upsertLocalRecords } from './localMirror';
 import * as mirror from './localMirror';
 
@@ -90,6 +90,21 @@ afterEach(async () => {
 });
 
 describe('incremental mirror bootstrap', () => {
+  it('marks a collection cloud-confirmed only after its authoritative snapshot is persisted', async () => {
+    __offlineCacheInternals.startLegacyListener('sales', control);
+    const onData = (firestore.onSnapshot.mock.calls as any).at(-1)[2];
+    onData({ ...result([document('cached', { total: 1 })]), metadata: { fromCache: true } });
+    await __offlineCacheInternals.waitForPersistence('sales');
+    expect(getOfflineCacheStatus().serverConfirmedCollections).toBe(0);
+
+    const serverRecord = document('server', { total: 2 });
+    onData({ ...result([serverRecord]), metadata: { fromCache: false },
+      docChanges: () => [{ type: 'added', doc: serverRecord }] });
+    await __offlineCacheInternals.waitForPersistence('sales');
+    expect(getOfflineCacheStatus().serverConfirmedCollections).toBe(1);
+    expect((await queryLocalRecords('sales')).map(record => record.id)).toEqual(['server']);
+  });
+
   it('uses document ID as the deterministic tie-breaker for identical timestamps', () => {
     const timestamp = { seconds: 1_788_000_000, nanoseconds: 123 };
     expect(__offlineCacheInternals.compareCheckpoint(

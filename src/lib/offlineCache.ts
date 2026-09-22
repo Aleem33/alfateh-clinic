@@ -46,10 +46,12 @@ export type OfflineCacheStatus = {
   active: boolean;
   mode: OfflineCacheMode;
   readyCollections: number;
+  serverConfirmedCollections: number;
   totalCollections: number;
   fromCacheCollections: number;
   pendingCollections: string[];
   incompleteCollections: string[];
+  unreconciledCollections: string[];
   lastError: string;
 };
 
@@ -75,6 +77,7 @@ let registeredReadyState: boolean | null = null;
 let readinessAuditRun: number | null = null;
 let rejectionListener: ((event: Event) => void) | null = null;
 const serverDelivered = new Set<string>();
+const serverReconciled = new Set<string>();
 const reconnectPending = new Set<string>();
 const BOOTSTRAP_PAGE_SIZE = 250;
 
@@ -83,10 +86,12 @@ function snapshot(): OfflineCacheStatus {
     active: activeUnsubscribers.size > 0 || activeCollections.length > 0,
     mode,
     readyCollections: ready.size,
+    serverConfirmedCollections: serverReconciled.size,
     totalCollections: activeCollections.length,
     fromCacheCollections: cached.size,
     pendingCollections: [...new Set([...pending, ...rejected])],
     incompleteCollections: activeCollections.filter(name => !ready.has(name)),
+    unreconciledCollections: activeCollections.filter(name => !serverReconciled.has(name)),
     lastError,
   };
 }
@@ -114,6 +119,7 @@ function stopCollectionListeners() {
   cached.clear();
   pending.clear();
   serverDelivered.clear();
+  serverReconciled.clear();
   reconnectPending.clear();
 }
 
@@ -320,6 +326,8 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
           },
         });
         if (run !== lifecycle) return;
+        if (hasPendingWrites) serverReconciled.delete(collectionName);
+        else serverReconciled.add(collectionName);
         ready.add(collectionName);
         notify();
       }).catch(handleError);
@@ -599,7 +607,12 @@ async function startIncrementalListener(collectionName: string, control: SyncCon
           },
         });
         if (run !== lifecycle) return;
-        if (caughtUp) ready.add(collectionName);
+        if (caughtUp) {
+          ready.add(collectionName);
+          serverReconciled.add(collectionName);
+        } else if (!result.metadata.fromCache) {
+          serverReconciled.delete(collectionName);
+        }
         if (caughtUp && lastError.startsWith(`Incremental sync for ${collectionName} needs retry:`)) lastError = '';
         notify();
         // Bound the lifetime of an incremental query, not its results. Never

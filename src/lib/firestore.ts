@@ -69,6 +69,7 @@ function referenceDetails(reference: any, data?: AnyRecord) {
 }
 
 function reportRejectedWrite(error: unknown, activities: AnyRecord[]) {
+  if (error instanceof Error && error.name === 'InsufficientStockError') return;
   if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
   const message = error instanceof Error ? error.message : String(error || 'Firestore rejected a write.');
   window.dispatchEvent(new CustomEvent('alfateh:firestore-write-rejected', {

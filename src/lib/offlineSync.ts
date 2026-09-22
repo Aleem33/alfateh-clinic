@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocFromServer, getDocs, increment, query, setDoc, updateDoc, waitForPendingWrites, where, writeBatch } from '@/lib/firestore';
+import { collection, doc, getDocFromServer, getDocs, increment, query, runTransaction, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
@@ -10,6 +10,9 @@ import { isCloudAuthReady } from './offlineAuth';
 import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
 import { waitForSyncStep } from './syncTiming';
 import { trustedNowISO } from './trustedClock';
+import { allocateCartBonusCost } from '../pos/lib/bonusInventory';
+import { aggregateSaleStockAdjustments } from '../pos/lib/offlineSalesOutbox';
+import { findCartStockProblem, InsufficientStockError } from '../pos/lib/billingCart';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -190,23 +193,44 @@ async function replayPendingPosSales() {
   await replayPendingPosSaleRecords(records, {
     saleExists: async saleId => (await getDocFromServer(doc(db, 'sales', saleId))).exists(),
     replay: async record => {
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'sales', record.saleId), record.saleData);
-      record.movements.forEach(movement => {
-        batch.set(doc(db, 'stockMovements', movement.id), movement.data);
-      });
-      record.stockAdjustments.forEach(adjustment => {
-        batch.update(doc(db, 'medicines', adjustment.medicineId), {
-          stock: increment(-adjustment.units),
-          ...(adjustment.bonusUnits ? { bonusStockUnits: increment(-adjustment.bonusUnits) } : {}),
+      await runTransaction(db, async transaction => {
+        const saleRef = doc(db, 'sales', record.saleId);
+        const medicineRefs = record.stockAdjustments.map(adjustment => doc(db, 'medicines', adjustment.medicineId));
+        const [saleSnapshot, ...medicineSnapshots] = await Promise.all([
+          transaction.get(saleRef),
+          ...medicineRefs.map(reference => transaction.get(reference)),
+        ]);
+        if (saleSnapshot.exists()) return;
+        const medicines: Array<{ id: string; stock?: number; bonusStockUnits?: number; [key: string]: unknown }> = medicineSnapshots.map((snapshot, index) => ({
+          id: record.stockAdjustments[index].medicineId,
+          ...(snapshot.exists() ? snapshot.data() : {}),
+        }));
+        const items = Array.isArray(record.saleData.items) ? record.saleData.items : [];
+        const stockProblem = findCartStockProblem(items, medicines);
+        if (stockProblem) throw new InsufficientStockError(`Offline sale ${record.saleData.receiptNo || record.saleId}: ${stockProblem}`);
+        const authoritativeItems = allocateCartBonusCost(items, medicines);
+        const authoritativeAdjustments = aggregateSaleStockAdjustments(authoritativeItems);
+        transaction.set(saleRef, { ...record.saleData, items: authoritativeItems });
+        authoritativeItems.forEach((item: any, index: number) => {
+          transaction.set(doc(db, 'stockMovements', record.movements[index].id), {
+            ...record.movements[index].data,
+            paidUnits: -Number(item.paidUnitsSold || 0),
+            bonusUnits: -Number(item.bonusUnitsSold || 0),
+          });
         });
-      });
-      if (record.customerAdjustment && record.customerAdjustment.pendingAmount > 0) {
-        batch.update(doc(db, 'customers', record.customerAdjustment.customerId), {
-          creditBalance: increment(record.customerAdjustment.pendingAmount),
+        authoritativeAdjustments.forEach(adjustment => {
+          const medicine = medicines.find(entry => entry.id === adjustment.medicineId)!;
+          transaction.update(doc(db, 'medicines', adjustment.medicineId), {
+            stock: Number(medicine.stock || 0) - adjustment.units,
+            bonusStockUnits: Number(medicine.bonusStockUnits || 0) - Number(adjustment.bonusUnits || 0),
+          });
         });
-      }
-      await batch.commit();
+        if (record.customerAdjustment && record.customerAdjustment.pendingAmount > 0) {
+          transaction.update(doc(db, 'customers', record.customerAdjustment.customerId), {
+            creditBalance: increment(record.customerAdjustment.pendingAmount),
+          });
+        }
+      });
     },
     remove: removePendingPosSale,
   });

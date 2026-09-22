@@ -6,6 +6,13 @@ export type BillCartItem = {
   unitsPerBox?: number;
 };
 
+export class InsufficientStockError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InsufficientStockError';
+  }
+}
+
 export function cartItemUnits(item: BillCartItem): number {
   const quantity = Math.max(0, Number(item.quantity) || 0);
   const unitsPerBox = item.sellType === 'box'
