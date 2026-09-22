@@ -120,8 +120,16 @@ integrationDescribe('Firestore offline operational rules', () => {
 
   it('blocks a cashier from making the bonus bucket negative or larger than stock', async () => {
     const database = environment.authenticatedContext('cashier-1').firestore();
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { stock: -1, bonusStockUnits: 0 }));
     await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { bonusStockUnits: -1 }));
     await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { stock: 5, bonusStockUnits: 6 }));
+  });
+
+  it('blocks every role from storing negative medicine stock', async () => {
+    const adminDatabase = environment.authenticatedContext('admin-1').firestore();
+    const pharmacistDatabase = environment.authenticatedContext('pharmacist-1').firestore();
+    await assertFails(updateDoc(doc(adminDatabase, 'medicines', 'batch-a'), { stock: -1, bonusStockUnits: 0 }));
+    await assertFails(updateDoc(doc(pharmacistDatabase, 'medicines', 'batch-a'), { stock: -1, bonusStockUnits: 0 }));
   });
 
   it('allows a cashier return batch to restore stock', async () => {
@@ -402,8 +410,9 @@ integrationDescribe('Firestore offline operational rules', () => {
       await enforce();
       const database = environment.authenticatedContext('admin-1').firestore();
       const reference = doc(database, name, 'tracked-check');
-      await assertFails(setDoc(reference, { value: 1 }));
-      await assertSucceeds(setDoc(reference, { value: 1, ...revision() }));
+      const invariantFields = name === 'medicines' ? { stock: 0, bonusStockUnits: 0 } : {};
+      await assertFails(setDoc(reference, { value: 1, ...invariantFields }));
+      await assertSucceeds(setDoc(reference, { value: 1, ...invariantFields, ...revision() }));
       // REQUEST_TIME has millisecond precision. Move past the creation tick:
       // two legitimate writes in one tick must not be rejected merely because
       // their timestamps match (the mirror deliberately overlaps that boundary).

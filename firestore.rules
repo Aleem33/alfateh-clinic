@@ -41,6 +41,13 @@ service cloud.firestore {
         request.resource.data.syncProtocolVersion == 2
       );
     }
+    function hasValidMedicineStock() {
+      return request.resource.data.stock is number &&
+        request.resource.data.get('bonusStockUnits', 0) is number &&
+        request.resource.data.stock >= 0 &&
+        request.resource.data.get('bonusStockUnits', 0) >= 0 &&
+        request.resource.data.get('bonusStockUnits', 0) <= request.resource.data.stock;
+    }
     function isBootstrapAdmin(uid) {
       return isAuth()
         && request.auth.uid == uid
@@ -173,7 +180,7 @@ service cloud.firestore {
     // ── Medicines ──────────────────────────────────────────────────────────────
     match /medicines/{doc} {
       allow read: if isAuth();
-      allow create: if syncMutationAllowed("medicines") && (isAdmin() || (
+      allow create: if syncMutationAllowed("medicines") && hasValidMedicineStock() && (isAdmin() || (
         isPharmacist() &&
         hasNoTombstoneOnCreate() &&
         request.resource.data.archived != true &&
@@ -184,7 +191,7 @@ service cloud.firestore {
           'restoredBy'
         ])
       ));
-      allow update: if syncMutationAllowed("medicines") && (isAdmin() || (
+      allow update: if syncMutationAllowed("medicines") && hasValidMedicineStock() && (isAdmin() || (
         isPharmacist() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'stock',
@@ -195,11 +202,7 @@ service cloud.firestore {
           'syncProtocolVersion'
         ]) &&
         hasValidSyncMetadataChange() &&
-        request.resource.data.stock is number &&
-        request.resource.data.get('bonusStockUnits', 0) is number &&
-        request.resource.data.stock >= 0 &&
-        request.resource.data.get('bonusStockUnits', 0) >= 0 &&
-        request.resource.data.get('bonusStockUnits', 0) <= request.resource.data.stock
+        hasValidMedicineStock()
       ) || (
         isCashier() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -209,10 +212,7 @@ service cloud.firestore {
           'syncProtocolVersion'
         ]) &&
         hasValidSyncMetadataChange() &&
-        request.resource.data.stock is number &&
-        request.resource.data.get('bonusStockUnits', 0) is number &&
-        request.resource.data.get('bonusStockUnits', 0) >= 0 &&
-        request.resource.data.get('bonusStockUnits', 0) <= request.resource.data.stock
+        hasValidMedicineStock()
       ));
       allow delete: if syncMutationAllowed("medicines") && (isAdmin());
     }
@@ -432,7 +432,9 @@ service cloud.firestore {
     // ── Catch-all: only admin can touch anything not listed above ──────────────
     match /{collection}/{document=**} {
       allow read: if isAdmin();
-      allow write: if syncMutationAllowed(collection) && (isAdmin());
+      // Medicines have stricter batch/stock invariants above. Do not let the
+      // generic admin fallback bypass those validations.
+      allow write: if collection != "medicines" && syncMutationAllowed(collection) && (isAdmin());
     }
 
   }
