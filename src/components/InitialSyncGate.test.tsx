@@ -20,7 +20,7 @@ vi.mock('../lib/lanCoordinator', () => ({
   getLanStatus: () => mocks.lan,
   subscribeLanStatus: vi.fn(() => () => undefined),
 }));
-import { InitialSyncGate } from './InitialSyncGate';
+import { InitialSyncGate, keepInitialSyncGateOpen } from './InitialSyncGate';
 
 beforeEach(() => {
   mocks.session = { mode: 'online', profile: {} };
@@ -33,6 +33,12 @@ beforeEach(() => {
 const render = () => renderToStaticMarkup(<InitialSyncGate onLogout={() => undefined}><div>Operational inventory</div></InitialSyncGate>);
 
 describe('initial data synchronization gate', () => {
+  it('never closes again after the session has reached authoritative readiness', () => {
+    expect(keepInitialSyncGateOpen(false, false)).toBe(false);
+    expect(keepInitialSyncGateOpen(false, true)).toBe(true);
+    expect(keepInitialSyncGateOpen(true, false)).toBe(true);
+  });
+
   it('does not present incomplete records as an empty operational screen', () => {
     const html = render();
     expect(html).toContain('Synchronizing current data');
