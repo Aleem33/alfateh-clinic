@@ -1,8 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { getOfflineCacheStatus, subscribeOfflineCache } from '../lib/offlineCache';
 import { getActiveAuthSession, subscribeActiveAuthSession } from '../lib/offlineAuth';
 import { getLanStatus, subscribeLanStatus } from '../lib/lanCoordinator';
 import { SyncStatusBadge } from './SyncStatusBadge';
+
+export function keepInitialSyncGateOpen(opened: boolean, ready: boolean) {
+  return opened || ready;
+}
 
 export function InitialSyncGate({ children, onLogout }: { children: ReactNode; onLogout: () => void }) {
   const [cache, setCache] = useState(getOfflineCacheStatus);
@@ -18,17 +22,21 @@ export function InitialSyncGate({ children, onLogout }: { children: ReactNode; o
   const progress = cache.totalCollections > 0
     ? Math.round((completedCollections / cache.totalCollections) * 100)
     : 0;
-  const [opened, setOpened] = useState(ready);
+  // This is a one-time login gate. Incremental listeners can briefly restart
+  // after a normal write or control refresh; once this session has seen a
+  // complete authoritative snapshot, never cover the working app again.
+  const openedRef = useRef(ready);
+  openedRef.current = keepInitialSyncGateOpen(openedRef.current, ready);
+  const opened = openedRef.current;
   useEffect(() => subscribeOfflineCache(setCache), []);
   useEffect(() => subscribeActiveAuthSession(setSession), []);
   useEffect(() => subscribeLanStatus(setLan), []);
-  useEffect(() => { if (ready) setOpened(true); }, [ready]);
 
   return <div className="relative h-full">
     {/* Retain mounted forms and carts during a listener restart. Hidden content
         cannot be focused or mistaken for a complete inventory or report. */}
-    {(opened || ready) && <div style={{ visibility: ready ? 'visible' : 'hidden' }}>{children}</div>}
-    {!ready && <div className="absolute inset-0 z-[90] min-h-screen bg-slate-100 p-4 md:p-6" role="status" aria-live="polite">
+    {opened && <div>{children}</div>}
+    {!opened && <div className="absolute inset-0 z-[90] min-h-screen bg-slate-100 p-4 md:p-6" role="status" aria-live="polite">
       <div className="mx-auto flex h-full max-w-6xl gap-5 overflow-hidden">
         <div className="hidden w-56 shrink-0 rounded-2xl border border-slate-200 bg-white p-5 md:block" aria-hidden="true">
           <div className="h-9 w-36 animate-pulse rounded-lg bg-slate-200" />
