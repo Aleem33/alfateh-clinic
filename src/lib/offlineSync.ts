@@ -13,6 +13,13 @@ import { trustedNowISO } from './trustedClock';
 import { allocateCartBonusCost } from '../pos/lib/bonusInventory';
 import { aggregateSaleStockAdjustments } from '../pos/lib/offlineSalesOutbox';
 import { findCartStockProblem, InsufficientStockError } from '../pos/lib/billingCart';
+import {
+  countPendingSaleReturns,
+  listPendingSaleReturns,
+  recoverPendingSaleReturnsFromMirror,
+  removePendingSaleReturn,
+  replayPendingSaleReturnRecords,
+} from '../pos/lib/offlineSaleReturnsOutbox';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -48,6 +55,7 @@ let online = typeof window === 'undefined' ? true : getLanStatus().online;
 let syncing = false;
 let labPendingCount = 0;
 let posSalePendingCount = 0;
+let saleReturnPendingCount = 0;
 let pendingCount = 0;
 let issueCount = 0;
 let lastError = '';
@@ -67,7 +75,7 @@ function currentSnapshot(): SyncSnapshot {
 }
 
 function recomputePendingCount() {
-  pendingCount = labPendingCount + posSalePendingCount + pendingWriteCollections.size;
+  pendingCount = labPendingCount + posSalePendingCount + saleReturnPendingCount + pendingWriteCollections.size;
 }
 
 function notify() {
@@ -111,9 +119,11 @@ async function refreshPendingCount() {
     const records = await withStore<PendingLabReport[]>('readonly', store => store.getAll());
     labPendingCount = records.length;
     posSalePendingCount = await countPendingPosSales();
+    saleReturnPendingCount = await countPendingSaleReturns();
   } catch {
     labPendingCount = 0;
     posSalePendingCount = 0;
+    saleReturnPendingCount = 0;
   }
   notify();
 }
@@ -236,6 +246,51 @@ async function replayPendingPosSales() {
   });
 }
 
+async function replayPendingSaleReturns() {
+  await recoverPendingSaleReturnsFromMirror();
+  const records = await listPendingSaleReturns();
+  await replayPendingSaleReturnRecords(records, {
+    returnExists: async returnId => (await getDocFromServer(doc(db, 'saleReturns', returnId))).exists(),
+    replay: async record => {
+      await runTransaction(db, async transaction => {
+        const returnRef = doc(db, 'saleReturns', record.returnId);
+        const uniqueMedicineIds = [...new Set(record.stockAdjustments.map(adjustment => adjustment.medicineId))];
+        const medicineRefs = uniqueMedicineIds.map(medicineId => doc(db, 'medicines', medicineId));
+        const [returnSnapshot, ...medicineSnapshots] = await Promise.all([
+          transaction.get(returnRef),
+          ...medicineRefs.map(reference => transaction.get(reference)),
+        ]);
+        if (returnSnapshot.exists()) return;
+
+        const medicines = new Map<string, { stock: number; bonusStockUnits: number }>();
+        medicineSnapshots.forEach((snapshot, index) => {
+          if (!snapshot.exists()) {
+            throw new Error(`Sales return ${record.returnData.returnNo || record.returnId} references a medicine batch that no longer exists.`);
+          }
+          const data = snapshot.data();
+          medicines.set(uniqueMedicineIds[index], {
+            stock: Number(data.stock || 0),
+            bonusStockUnits: Number(data.bonusStockUnits || 0),
+          });
+        });
+
+        transaction.set(returnRef, record.returnData);
+        record.movements.forEach(movement => {
+          transaction.set(doc(db, 'stockMovements', movement.id), movement.data);
+        });
+        record.stockAdjustments.forEach(adjustment => {
+          const medicine = medicines.get(adjustment.medicineId)!;
+          transaction.update(doc(db, 'medicines', adjustment.medicineId), {
+            stock: medicine.stock + Math.max(0, Number(adjustment.units) || 0),
+            bonusStockUnits: medicine.bonusStockUnits + Math.max(0, Number(adjustment.bonusUnits) || 0),
+          });
+        });
+      });
+    },
+    remove: removePendingSaleReturn,
+  });
+}
+
 async function checkStockConflicts() {
   const medicines = await getDocs(query(collection(db, 'medicines'), where('stock', '<', 0)));
   const activeMedicines = medicines.docs.filter(medicine => medicine.data().deleted !== true);
@@ -272,6 +327,9 @@ export async function runOfflineSyncNow() {
   notify();
   try {
     await processLabReportQueue();
+    // Capture legacy pending/rejected returns before Firestore drains its SDK
+    // queue or an authoritative snapshot replaces operational mirror records.
+    await recoverPendingSaleReturnsFromMirror();
     try {
       await waitForSyncStep(waitForPendingWrites(db), 15_000, 'Queued cloud writes');
     } catch (error: any) {
@@ -285,6 +343,7 @@ export async function runOfflineSyncNow() {
       throw error;
     }
     await replayPendingPosSales();
+    await replayPendingSaleReturns();
     await checkStockConflicts();
   } catch (error: any) {
     lastError = error?.message || 'Offline sync failed.';
@@ -322,6 +381,7 @@ export function startOfflineSyncService() {
   }
   window.addEventListener('alfateh:auth-sync-ready', () => void runOfflineSyncNow());
   window.addEventListener('alfateh:pos-outbox-changed', () => void refreshPendingCount());
+  window.addEventListener('alfateh:return-outbox-changed', () => void refreshPendingCount());
   subscribeLanStatus(lanStatus => updateOnline(lanStatus.online));
   subscribeOfflineCache(cacheStatus => {
     pendingWriteCollections.clear();

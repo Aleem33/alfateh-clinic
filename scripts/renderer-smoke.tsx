@@ -7,6 +7,11 @@ import { getOfflineCacheStatus, startFullOfflineCache } from '../src/lib/offline
 import { setActiveAuthSession } from '../src/lib/offlineAuth';
 import { getLocalCollectionOnce } from '../src/lib/collectionRepository';
 import { listPendingPosSales, replayPendingPosSaleRecords, removePendingPosSale } from '../src/pos/lib/offlineSalesOutbox';
+import {
+  listPendingSaleReturns,
+  removePendingSaleReturn,
+  replayPendingSaleReturnRecords,
+} from '../src/pos/lib/offlineSaleReturnsOutbox';
 import { getFirestoreReadDiagnostics } from '../src/lib/readDiagnostics';
 import { setDoc as trackedSetDoc, updateDoc as trackedUpdateDoc, serverTimestamp } from '../src/lib/firestore';
 import '../src/index.css';
@@ -23,6 +28,12 @@ const click = (label: string) => {
   const button = [...document.querySelectorAll('button')].find(node => node.textContent?.includes(label));
   if (!button || button.disabled) throw new Error(`Button unavailable: ${label}`);
   button.click();
+};
+const setInputValue = (input: HTMLInputElement, value: string) => {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
 };
 let online = !new URLSearchParams(location.search).has('offline');
 Object.defineProperty(navigator, 'onLine', { get: () => online });
@@ -60,18 +71,41 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
     online = false; window.dispatchEvent(new Event('offline'));
     await checkout(2);
     if ((await listPendingPosSales()).length !== 1) throw new Error('Offline sale not durably queued');
+    location.hash = '/sale-returns';
+    await waitFor(() => document.body.innerText.includes('Return History'), 'sales return page offline');
+    const returnButton = [...document.querySelectorAll('button')]
+      .find(node => node.textContent?.trim() === 'Return') as HTMLButtonElement | undefined;
+    if (!returnButton) throw new Error('Offline sale return action unavailable');
+    returnButton.click();
+    await waitFor(() => document.body.innerText.includes('Process Sale Return'), 'return dialog');
+    const quantityInput = [...document.querySelectorAll('input[type="number"]')]
+      .find(node => (node as HTMLInputElement).max !== '') as HTMLInputElement | undefined;
+    if (!quantityInput) throw new Error('Return quantity input unavailable');
+    setInputValue(quantityInput, '1');
+    await waitFor(() => [...document.querySelectorAll('button')]
+      .some(node => node.textContent?.includes('Confirm Return & Print Slip') && !node.disabled), 'return ready');
+    click('Confirm Return & Print Slip');
+    await waitFor(async () => (await getLocalCollectionOnce('saleReturns')).length === 1, 'return mirrored offline');
+    if ((await listPendingSaleReturns()).length !== 1) throw new Error('Offline sales return not durably queued');
     location.hash = '/suppliers';
     await waitFor(() => document.body.innerText.includes('Smoke Supplier'), 'supplier mirror offline');
     location.hash = '/billing';
     await waitFor(() => document.body.innerText.includes('Smoke Medicine'), 'billing reopen offline');
     window.dispatchEvent(new Event('focus'));
-    return { offlineSales: (await getLocalCollectionOnce('sales')).length, outbox: (await listPendingPosSales()).length };
+    return {
+      offlineSales: (await getLocalCollectionOnce('sales')).length,
+      saleReturns: (await getLocalCollectionOnce('saleReturns')).length,
+      outbox: (await listPendingPosSales()).length,
+      returnOutbox: (await listPendingSaleReturns()).length,
+    };
   },
   async reconnectAfterOfflineRestart() {
     await ready();
     if (online) throw new Error('Restart must begin offline');
     if ((await getLocalCollectionOnce('sales')).length !== 2) throw new Error('Offline history lost after restart');
     if ((await listPendingPosSales()).length !== 1) throw new Error('Offline outbox lost after restart');
+    if ((await getLocalCollectionOnce('saleReturns')).length !== 1) throw new Error('Offline sales-return history lost after restart');
+    if ((await listPendingSaleReturns()).length !== 1) throw new Error('Offline sales-return outbox lost after restart');
     online = true; window.dispatchEvent(new Event('online'));
     await enableNetwork(db);
     await waitForPendingWrites(db);
@@ -80,23 +114,34 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
       replay: async () => { throw new Error('An acknowledged offline sale must not deduct stock twice'); },
       remove: removePendingPosSale,
     });
+    await replayPendingSaleReturnRecords(await listPendingSaleReturns(), {
+      returnExists: async id => (await getDocFromServer(doc(db, 'saleReturns', id))).exists(),
+      replay: async () => { throw new Error('An acknowledged offline return must not restore stock twice'); },
+      remove: removePendingSaleReturn,
+    });
     const sales = await getDocsFromServer(collection(db, 'sales'));
+    const returns = await getDocsFromServer(collection(db, 'saleReturns'));
     const stock = (await getDocFromServer(doc(db, 'medicines', 'smoke-med'))).data()?.stock;
-    if (sales.size !== 2 || stock !== 18) throw new Error(`Reconciliation mismatch: ${sales.size} sales, ${stock} stock`);
-    await waitFor(async () => (await getLocalCollectionOnce('medicines'))[0]?.stock === 18, 'confirmed stock persisted');
+    await waitFor(async () => (await listPendingSaleReturns()).length === 0, 'sales-return outbox confirmed');
+    if (sales.size !== 2 || returns.size !== 1 || stock !== 19) {
+      throw new Error(`Reconciliation mismatch: ${sales.size} sales, ${returns.size} returns, ${stock} stock`);
+    }
+    await waitFor(async () => (await getLocalCollectionOnce('medicines'))[0]?.stock === 19, 'confirmed stock persisted');
     await new Promise(resolve => setTimeout(resolve, 200));
     const beforeFocus = getFirestoreReadDiagnostics().total.operations;
     window.dispatchEvent(new Event('focus'));
     await new Promise(resolve => setTimeout(resolve, 300));
     if (getFirestoreReadDiagnostics().total.operations !== beforeFocus) throw new Error('Focus started additional Firestore reads');
-    return { sales: sales.size, stock, outbox: (await listPendingPosSales()).length };
+    return { sales: sales.size, returns: returns.size, stock, outbox: (await listPendingPosSales()).length,
+      returnOutbox: (await listPendingSaleReturns()).length };
   },
   async verifyReplica() {
     await ready();
     await waitFor(async () => (await getLocalCollectionOnce('sales')).length === 2, 'second PC sees both sales');
+    await waitFor(async () => (await getLocalCollectionOnce('saleReturns')).length === 1, 'second PC sees sales return');
     const medicines = await getLocalCollectionOnce('medicines');
-    if (medicines[0]?.stock !== 18) throw new Error('Replica stock differs');
-    return { mirroredSales: 2, stock: medicines[0].stock };
+    if (medicines[0]?.stock !== 19) throw new Error('Replica stock differs');
+    return { mirroredSales: 2, mirroredReturns: 1, stock: medicines[0].stock };
   },
   async verifyTransitions() {
     if (getOfflineCacheStatus().mode !== 'incremental') return { mode: 'legacy' };
@@ -121,9 +166,11 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
       const status = getOfflineCacheStatus();
       return status.mode === 'incremental' && status.readyCollections === status.totalCollections;
     }, 'fresh baseline after generation change');
-    if ((await getLocalCollectionOnce('sales')).length !== 2 || (await getLocalCollectionOnce('medicines'))[0]?.stock !== 18) {
+    if ((await getLocalCollectionOnce('sales')).length !== 2 ||
+      (await getLocalCollectionOnce('saleReturns')).length !== 1 ||
+      (await getLocalCollectionOnce('medicines'))[0]?.stock !== 19) {
       throw new Error('Generation/rollback changed sales or stock');
     }
-    return { tombstoneRestored: true, generation: previous.datasetGeneration + 1, sales: 2, stock: 18 };
+    return { tombstoneRestored: true, generation: previous.datasetGeneration + 1, sales: 2, returns: 1, stock: 19 };
   },
 };

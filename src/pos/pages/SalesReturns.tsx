@@ -14,6 +14,13 @@ import { clinicDateKey, recordClinicDateTimeLabel } from '../../lib/clinicDate';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { getTrustedClockReading } from '../../lib/trustedClock';
 import { allocateReceiptReturn } from '../lib/bonusInventory';
+import { ensureLanWriteAccess, isCloudOnline } from '../../lib/lanCoordinator';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
+import {
+  queuePendingSaleReturn,
+  removePendingSaleReturn,
+  saleReturnStockAdjustments,
+} from '../lib/offlineSaleReturnsOutbox';
 
 // ── Print via hidden iframe so main page layout is unaffected ────────────────
 function printSlip(slipHtml: string) {
@@ -242,17 +249,18 @@ export function SalesReturns() {
         trustedDate: returnTimestamp,
         businessDate: clinicDateKey(returnTimestamp),
         timeSource: returnClock.source,
-        processedBy: auth.currentUser?.uid,
+        processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
       };
 
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'saleReturns'));
       batch.set(docRef, returnDoc);
+      const movements: Array<{ id: string; data: Record<string, any> }> = [];
 
       for (const item of itemsToReturn) {
         const unitsToRestore = item.returnQty * (item.sellType === 'box' ? item.unitsPerBox : 1);
         const movementRef = doc(collection(db, 'stockMovements'));
-        batch.set(movementRef, {
+        const movementData = {
           type: 'sale-return',
           returnId: docRef.id,
           returnNo,
@@ -264,18 +272,42 @@ export function SalesReturns() {
           paidUnits: item.paidUnitsRestored,
           bonusUnits: item.bonusUnitsRestored,
           createdAt: returnTimestamp,
-          processedBy: auth.currentUser?.uid || '',
-        });
+          processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
+        };
+        movements.push({ id: movementRef.id, data: movementData });
+        batch.set(movementRef, movementData);
         batch.update(doc(db, 'medicines', item.medicineId), {
           stock: increment(unitsToRestore),
           ...(item.bonusUnitsRestored ? { bonusStockUnits: increment(item.bonusUnitsRestored) } : {}),
         });
       }
-      await waitForOnlineWrite(batch.commit());
+      await ensureLanWriteAccess();
+      await queuePendingSaleReturn({
+        returnId: docRef.id,
+        returnData: returnDoc,
+        movements,
+        stockAdjustments: saleReturnStockAdjustments(itemsToReturn),
+        createdAt: returnTimestamp,
+      });
+      const startedOnline = isCloudOnline();
+      let serverConfirmed = false;
+      try {
+        await waitForOnlineWrite(batch.commit());
+        if (startedOnline) {
+          await removePendingSaleReturn(docRef.id);
+          serverConfirmed = true;
+        }
+      } catch (commitError) {
+        // The independent outbox owns recovery from this point. Do not ask the
+        // cashier to submit again and accidentally create a second return.
+        handleFirestoreError(commitError, OperationType.CREATE, `saleReturns/${docRef.id}`);
+      }
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setSelectedSale(null);
-      setSuccessMsg(`Return processed — Rs. ${returnTotal.toFixed(2)} refund`);
+      setSuccessMsg(serverConfirmed
+        ? `Return processed — Rs. ${returnTotal.toFixed(2)} refund`
+        : `Return saved safely offline — Rs. ${returnTotal.toFixed(2)} refund; it will sync automatically`);
       setTimeout(() => setSuccessMsg(''), 5000);
       setTimeout(() => printReturnData(dataWithId), 400);
     } catch (error) {
@@ -313,17 +345,18 @@ export function SalesReturns() {
         trustedDate: returnTimestamp,
         businessDate: clinicDateKey(returnTimestamp),
         timeSource: returnClock.source,
-        processedBy: auth.currentUser?.uid || '',
+        processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
       };
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'saleReturns'));
       batch.set(docRef, returnDoc);
       const stockByMedicine = new Map<string, number>();
+      const movements: Array<{ id: string; data: Record<string, any> }> = [];
       for (const item of manualItems) {
         const unitsToRestore = calculateReturnStockUnits(item.returnQty, item.sellType, item.unitsPerBox);
         stockByMedicine.set(item.medicineId, (stockByMedicine.get(item.medicineId) || 0) + unitsToRestore);
         const movementRef = doc(collection(db, 'stockMovements'));
-        batch.set(movementRef, {
+        const movementData = {
           type: 'sale-return-without-receipt',
           returnId: docRef.id,
           returnNo,
@@ -334,13 +367,33 @@ export function SalesReturns() {
           paidUnits: unitsToRestore,
           bonusUnits: 0,
           createdAt: returnTimestamp,
-          processedBy: auth.currentUser?.uid || '',
-        });
+          processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
+        };
+        movements.push({ id: movementRef.id, data: movementData });
+        batch.set(movementRef, movementData);
       }
       for (const [medicineId, unitsToRestore] of stockByMedicine) {
         batch.update(doc(db, 'medicines', medicineId), { stock: increment(unitsToRestore) });
       }
-      await waitForOnlineWrite(batch.commit());
+      await ensureLanWriteAccess();
+      await queuePendingSaleReturn({
+        returnId: docRef.id,
+        returnData: returnDoc,
+        movements,
+        stockAdjustments: saleReturnStockAdjustments(returnDoc.items),
+        createdAt: returnTimestamp,
+      });
+      const startedOnline = isCloudOnline();
+      let serverConfirmed = false;
+      try {
+        await waitForOnlineWrite(batch.commit());
+        if (startedOnline) {
+          await removePendingSaleReturn(docRef.id);
+          serverConfirmed = true;
+        }
+      } catch (commitError) {
+        handleFirestoreError(commitError, OperationType.CREATE, `saleReturns/${docRef.id}`);
+      }
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setShowNoReceiptReturn(false);
@@ -348,7 +401,9 @@ export function SalesReturns() {
       setManualItems([]);
       setMedicineSearch('');
       setManualReason('');
-      setSuccessMsg(`Receipt-less return processed — ${manualItems.length} medicine(s), Rs. ${totalRefund.toFixed(2)} refund`);
+      setSuccessMsg(serverConfirmed
+        ? `Receipt-less return processed — ${manualItems.length} medicine(s), Rs. ${totalRefund.toFixed(2)} refund`
+        : `Receipt-less return saved safely offline — ${manualItems.length} medicine(s), Rs. ${totalRefund.toFixed(2)} refund; it will sync automatically`);
       setTimeout(() => setSuccessMsg(''), 5000);
       setTimeout(() => printReturnData(dataWithId), 400);
     } catch (error) {
