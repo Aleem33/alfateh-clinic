@@ -6,6 +6,12 @@ export type StockSyncIssue = {
   stock?: number;
 };
 
+export function isOperationalNegativeMedicine(data: Record<string, unknown>) {
+  return data.deleted !== true
+    && data.archived !== true
+    && Number(data.stock) < 0;
+}
+
 export function findClearedStockIssueIds(
   issues: StockSyncIssue[],
   negativeMedicineIds: ReadonlySet<string>,

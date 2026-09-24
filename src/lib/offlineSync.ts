@@ -21,7 +21,12 @@ import {
   replayPendingSaleReturnRecords,
 } from '../pos/lib/offlineSaleReturnsOutbox';
 import { getLocalCollectionOnce } from './collectionRepository';
-import { findClearedStockIssueIds, shouldWriteNegativeStockIssue, type StockSyncIssue } from './stockSyncIssues';
+import {
+  findClearedStockIssueIds,
+  isOperationalNegativeMedicine,
+  shouldWriteNegativeStockIssue,
+  type StockSyncIssue,
+} from './stockSyncIssues';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -304,7 +309,7 @@ async function checkStockConflicts() {
   }
 
   const medicines = await getDocsFromServer(query(collection(db, 'medicines'), where('stock', '<', 0)));
-  const activeMedicines = medicines.docs.filter(medicine => medicine.data().deleted !== true);
+  const activeMedicines = medicines.docs.filter(medicine => isOperationalNegativeMedicine(medicine.data()));
   const negativeMedicineIds = new Set(activeMedicines.map(medicine => medicine.id));
   let existingIssues: StockSyncIssue[] = [];
   try {
