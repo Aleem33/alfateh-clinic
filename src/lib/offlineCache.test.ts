@@ -140,6 +140,57 @@ describe('incremental mirror bootstrap', () => {
     });
   });
 
+  it('clears only a rejected write superseded by a confirmed retry of the same fields', async () => {
+    await upsertLocalRecords('sales', [{ id: 'sale-1', data: { total: 900 }, pending: true }], {
+      seedComplete: true,
+      generation: 7,
+      pending: {
+        hasPendingWrites: true,
+        rejectedRecordIds: ['sale-1'],
+        rejectedActivities: [{ collection: 'sales', recordId: 'sale-1', changedFields: ['total'] }],
+        recoveryRecords: [{ id: 'sale-1', data: { total: 900 } }],
+        lastError: 'Missing or insufficient permissions.',
+      },
+    });
+
+    await __offlineCacheInternals.clearConfirmedRejectedWrites([
+      { collection: 'sales', recordId: 'sale-1', changedFields: ['total'] },
+    ]);
+    await __offlineCacheInternals.waitForPersistence('sales');
+
+    expect((await getLocalSyncStatus('sales')).pending).toMatchObject({
+      hasPendingWrites: false,
+      rejectedRecordIds: [],
+      rejectedActivities: [],
+      recoveryRecords: [],
+      lastError: '',
+    });
+  });
+
+  it('retains recovery data when a successful write does not cover rejected fields', async () => {
+    await upsertLocalRecords('sales', [{ id: 'sale-1', data: { total: 900 }, pending: true }], {
+      seedComplete: true,
+      generation: 7,
+      pending: {
+        hasPendingWrites: true,
+        rejectedRecordIds: ['sale-1'],
+        rejectedActivities: [{ collection: 'sales', recordId: 'sale-1', changedFields: ['total'] }],
+        recoveryRecords: [{ id: 'sale-1', data: { total: 900 } }],
+        lastError: 'Missing or insufficient permissions.',
+      },
+    });
+
+    await __offlineCacheInternals.clearConfirmedRejectedWrites([
+      { collection: 'sales', recordId: 'sale-1', changedFields: ['customerName'] },
+    ]);
+
+    expect((await getLocalSyncStatus('sales')).pending).toMatchObject({
+      hasPendingWrites: true,
+      rejectedRecordIds: ['sale-1'],
+      lastError: 'Missing or insufficient permissions.',
+    });
+  });
+
   it('does not replace complete history with a partial or stale SDK cache while offline', async () => {
     await upsertLocalRecords('sales', [
       { id: 'sale-1', data: { total: 100 } },

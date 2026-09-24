@@ -76,6 +76,7 @@ let lifecycle = 0;
 let registeredReadyState: boolean | null = null;
 let readinessAuditRun: number | null = null;
 let rejectionListener: ((event: Event) => void) | null = null;
+let confirmationListener: ((event: Event) => void) | null = null;
 const serverDelivered = new Set<string>();
 const serverReconciled = new Set<string>();
 const reconnectPending = new Set<string>();
@@ -208,6 +209,83 @@ async function markReadyFromLocal(collectionName: string, generation: number, ru
   return status;
 }
 
+type WriteActivity = Record<string, unknown>;
+
+function activityFields(activity: WriteActivity) {
+  return Array.isArray(activity.changedFields) ? activity.changedFields.map(String) : [];
+}
+
+function confirmedActivitySupersedes(rejectedActivity: WriteActivity | undefined, confirmedActivity: WriteActivity) {
+  const confirmedFields = new Set(activityFields(confirmedActivity));
+  if (!rejectedActivity) {
+    // v3.1.99 and older did not persist field details. A confirmed archive or
+    // restore on the same medicine safely supersedes that legacy marker.
+    return String(confirmedActivity.collection) === 'medicines' && confirmedFields.has('archived');
+  }
+  const rejectedFields = activityFields(rejectedActivity);
+  return rejectedFields.length > 0 && rejectedFields.every(field => confirmedFields.has(field));
+}
+
+function recoveryRecordId(value: unknown) {
+  return String(value && typeof value === 'object' && 'id' in value ? (value as { id?: unknown }).id || '' : '');
+}
+
+async function clearConfirmedRejectedWrites(activities: WriteActivity[]) {
+  const byCollection = new Map<string, WriteActivity[]>();
+  for (const activity of activities) {
+    const collectionName = String(activity.collection || '');
+    const recordId = String(activity.recordId || '');
+    if (!collectionName || !recordId) continue;
+    const values = byCollection.get(collectionName) || [];
+    values.push(activity);
+    byCollection.set(collectionName, values);
+  }
+
+  await Promise.all([...byCollection].map(([collectionName, confirmedActivities]) => (
+    queuePersistence(collectionName, lifecycle, async () => {
+      const status = await getLocalSyncStatus(collectionName);
+      const rejectedIds = Array.isArray(status.pending.rejectedRecordIds)
+        ? status.pending.rejectedRecordIds.map(String) : [];
+      const rejectedActivities = Array.isArray(status.pending.rejectedActivities)
+        ? status.pending.rejectedActivities as WriteActivity[] : [];
+      const clearedIds = new Set<string>();
+      for (const confirmed of confirmedActivities) {
+        const recordId = String(confirmed.recordId || '');
+        if (!rejectedIds.includes(recordId)) continue;
+        const rejectedActivity = [...rejectedActivities].reverse().find(activity => (
+          String(activity.recordId || '') === recordId
+        ));
+        if (confirmedActivitySupersedes(rejectedActivity, confirmed)) clearedIds.add(recordId);
+      }
+      if (!clearedIds.size) return;
+
+      const remainingIds = rejectedIds.filter(id => !clearedIds.has(id));
+      const recoveryRecords = Array.isArray(status.pending.recoveryRecords)
+        ? status.pending.recoveryRecords.filter(value => !clearedIds.has(recoveryRecordId(value)))
+        : [];
+      const remainingActivities = rejectedActivities.filter(activity => (
+        !clearedIds.has(String(activity.recordId || ''))
+      ));
+      await setLocalSyncMetadata(collectionName, {
+        pending: {
+          hasPendingWrites: remainingIds.length > 0,
+          count: remainingIds.length > 0 ? 1 : 0,
+          lastError: remainingIds.length > 0 ? String(status.pending.lastError || '') : '',
+          rejectedRecordIds: remainingIds,
+          rejectedActivities: remainingActivities,
+          recoveryRecords,
+        },
+      });
+      if (remainingIds.length === 0) rejected.delete(collectionName);
+    })
+  )));
+
+  if (rejected.size === 0 && /permission|cloud write needs attention|queued write/i.test(lastError)) {
+    lastError = '';
+  }
+  notify();
+}
+
 function startRejectedWriteListener() {
   if (rejectionListener || typeof window === 'undefined') return;
   rejectionListener = event => {
@@ -229,6 +307,11 @@ function startRejectedWriteListener() {
       void queuePersistence(collectionName, lifecycle, async () => {
         const status = await getLocalSyncStatus(collectionName);
         const previousIds = Array.isArray(status.pending.rejectedRecordIds) ? status.pending.rejectedRecordIds.map(String) : [];
+        const previousActivities = Array.isArray(status.pending.rejectedActivities)
+          ? status.pending.rejectedActivities as WriteActivity[] : [];
+        const collectionActivities = activities.filter(activity => (
+          String(activity.collection || '') === collectionName && String(activity.recordId || '')
+        ));
         const recoveryRecords = await queryLocalRecords(collectionName, {
           includeDeleted: true, filter: record => recordIds.includes(record.id),
         });
@@ -237,6 +320,7 @@ function startRejectedWriteListener() {
           hasPendingWrites: true,
           lastError: message,
           rejectedRecordIds: [...new Set([...previousIds, ...recordIds])],
+          rejectedActivities: [...previousActivities, ...collectionActivities],
           recoveryRecords: [
             ...(Array.isArray(status.pending.recoveryRecords) ? status.pending.recoveryRecords : []),
             ...recoveryRecords,
@@ -249,6 +333,11 @@ function startRejectedWriteListener() {
     notify();
   };
   window.addEventListener('alfateh:firestore-write-rejected', rejectionListener);
+  confirmationListener = event => {
+    const detail = (event as CustomEvent<{ activities?: WriteActivity[] }>).detail;
+    void clearConfirmedRejectedWrites(Array.isArray(detail?.activities) ? detail.activities : []).catch(handleError);
+  };
+  window.addEventListener('alfateh:firestore-write-confirmed', confirmationListener);
 }
 
 function startLegacyListener(collectionName: string, control: SyncControl, run: number) {
@@ -461,6 +550,7 @@ export const __offlineCacheInternals = {
     startIncrementalListener(collectionName, control, lifecycle)
   ),
   waitForPersistence,
+  clearConfirmedRejectedWrites,
 };
 
 async function startIncrementalListener(collectionName: string, control: SyncControl, run: number) {
@@ -739,6 +829,10 @@ export function stopFullOfflineCache() {
   if (rejectionListener && typeof window !== 'undefined') {
     window.removeEventListener('alfateh:firestore-write-rejected', rejectionListener);
     rejectionListener = null;
+  }
+  if (confirmationListener && typeof window !== 'undefined') {
+    window.removeEventListener('alfateh:firestore-write-confirmed', confirmationListener);
+    confirmationListener = null;
   }
   notify();
 }

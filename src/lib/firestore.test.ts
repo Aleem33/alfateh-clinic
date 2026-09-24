@@ -339,4 +339,22 @@ describe('Firestore sync metadata gateway', () => {
       activities: [expect.objectContaining({ collection: 'medicines' })],
     });
   });
+
+  it('emits changed fields after Firestore confirms a retry', async () => {
+    const appWindow = new EventTarget();
+    vi.stubGlobal('window', appWindow);
+    const confirmed = vi.fn();
+    appWindow.addEventListener('alfateh:firestore-write-confirmed', confirmed);
+
+    await updateDoc(medicineRef, { archived: false, restoredAt: 'now' });
+
+    expect(confirmed).toHaveBeenCalledOnce();
+    expect((confirmed.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
+      activities: [expect.objectContaining({
+        collection: 'medicines',
+        recordId: 'medicine-1',
+        changedFields: ['archived', 'restoredAt'],
+      })],
+    });
+  });
 });
