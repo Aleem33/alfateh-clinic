@@ -57,6 +57,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
   const [editingId, setEditingId]       = useState<string | null>(null);
   const [successMsg, setSuccessMsg]     = useState('');
   const [formError, setFormError]       = useState('');
+  const [actionError, setActionError]   = useState('');
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showInlineSupplier, setShowInlineSupplier] = useState(false);
@@ -105,7 +106,8 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
     try {
       const unitsPerBox = Math.max(1, Math.floor(toNumber(formData.unitsPerBox, 1)));
       const totalStock = (Math.floor(toNumber(formData.stockBoxes)) * unitsPerBox) + Math.floor(toNumber(formData.stockLoose));
-      const editingMedicine = editingId ? medicines.find(medicine => medicine.id === editingId) : null;
+      const allMedicines = [...medicines, ...archivedMedicines];
+      const editingMedicine = editingId ? allMedicines.find(medicine => medicine.id === editingId) : null;
       if (editingMedicine && Number(editingMedicine.stock || 0) > 0 && unitsPerBox !== Math.max(1, Number(editingMedicine.unitsPerBox || 1))) {
         setFormError('Units per box cannot be changed while this batch has stock. Create a new batch for different packaging.');
         return;
@@ -124,7 +126,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
         supplierId: formData.supplierId || '',
         supplierName,
       };
-      const duplicate = findDuplicateMedicine(medicines, data, editingId);
+      const duplicate = findDuplicateMedicine(allMedicines, data, editingId);
       if (duplicate) {
         setFormError(`${duplicate.name} already exists${duplicate.batchNo ? ` in batch ${duplicate.batchNo}` : ''}. Edit it or record a purchase instead of creating another entry.`);
         return;
@@ -167,6 +169,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
 
   const handleEdit = (med: any) => {
     if (!canEdit) return;
+    setActionError('');
     const unitsPerBox = med.unitsPerBox || 1;
     setFormData({
       name: med.name, form: resolveMedicineCategory(categories, med.form || med.category),
@@ -190,7 +193,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
       setSuccessMsg(`${medicine.name} moved to Archived Medicines.`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
-      setFormError(handleFirestoreError(error, OperationType.UPDATE, `medicines/${medicine.id}`));
+      setActionError(handleFirestoreError(error, OperationType.UPDATE, `medicines/${medicine.id}`));
     } finally {
       setConfirmArchiveId(null);
     }
@@ -198,12 +201,17 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
 
   const handleRestore = async (medicine: any) => {
     if (!canArchive) return;
+    setActionError('');
+    if (Number(medicine.stock || 0) < 0) {
+      setActionError(`${medicine.name} cannot be restored while its stock is ${medicine.stock}. Use Edit in Archived Medicines to correct the stock to zero or higher, then restore it.`);
+      return;
+    }
     try {
       await restoreMedicine(medicine);
       setSuccessMsg(`${medicine.name} restored to active inventory.`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
-      setFormError(handleFirestoreError(error, OperationType.UPDATE, `medicines/${medicine.id}`));
+      setActionError(handleFirestoreError(error, OperationType.UPDATE, `medicines/${medicine.id}`));
     }
   };
 
@@ -310,6 +318,15 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
         </div>
       )}
 
+      {actionError && (
+        <div className="fixed top-4 right-4 bg-red-600 text-white px-5 py-3 rounded-lg shadow-lg z-50 flex items-start gap-2 max-w-md">
+          <span className="flex-1">{actionError}</span>
+          <button onClick={() => setActionError('')} className="text-white/80 hover:text-white" aria-label="Dismiss error">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Confirm Archive Modal */}
       {confirmArchiveId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -389,7 +406,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
                   </p>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  {canEdit && !showArchived && <button onClick={() => handleEdit(med)} title="Edit medicine" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
+                  {canEdit && <button onClick={() => handleEdit(med)} title={showArchived ? 'Correct archived medicine' : 'Edit medicine'} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
                     <Edit2 className="w-4 h-4" />
                   </button>}
                   {canArchive && (showArchived ? (
@@ -462,7 +479,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
                     </div>
                   </td>
                   <td className="p-4 flex justify-end gap-2">
-                    {canEdit && !showArchived && <button onClick={() => handleEdit(med)} title="Edit medicine" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>}
+                    {canEdit && <button onClick={() => handleEdit(med)} title={showArchived ? 'Correct archived medicine' : 'Edit medicine'} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-4 h-4" /></button>}
                     {canArchive && (showArchived ? (
                       <button onClick={() => handleRestore(med)} title="Restore medicine" className="p-1.5 text-green-600 hover:bg-green-50 rounded"><RotateCcw className="w-4 h-4" /></button>
                     ) : (

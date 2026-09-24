@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { findClearedStockIssueIds, shouldWriteNegativeStockIssue } from './stockSyncIssues';
+import {
+  findClearedStockIssueIds,
+  isOperationalNegativeMedicine,
+  shouldWriteNegativeStockIssue,
+} from './stockSyncIssues';
 
 describe('stock sync issue reconciliation', () => {
+  it('excludes archived negative batches from operational sync warnings', () => {
+    expect(isOperationalNegativeMedicine({ stock: -5, archived: true })).toBe(false);
+    expect(isOperationalNegativeMedicine({ stock: -5, archived: false })).toBe(true);
+    expect(isOperationalNegativeMedicine({ stock: 0, archived: false })).toBe(false);
+  });
+
   it('closes an open warning after its medicine is no longer negative', () => {
     const issues = [
       { id: 'stock-preset', type: 'stock-negative', status: 'open', medicineId: 'preset', stock: -1 },
