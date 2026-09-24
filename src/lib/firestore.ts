@@ -65,7 +65,13 @@ function referenceDetails(reference: any, data?: AnyRecord) {
       ? data.items.slice(0, 3).map((item: any) => item.name || item.medicineName).filter(Boolean).join(', ')
       : '',
   ].filter(Boolean);
-  return { collection: collectionName, recordId, label: String(label || ''), summary: summaryParts.join(' · ') };
+  return {
+    collection: collectionName,
+    recordId,
+    label: String(label || ''),
+    summary: summaryParts.join(' · '),
+    changedFields: data && typeof data === 'object' ? Object.keys(data).sort() : [],
+  };
 }
 
 function reportRejectedWrite(error: unknown, activities: AnyRecord[]) {
@@ -77,18 +83,29 @@ function reportRejectedWrite(error: unknown, activities: AnyRecord[]) {
   }));
 }
 
+function reportConfirmedWrite(activities: AnyRecord[]) {
+  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('alfateh:firestore-write-confirmed', {
+    detail: { activities },
+  }));
+}
+
 async function executeWrite<T>(run: () => Promise<T>, activity: AnyRecord): Promise<T | undefined> {
   await ensureLanWriteAccess();
   const pending = run();
   void publishLanActivity(activity);
   if (typeof navigator !== 'undefined' && !isCloudOnline()) {
+    pending.then(() => reportConfirmedWrite([activity])).catch(() => undefined);
     pending.catch(error => {
       reportRejectedWrite(error, [activity]);
       console.warn('Queued LAN-primary write failed after reconnect:', error);
     });
     return undefined;
   }
-  return pending.catch(error => {
+  return pending.then(result => {
+    reportConfirmedWrite([activity]);
+    return result;
+  }).catch(error => {
     reportRejectedWrite(error, [activity]);
     throw error;
   });
@@ -100,7 +117,9 @@ export const addDoc: typeof firestore.addDoc = (async (reference: any, data: Any
   if (isCloudOnline()) {
     try {
       const documentRef = await firestore.addDoc(reference, syncedData);
-      void publishLanActivity({ action: 'created', ...referenceDetails(documentRef, data) });
+      const activity = { action: 'created', ...referenceDetails(documentRef, data) };
+      void publishLanActivity(activity);
+      reportConfirmedWrite([activity]);
       return documentRef;
     } catch (error) {
       reportRejectedWrite(error, [{ action: 'created', ...referenceDetails(reference, data) }]);
@@ -109,6 +128,9 @@ export const addDoc: typeof firestore.addDoc = (async (reference: any, data: Any
   }
   const documentRef = firestore.doc(reference);
   const pending = firestore.setDoc(documentRef, syncedData);
+  pending.then(() => reportConfirmedWrite([
+    { action: 'created', ...referenceDetails(documentRef, data) },
+  ])).catch(() => undefined);
   pending.catch(error => {
     reportRejectedWrite(error, [{ action: 'created', ...referenceDetails(documentRef, data) }]);
     console.warn('Queued LAN-primary create failed after reconnect:', error);
@@ -181,6 +203,7 @@ function createWriteBatch(database: any, permanentDeletes: boolean) {
       const pending = underlying.commit();
       activities.forEach(activity => void publishLanActivity(activity));
       if (!permanentDeletes && typeof navigator !== 'undefined' && !isCloudOnline()) {
+        pending.then(() => reportConfirmedWrite(activities)).catch(() => undefined);
         pending.catch(error => {
           reportRejectedWrite(error, activities);
           console.warn('Queued LAN-primary batch failed after reconnect:', error);
@@ -189,6 +212,7 @@ function createWriteBatch(database: any, permanentDeletes: boolean) {
       }
       try {
         await pending;
+        reportConfirmedWrite(activities);
       } catch (error) {
         reportRejectedWrite(error, activities);
         throw error;
