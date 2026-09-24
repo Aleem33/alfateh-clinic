@@ -1,12 +1,12 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocFromServer, getDocs, increment, query, runTransaction, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
+import { collection, doc, getDocFromServer, getDocsFromServer, increment, query, runTransaction, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
 import { completeLanCloudSync, getLanStatus, subscribeLanStatus } from './lanCoordinator';
 import { subscribeOfflineCache } from './offlineCache';
 import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
-import { isCloudAuthReady } from './offlineAuth';
+import { getActiveAuthSession, isCloudAuthReady } from './offlineAuth';
 import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
 import { waitForSyncStep } from './syncTiming';
 import { trustedNowISO } from './trustedClock';
@@ -20,6 +20,8 @@ import {
   removePendingSaleReturn,
   replayPendingSaleReturnRecords,
 } from '../pos/lib/offlineSaleReturnsOutbox';
+import { getLocalCollectionOnce } from './collectionRepository';
+import { findClearedStockIssueIds, shouldWriteNegativeStockIssue, type StockSyncIssue } from './stockSyncIssues';
 
 export type SyncSnapshot = {
   online: boolean;
@@ -292,21 +294,58 @@ async function replayPendingSaleReturns() {
 }
 
 async function checkStockConflicts() {
-  const medicines = await getDocs(query(collection(db, 'medicines'), where('stock', '<', 0)));
+  // Only admins can read/reconcile syncIssues. Running this scan on every staff
+  // device previously multiplied reads and let cached negative results revive a
+  // warning after the medicine had already been corrected to zero.
+  if (getActiveAuthSession()?.profile.role !== 'admin') {
+    issueCount = 0;
+    notify();
+    return;
+  }
+
+  const medicines = await getDocsFromServer(query(collection(db, 'medicines'), where('stock', '<', 0)));
   const activeMedicines = medicines.docs.filter(medicine => medicine.data().deleted !== true);
+  const negativeMedicineIds = new Set(activeMedicines.map(medicine => medicine.id));
+  let existingIssues: StockSyncIssue[] = [];
+  try {
+    existingIssues = await getLocalCollectionOnce<StockSyncIssue>('syncIssues');
+  } catch {
+    // The initial mirror can still be finishing during startup. The confirmed
+    // server scan remains safe; stale-warning cleanup will run on the next pass.
+  }
+
+  const issuesByMedicineId = new Map(
+    existingIssues
+      .filter(issue => issue.type === 'stock-negative' && issue.medicineId)
+      .map(issue => [String(issue.medicineId), issue]),
+  );
+
+  const resolvedAt = trustedNowISO();
+  for (const issueId of findClearedStockIssueIds(existingIssues, negativeMedicineIds)) {
+    await updateDoc(doc(db, 'syncIssues', issueId), {
+      status: 'resolved',
+      resolvedAt,
+      resolvedReason: 'stock-nonnegative',
+    });
+  }
+
   issueCount = activeMedicines.length;
   for (const medicine of activeMedicines) {
     const data = medicine.data();
+    const stock = Number(data.stock || 0);
+    const existing = issuesByMedicineId.get(medicine.id);
+    if (!shouldWriteNegativeStockIssue(existing, stock)) continue;
+    const now = trustedNowISO();
     await setDoc(doc(db, 'syncIssues', `stock-${medicine.id}`), {
       type: 'stock-negative',
       status: 'open',
       medicineId: medicine.id,
       medicineName: data.name || 'Medicine',
-      stock: data.stock || 0,
+      stock,
       message: `${data.name || 'Medicine'} stock is negative after offline sync.`,
       devicePrefix: device.prefix,
-      updatedAt: trustedNowISO(),
-      createdAt: trustedNowISO(),
+      updatedAt: now,
+      ...(existing ? { reopenedAt: now } : { createdAt: now }),
     }, { merge: true });
   }
   notify();
