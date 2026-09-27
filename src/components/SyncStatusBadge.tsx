@@ -77,7 +77,10 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
   const reasonSummary = Object.entries(readDiagnostics.byReason)
     .sort(([, left], [, right]) => right.documents - left.documents);
 
-  const hasIssue = Boolean(status.lastError || cache.lastError) || status.issueCount > 0;
+  const hasStockIssue = status.issueCount > 0;
+  const hasUploadIssue = Boolean(status.lastError);
+  const hasDataSyncIssue = Boolean(cache.lastError);
+  const hasIssue = hasStockIssue || hasUploadIssue || hasDataSyncIssue;
   const lanSyncBarrier = lan.role === 'syncing-primary' || lan.role === 'sync-wait';
   const label = lan.role === 'syncing-primary'
     ? 'Uploading offline entries'
@@ -95,8 +98,12 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
           : 'Offline ready'
     : status.syncing
       ? 'Syncing'
-      : hasIssue
-        ? 'Sync issue'
+      : hasStockIssue
+        ? 'Stock issue'
+        : hasUploadIssue
+          ? 'Upload issue'
+          : hasDataSyncIssue
+            ? 'Data sync issue'
         : status.pendingCount > 0
           ? 'Pending changes'
           : 'Online';

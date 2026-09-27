@@ -191,6 +191,47 @@ describe('incremental mirror bootstrap', () => {
     });
   });
 
+  it('clears a legacy device-registration marker after a complete heartbeat succeeds', async () => {
+    await upsertLocalRecords('syncClients', [{
+      id: 'device-a',
+      data: { deviceId: 'device-a', uid: 'admin-1' },
+      pending: true,
+    }], {
+      seedComplete: true,
+      generation: 7,
+      pending: {
+        hasPendingWrites: true,
+        rejectedRecordIds: ['device-a'],
+        recoveryRecords: [{ id: 'device-a', data: { deviceId: 'device-a', uid: 'admin-1' } }],
+        lastError: 'Missing or insufficient permissions.',
+      },
+    });
+
+    await __offlineCacheInternals.clearConfirmedRejectedWrites([{
+      collection: 'syncClients',
+      recordId: 'device-a',
+      changedFields: [
+        'appVersion',
+        'datasetGeneration',
+        'deviceId',
+        'devicePrefix',
+        'lastSeenAt',
+        'mirrorReady',
+        'protocolVersion',
+        'role',
+        'uid',
+      ],
+    }]);
+    await __offlineCacheInternals.waitForPersistence('syncClients');
+
+    expect((await getLocalSyncStatus('syncClients')).pending).toMatchObject({
+      hasPendingWrites: false,
+      rejectedRecordIds: [],
+      recoveryRecords: [],
+      lastError: '',
+    });
+  });
+
   it('does not replace complete history with a partial or stale SDK cache while offline', async () => {
     await upsertLocalRecords('sales', [
       { id: 'sale-1', data: { total: 100 } },

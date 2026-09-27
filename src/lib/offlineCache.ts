@@ -218,9 +218,20 @@ function activityFields(activity: WriteActivity) {
 function confirmedActivitySupersedes(rejectedActivity: WriteActivity | undefined, confirmedActivity: WriteActivity) {
   const confirmedFields = new Set(activityFields(confirmedActivity));
   if (!rejectedActivity) {
-    // v3.1.99 and older did not persist field details. A confirmed archive or
-    // restore on the same medicine safely supersedes that legacy marker.
-    return String(confirmedActivity.collection) === 'medicines' && confirmedFields.has('archived');
+    // v3.1.99 and older did not persist field details. Only complete,
+    // unambiguous retries can acknowledge those legacy markers safely.
+    const collectionName = String(confirmedActivity.collection);
+    if (collectionName === 'medicines') return confirmedFields.has('archived');
+    if (collectionName === 'syncIssues') {
+      return confirmedFields.has('status') && (
+        confirmedFields.has('resolvedAt') || confirmedFields.has('updatedAt')
+      );
+    }
+    if (collectionName === 'syncClients') {
+      return ['deviceId', 'uid', 'protocolVersion', 'datasetGeneration', 'lastSeenAt']
+        .every(field => confirmedFields.has(field));
+    }
+    return false;
   }
   const rejectedFields = activityFields(rejectedActivity);
   return rejectedFields.length > 0 && rejectedFields.every(field => confirmedFields.has(field));
