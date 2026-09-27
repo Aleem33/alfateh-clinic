@@ -438,6 +438,16 @@ integrationDescribe('Firestore offline operational rules', () => {
     await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { retailPrice: 1, ...revision() }));
   });
 
+  it('allows a user to refresh their own device registration after Stage 2 activation', async () => {
+    await enforce();
+    const database = environment.authenticatedContext('cashier-1').firestore();
+    const reference = doc(database, 'syncClients', 'device-stage-2');
+    const identity = { deviceId: 'device-stage-2', uid: 'cashier-1', role: 'cashier', protocolVersion: 2 };
+    await assertSucceeds(setDoc(reference, { ...identity, mirrorReady: false, ...revision() }));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await assertSucceeds(setDoc(reference, { ...identity, mirrorReady: true, ...revision() }, { merge: true }));
+  });
+
   it('shares rule lookups across bulk tracked writes', async () => {
     await enforce();
     const database = environment.authenticatedContext('admin-1').firestore();
