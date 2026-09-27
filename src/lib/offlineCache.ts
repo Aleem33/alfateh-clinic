@@ -72,8 +72,10 @@ let activeAuthUid = '';
 let activeCollections: string[] = [];
 let mode: OfflineCacheMode = 'legacy';
 let lastError = '';
+let registrationError = '';
 let lifecycle = 0;
 let registeredReadyState: boolean | null = null;
+let registrationRetry: ReturnType<typeof setTimeout> | null = null;
 let readinessAuditRun: number | null = null;
 let rejectionListener: ((event: Event) => void) | null = null;
 let confirmationListener: ((event: Event) => void) | null = null;
@@ -81,6 +83,7 @@ const serverDelivered = new Set<string>();
 const serverReconciled = new Set<string>();
 const reconnectPending = new Set<string>();
 const BOOTSTRAP_PAGE_SIZE = 250;
+const REGISTRATION_RETRY_DELAY = 30_000;
 
 function snapshot(): OfflineCacheStatus {
   return {
@@ -93,8 +96,14 @@ function snapshot(): OfflineCacheStatus {
     pendingCollections: [...new Set([...pending, ...rejected])],
     incompleteCollections: activeCollections.filter(name => !ready.has(name)),
     unreconciledCollections: activeCollections.filter(name => !serverReconciled.has(name)),
-    lastError,
+    lastError: lastError || registrationError,
   };
+}
+
+function clearRegistrationRetry() {
+  if (!registrationRetry) return;
+  clearTimeout(registrationRetry);
+  registrationRetry = null;
 }
 
 function notify() {
@@ -102,11 +111,27 @@ function notify() {
   listeners.forEach(listener => listener(current));
   const mirrorReady = current.totalCollections > 0 && current.readyCollections === current.totalCollections;
   if (activeRole) setOfflineMirrorReadiness(activeRole, mirrorReady, getSyncControl().datasetGeneration);
-  if (auth.currentUser && readinessAuditRun === null && mirrorReady !== registeredReadyState) {
+  if (activeRole && auth.currentUser && readinessAuditRun === null && mirrorReady !== registeredReadyState) {
+    const run = lifecycle;
+    const uid = auth.currentUser.uid;
     registeredReadyState = mirrorReady;
-    void registerSyncClient(activeRole, mirrorReady).catch(error => {
-      lastError = error instanceof Error ? error.message : 'Could not register this sync client.';
+    clearRegistrationRetry();
+    void registerSyncClient(activeRole, mirrorReady).then(() => {
+      if (run !== lifecycle || auth.currentUser?.uid !== uid) return;
+      if (registrationError) {
+        registrationError = '';
+        listeners.forEach(listener => listener(snapshot()));
+      }
+    }).catch(error => {
+      if (run !== lifecycle || auth.currentUser?.uid !== uid) return;
+      registeredReadyState = null;
+      const message = error instanceof Error ? error.message : 'Could not register this sync client.';
+      registrationError = `Device sync registration failed: ${message}`;
       listeners.forEach(listener => listener(snapshot()));
+      registrationRetry = setTimeout(() => {
+        registrationRetry = null;
+        if (run === lifecycle && auth.currentUser?.uid === uid) notify();
+      }, REGISTRATION_RETRY_DELAY);
     });
   }
 }
@@ -560,6 +585,7 @@ export const __offlineCacheInternals = {
   startIncrementalListener: (collectionName: string, control: SyncControl) => (
     startIncrementalListener(collectionName, control, lifecycle)
   ),
+  notify,
   waitForPersistence,
   clearConfirmedRejectedWrites,
 };
@@ -800,6 +826,8 @@ export function startFullOfflineCache(role?: string | null) {
   }
   activeRole = resolvedRole;
   activeAuthUid = authenticatedUid;
+  clearRegistrationRetry();
+  registrationError = '';
   startRejectedWriteListener();
   activeCollections = getOfflineCollectionsForRole(resolvedRole);
   registeredReadyState = null;
@@ -820,6 +848,7 @@ export function startFullOfflineCache(role?: string | null) {
 
 export function stopFullOfflineCache() {
   lifecycle += 1;
+  clearRegistrationRetry();
   stopCollectionListeners();
   controlUnsubscribe?.();
   controlUnsubscribe = null;
@@ -835,6 +864,7 @@ export function stopFullOfflineCache() {
   pending.clear();
   rejected.clear();
   registeredReadyState = null;
+  registrationError = '';
   readinessAuditRun = null;
   mode = 'legacy';
   if (rejectionListener && typeof window !== 'undefined') {

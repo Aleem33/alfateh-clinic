@@ -29,9 +29,11 @@ const firestore = vi.hoisted(() => {
 });
 
 const diagnostics = vi.hoisted(() => ({ record: vi.fn() }));
+const firebase = vi.hoisted(() => ({ auth: { currentUser: null as { uid: string } | null } }));
+const syncProtocol = vi.hoisted(() => ({ registerSyncClient: vi.fn().mockResolvedValue(undefined) }));
 
 vi.mock('@/lib/firestore', () => firestore);
-vi.mock('../firebase', () => ({ auth: { currentUser: null }, db: {} }));
+vi.mock('../firebase', () => ({ auth: firebase.auth, db: {} }));
 vi.mock('./offlineAuth', () => ({ getActiveAuthSession: () => null }));
 vi.mock('./offlineDataPolicy', () => ({ getOfflineCollectionsForRole: () => ['sales'] }));
 vi.mock('./readDiagnostics', () => ({ recordFirestoreRead: diagnostics.record }));
@@ -44,14 +46,14 @@ vi.mock('./syncProtocol', () => ({
     minimumProtocolVersion: 2,
     datasetGeneration: 1,
   }),
-  registerSyncClient: vi.fn(),
+  registerSyncClient: syncProtocol.registerSyncClient,
   shouldUseIncrementalMirror: () => false,
   startSyncControlListener: vi.fn(),
   stopSyncControlListener: vi.fn(),
   subscribeSyncControl: vi.fn(() => vi.fn()),
 }));
 
-import { __offlineCacheInternals, getOfflineCacheStatus, stopFullOfflineCache } from './offlineCache';
+import { __offlineCacheInternals, getOfflineCacheStatus, startFullOfflineCache, stopFullOfflineCache } from './offlineCache';
 import { getLocalSyncStatus, queryLocalRecords, resetLocalMirrorForTests, upsertLocalRecords } from './localMirror';
 import * as mirror from './localMirror';
 
@@ -79,6 +81,8 @@ function result(documents: ReturnType<typeof document>[]) {
 beforeEach(async () => {
   await resetLocalMirrorForTests();
   vi.clearAllMocks();
+  firebase.auth.currentUser = null;
+  syncProtocol.registerSyncClient.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -90,6 +94,23 @@ afterEach(async () => {
 });
 
 describe('incremental mirror bootstrap', () => {
+  it('retries a failed device registration and clears its sync warning after recovery', async () => {
+    vi.useFakeTimers();
+    firebase.auth.currentUser = { uid: 'admin-1' };
+    syncProtocol.registerSyncClient
+      .mockRejectedValueOnce(new Error('Missing or insufficient permissions.'))
+      .mockResolvedValueOnce(undefined);
+
+    startFullOfflineCache('admin');
+    __offlineCacheInternals.notify();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getOfflineCacheStatus().lastError).toContain('Device sync registration failed');
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(syncProtocol.registerSyncClient).toHaveBeenCalledTimes(2);
+    expect(getOfflineCacheStatus().lastError).toBe('');
+  });
+
   it('marks a collection cloud-confirmed only after its authoritative snapshot is persisted', async () => {
     __offlineCacheInternals.startLegacyListener('sales', control);
     const onData = (firestore.onSnapshot.mock.calls as any).at(-1)[2];
