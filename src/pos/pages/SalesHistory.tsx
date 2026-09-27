@@ -9,7 +9,7 @@ import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountTyp
 import { cartItemUnits } from '../lib/billingCart';
 import {
   Search, FileText, Eye, X, Printer, Download,
-  Users, Building2, LayoutList, Table2,
+  Users, Building2, LayoutList, Table2, Pill, Truck,
   ArrowUpDown, ArrowUp, ArrowDown, SlidersHorizontal, Edit2, Save,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -17,9 +17,11 @@ import { clinicTimeLabel, recordClinicDateKey, recordClinicTimestamp } from '../
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { summarizeSalesFinancials } from '../lib/salesFinancials';
 import { trustedNowISO } from '../../lib/trustedClock';
+import { saleBreakdownLines, summarizeSalesByMedicine, summarizeSalesBySupplier } from '../lib/salesBreakdown';
 
 type ExportType = 'all' | 'customer' | 'hospital';
-type ViewMode   = 'summary' | 'excel';
+type ExportReport = 'all' | 'medicine' | 'supplier';
+type ViewMode   = 'summary' | 'excel' | 'medicine' | 'supplier';
 type SortDir    = 'asc' | 'desc' | null;
 type SummaryCol = 'date' | 'type' | 'items' | 'subtotal' | 'discount' | 'total';
 type ExcelCol   = 'date' | 'type' | 'itemName' | 'sellType' | 'quantity' | 'unitPrice' | 'itemTotal' | 'subtotal' | 'discount' | 'saleTotal';
@@ -76,6 +78,9 @@ export function SalesHistory() {
 
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportType,      setExportType]      = useState<ExportType>('all');
+  const [exportReport,    setExportReport]    = useState<ExportReport>('all');
+  const [exportMedicine,  setExportMedicine]  = useState('');
+  const [exportSupplier,  setExportSupplier]  = useState('');
   const [exportDateFrom,  setExportDateFrom]  = useState('');
   const [exportDateTo,    setExportDateTo]    = useState('');
 
@@ -102,7 +107,8 @@ export function SalesHistory() {
         s.id.toLowerCase().includes(q.toLowerCase()) ||
         formatSaleDate(s, 'MMM dd, yyyy', false).toLowerCase().includes(q.toLowerCase()) ||
         (s.customerName && s.customerName.toLowerCase().includes(q.toLowerCase())) ||
-        (s.items?.some((it: any) => it.name?.toLowerCase().includes(q.toLowerCase())));
+        (s.items?.some((it: any) => [it.name, it.supplierName, it.batchNo]
+          .some(value => String(value || '').toLowerCase().includes(q.toLowerCase()))));
       const matchType =
         tf === 'all' || (tf === 'hospital' ? s.customerType === 'hospital' : s.customerType !== 'hospital');
       let matchDate = true;
@@ -149,6 +155,13 @@ export function SalesHistory() {
     });
     return rows;
   }, [filteredSales]);
+
+  const breakdownLines = useMemo(() => saleBreakdownLines(filteredSales), [filteredSales]);
+  const medicineSummaries = useMemo(() => summarizeSalesByMedicine(breakdownLines), [breakdownLines]);
+  const supplierSummaries = useMemo(() => summarizeSalesBySupplier(breakdownLines), [breakdownLines]);
+  const allBreakdownLines = useMemo(() => saleBreakdownLines(sales), [sales]);
+  const medicineOptions = useMemo(() => summarizeSalesByMedicine(allBreakdownLines), [allBreakdownLines]);
+  const supplierOptions = useMemo(() => summarizeSalesBySupplier(allBreakdownLines), [allBreakdownLines]);
 
   const sortedExcel = useMemo(() => {
     const arr = [...flatRows];
@@ -260,7 +273,7 @@ export function SalesHistory() {
   const doExport = () => {
     const exportSales = applyFilters(sales, exportType, exportDateFrom, exportDateTo, '');
     const rows: string[][] = [
-      ['Date & Time','Receipt No','Sale Type','Customer','Item Name','Sell Type','Quantity','Unit Price','Item Total','Gross Subtotal','Sale Discount','Sale Total','Amount Paid','Pending Amount'],
+      ['Date & Time','Receipt No','Sale Type','Customer','Item Name','Supplier','Batch','Sell Type','Quantity','Unit Price','Item Total','Gross Subtotal','Sale Discount','Sale Total','Amount Paid','Pending Amount'],
     ];
     exportSales.forEach(sale => {
       const dateStr  = formatSaleDate(sale, 'dd/MM/yyyy');
@@ -273,7 +286,7 @@ export function SalesHistory() {
         sale.items.forEach((item: any, idx: number) => {
           rows.push([
             dateStr, getSaleReceiptNo(sale), saleType, custName,
-            item.name || '', item.sellType || '',
+            item.name || '', item.supplierName || 'Unknown supplier', item.batchNo || 'N/A', item.sellType || '',
             String(item.quantity || 0), String(item.price || 0), String(item.total || 0),
             idx === 0 ? String(gross)              : '',
             idx === 0 ? String(sale.discount || 0) : '',
@@ -283,7 +296,7 @@ export function SalesHistory() {
           ]);
         });
       } else {
-        rows.push([dateStr, getSaleReceiptNo(sale), saleType, custName, '(no items)', '', '', '', '',
+        rows.push([dateStr, getSaleReceiptNo(sale), saleType, custName, '(no items)', '', '', '', '', '', '',
           String(gross), String(sale.discount || 0), String(sale.total || 0), String(paid), String(pend)]);
       }
     });
@@ -293,7 +306,7 @@ export function SalesHistory() {
     const gPen = exportSales.reduce((s, r) => s + (r.pendingAmount || 0), 0);
     const gQty = exportSales.reduce((s, r) => s + (r.items?.reduce((q: number, it: any) => q + (it.quantity || 0), 0) || 0), 0);
     rows.push([]);
-    rows.push(['TOTAL', `${exportSales.length} sales`, '', '', '', '', String(gQty), '', '', String(gSub), String(gDis), String(gTot), '', String(gPen)]);
+    rows.push(['TOTAL', `${exportSales.length} sales`, '', '', '', '', '', '', String(gQty), '', '', String(gSub), String(gDis), String(gTot), '', String(gPen)]);
     const csv  = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const typeLabel  = exportType === 'all' ? 'all' : exportType === 'hospital' ? 'hospitals' : 'customers';
     const rangeLabel = exportDateFrom && exportDateTo ? `${exportDateFrom}_to_${exportDateTo}` : exportDateFrom ? `from_${exportDateFrom}` : exportDateTo ? `to_${exportDateTo}` : 'all_dates';
@@ -301,13 +314,84 @@ export function SalesHistory() {
     setShowExportModal(false);
   };
 
+  const doPdfExport = async () => {
+    const exportSales = applyFilters(sales, exportType, exportDateFrom, exportDateTo, '');
+    const lines = saleBreakdownLines(exportSales).filter(line => (
+      exportReport === 'medicine' ? line.medicineKey === exportMedicine : line.supplierKey === exportSupplier
+    ));
+    if (!lines.length) return;
+    const selectedMedicine = medicineOptions.find(option => option.key === exportMedicine);
+    const selectedSupplier = supplierOptions.find(option => option.key === exportSupplier);
+    const subject = exportReport === 'medicine'
+      ? `${selectedMedicine?.medicineName || 'Medicine'} - Batch ${selectedMedicine?.batchNo || 'N/A'} - ${selectedMedicine?.supplierName || 'Unknown supplier'}`
+      : selectedSupplier?.supplierName || 'Supplier';
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(16);
+    pdf.text(PHARMACY_RECEIPT_NAME, 14, 15);
+    pdf.setFontSize(12);
+    pdf.text(exportReport === 'medicine' ? 'Medicine Sales History' : 'Supplier Sales History', 14, 23);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.text(subject, 14, 30);
+    const range = exportDateFrom || exportDateTo
+      ? `${exportDateFrom || 'Beginning'} to ${exportDateTo || 'Latest'}`
+      : 'All dates';
+    pdf.text(`Date range: ${range}`, 14, 36);
+
+    autoTable(pdf, {
+      startY: 42,
+      head: [[
+        'Date & Time', 'Receipt No', 'Medicine', 'Supplier', 'Batch', 'Sold As',
+        'Units', 'Price', 'Sales Amount',
+      ]],
+      body: lines.map(line => [
+        formatSaleDate(line.sale, 'dd/MM/yyyy'),
+        getSaleReceiptNo(line.sale),
+        line.medicineName,
+        line.supplierName,
+        line.batchNo,
+        `${line.item.quantity || 0} ${line.item.sellType === 'box' ? 'box(es)' : 'unit(s)'}`,
+        String(line.units),
+        `Rs ${Number(line.item.price || 0).toFixed(2)}`,
+        `Rs ${line.amount.toFixed(2)}`,
+      ]),
+      foot: [[
+        'TOTAL', `${new Set(lines.map(line => line.sale.id)).size} receipts`, '', '', '', '',
+        String(lines.reduce((sum, line) => sum + line.units, 0)), '',
+        `Rs ${lines.reduce((sum, line) => sum + line.amount, 0).toFixed(2)}`,
+      ]],
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [30, 64, 175], textColor: 255 },
+      footStyles: { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold' },
+      columnStyles: { 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right' } },
+      didDrawPage: data => {
+        pdf.setFontSize(8);
+        pdf.setTextColor(100);
+        pdf.text(`Page ${data.pageNumber}`, pdf.internal.pageSize.getWidth() - 22, pdf.internal.pageSize.getHeight() - 7);
+      },
+    });
+
+    const safeSubject = subject.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'history';
+    pdf.save(`sales_${exportReport}_${safeSubject}_${exportDateFrom || 'all'}_${exportDateTo || 'dates'}.pdf`);
+    setShowExportModal(false);
+  };
+
   const clearFilters = () => { setTypeFilter('all'); setDateFrom(''); setDateTo(''); setSearch(''); };
   const hasActiveFilters = typeFilter !== 'all' || dateFrom !== '' || dateTo !== '' || search !== '';
 
-  const exportPreviewCount = useMemo(
-    () => applyFilters(sales, exportType, exportDateFrom, exportDateTo, '').length,
-    [sales, exportType, exportDateFrom, exportDateTo]
-  );
+  const exportPreview = useMemo(() => {
+    const exportSales = applyFilters(sales, exportType, exportDateFrom, exportDateTo, '');
+    if (exportReport === 'all') return { sales: exportSales.length, lines: saleBreakdownLines(exportSales).length };
+    const lines = saleBreakdownLines(exportSales).filter(line => (
+      exportReport === 'medicine' ? line.medicineKey === exportMedicine : line.supplierKey === exportSupplier
+    ));
+    return { sales: new Set(lines.map(line => line.sale.id)).size, lines: lines.length };
+  }, [sales, exportType, exportDateFrom, exportDateTo, exportReport, exportMedicine, exportSupplier]);
 
   return (
     <>
@@ -365,15 +449,22 @@ export function SalesHistory() {
         <div className="flex justify-between items-center gap-3 flex-wrap">
           <h1 className="text-xl md:text-2xl font-bold text-gray-900">Sales History</h1>
           <div className="flex items-center gap-2">
-            {/* View toggle — desktop only */}
-            <div className="hidden md:flex items-center bg-gray-100 rounded-lg p-1 gap-1">
+            <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1 overflow-x-auto max-w-[calc(100vw-2rem)]">
               <button onClick={() => setViewMode('summary')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'summary' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                <LayoutList className="w-4 h-4" /> Summary
+                <LayoutList className="w-4 h-4" /> Sales
               </button>
               <button onClick={() => setViewMode('excel')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'excel' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                <Table2 className="w-4 h-4" /> Excel View
+                <Table2 className="w-4 h-4" /> Items
+              </button>
+              <button onClick={() => setViewMode('medicine')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-all ${viewMode === 'medicine' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                <Pill className="w-4 h-4" /> Medicines
+              </button>
+              <button onClick={() => setViewMode('supplier')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-all ${viewMode === 'supplier' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                <Truck className="w-4 h-4" /> Suppliers
               </button>
             </div>
             <button onClick={() => setShowExportModal(true)}
@@ -471,7 +562,7 @@ export function SalesHistory() {
           </div>
 
           {/* ── MOBILE: sale cards ── */}
-          <div className="md:hidden divide-y divide-gray-100">
+          {viewMode === 'summary' && <div className="md:hidden divide-y divide-gray-100">
             {sortedSummary.map(sale => (
               <div key={sale.id} className="p-4">
                 <div className="flex items-start justify-between gap-2 mb-2">
@@ -520,7 +611,7 @@ export function SalesHistory() {
                 {hasActiveFilters && <button onClick={clearFilters} className="mt-2 text-blue-600 text-sm hover:underline">Clear filters</button>}
               </div>
             )}
-          </div>
+          </div>}
 
           {/* ── DESKTOP: summary table ── */}
           {viewMode === 'summary' && (
@@ -590,7 +681,7 @@ export function SalesHistory() {
 
           {/* ── DESKTOP: excel table ── */}
           {viewMode === 'excel' && (
-            <div className="hidden md:block overflow-x-auto">
+            <div className="block overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
@@ -598,6 +689,8 @@ export function SalesHistory() {
                     <th className="p-4 font-medium text-gray-500 whitespace-nowrap">Receipt No</th>
                     <th className={thClass(excelSort.col === 'type')}      onClick={() => toggleExcelSort('type')}><span className="flex items-center">Type <SortIcon col="type" sort={excelSort} /></span></th>
                     <th className={thClass(excelSort.col === 'itemName')}  onClick={() => toggleExcelSort('itemName')}><span className="flex items-center">Item Name <SortIcon col="itemName" sort={excelSort} /></span></th>
+                    <th className="p-4 font-medium text-gray-500 whitespace-nowrap">Supplier</th>
+                    <th className="p-4 font-medium text-gray-500 whitespace-nowrap">Batch</th>
                     <th className={thClass(excelSort.col === 'sellType')}  onClick={() => toggleExcelSort('sellType')}><span className="flex items-center">Sell Type <SortIcon col="sellType" sort={excelSort} /></span></th>
                     <th className={thClass(excelSort.col === 'quantity')}  onClick={() => toggleExcelSort('quantity')}><span className="flex items-center">Qty <SortIcon col="quantity" sort={excelSort} /></span></th>
                     <th className={thClass(excelSort.col === 'unitPrice')} onClick={() => toggleExcelSort('unitPrice')}><span className="flex items-center">Unit Price <SortIcon col="unitPrice" sort={excelSort} /></span></th>
@@ -614,6 +707,8 @@ export function SalesHistory() {
                       <td className="p-3 text-gray-400 font-mono text-xs">{getSaleReceiptNo(sale)}</td>
                       <td className="p-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${sale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{sale.customerType || 'customer'}</span></td>
                       <td className="p-3 text-gray-900 font-medium">{item?.name || <span className="text-gray-400 italic">—</span>}</td>
+                      <td className="p-3 text-gray-600 whitespace-nowrap">{item?.supplierName || 'Unknown supplier'}</td>
+                      <td className="p-3 text-gray-500 font-mono whitespace-nowrap">{item?.batchNo || 'N/A'}</td>
                       <td className="p-3">{item ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold uppercase ${item.sellType === 'box' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{item.sellType}</span> : '—'}</td>
                       <td className="p-3 text-gray-700 text-center">{item?.quantity ?? '—'}</td>
                       <td className="p-3 text-gray-600">{item ? formatCurrency(item.price) : '—'}</td>
@@ -624,7 +719,7 @@ export function SalesHistory() {
                     </tr>
                   ))}
                   {sortedExcel.length === 0 && (
-                    <tr><td colSpan={11} className="p-8 text-center text-gray-500">
+                    <tr><td colSpan={13} className="p-8 text-center text-gray-500">
                       <div className="flex flex-col items-center"><FileText className="w-12 h-12 text-gray-300 mb-2" /><p>No records found.</p>
                         {hasActiveFilters && <button onClick={clearFilters} className="mt-2 text-blue-600 text-sm hover:underline">Clear filters</button>}
                       </div>
@@ -634,7 +729,7 @@ export function SalesHistory() {
                 {sortedExcel.length > 0 && (
                   <tfoot>
                     <tr className="bg-blue-50 border-t-2 border-blue-200 font-bold text-sm">
-                      <td className="p-4 text-blue-800" colSpan={5}>TOTAL — {filteredSales.length} sales / {sortedExcel.length} rows</td>
+                      <td className="p-4 text-blue-800" colSpan={7}>TOTAL — {filteredSales.length} sales / {sortedExcel.length} rows</td>
                       <td className="p-4 text-blue-800 text-center">{sortedExcel.reduce((s, { item }) => s + (item?.quantity || 0), 0)}</td>
                       <td className="p-4" />
                       <td className="p-4 text-blue-800">{formatCurrency(sortedExcel.reduce((s, { item }) => s + (item?.total || 0), 0))}</td>
@@ -644,6 +739,69 @@ export function SalesHistory() {
                     </tr>
                   </tfoot>
                 )}
+              </table>
+            </div>
+          )}
+
+          {viewMode === 'medicine' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead><tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="p-4 font-medium text-gray-500">Medicine</th>
+                  <th className="p-4 font-medium text-gray-500">Supplier</th>
+                  <th className="p-4 font-medium text-gray-500">Batch</th>
+                  <th className="p-4 font-medium text-gray-500 text-right">Receipts</th>
+                  <th className="p-4 font-medium text-gray-500 text-right">Units Sold</th>
+                  <th className="p-4 font-medium text-gray-500 text-right">Sales Amount</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {medicineSummaries.map(row => <tr key={row.key} className="hover:bg-gray-50">
+                    <td className="p-4 font-semibold text-gray-900">{row.medicineName}</td>
+                    <td className="p-4 text-gray-600">{row.supplierName}</td>
+                    <td className="p-4 text-gray-600 font-mono">{row.batchNo}</td>
+                    <td className="p-4 text-gray-600 text-right">{row.receiptCount}</td>
+                    <td className="p-4 text-gray-700 text-right font-medium">{row.units}</td>
+                    <td className="p-4 text-blue-700 text-right font-bold">{formatCurrency(row.amount)}</td>
+                  </tr>)}
+                  {medicineSummaries.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-500">No medicine sales found.</td></tr>}
+                </tbody>
+                {medicineSummaries.length > 0 && <tfoot><tr className="bg-blue-50 border-t-2 border-blue-200 font-bold">
+                  <td colSpan={3} className="p-4 text-blue-800">TOTAL — {medicineSummaries.length} medicine batches</td>
+                  <td className="p-4 text-blue-800 text-right">{new Set(breakdownLines.map(line => line.sale.id)).size}</td>
+                  <td className="p-4 text-blue-800 text-right">{breakdownLines.reduce((sum, line) => sum + line.units, 0)}</td>
+                  <td className="p-4 text-blue-900 text-right">{formatCurrency(breakdownLines.reduce((sum, line) => sum + line.amount, 0))}</td>
+                </tr></tfoot>}
+              </table>
+            </div>
+          )}
+
+          {viewMode === 'supplier' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead><tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="p-4 font-medium text-gray-500">Supplier</th>
+                  <th className="p-4 font-medium text-gray-500 text-right">Medicines</th>
+                  <th className="p-4 font-medium text-gray-500 text-right">Receipts</th>
+                  <th className="p-4 font-medium text-gray-500 text-right">Units Sold</th>
+                  <th className="p-4 font-medium text-gray-500 text-right">Sales Amount</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {supplierSummaries.map(row => <tr key={row.key} className="hover:bg-gray-50">
+                    <td className="p-4 font-semibold text-gray-900">{row.supplierName}</td>
+                    <td className="p-4 text-gray-600 text-right">{row.medicineCount}</td>
+                    <td className="p-4 text-gray-600 text-right">{row.receiptCount}</td>
+                    <td className="p-4 text-gray-700 text-right font-medium">{row.units}</td>
+                    <td className="p-4 text-blue-700 text-right font-bold">{formatCurrency(row.amount)}</td>
+                  </tr>)}
+                  {supplierSummaries.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-500">No supplier sales found.</td></tr>}
+                </tbody>
+                {supplierSummaries.length > 0 && <tfoot><tr className="bg-blue-50 border-t-2 border-blue-200 font-bold">
+                  <td className="p-4 text-blue-800">TOTAL — {supplierSummaries.length} suppliers</td>
+                  <td className="p-4" />
+                  <td className="p-4 text-blue-800 text-right">{new Set(breakdownLines.map(line => line.sale.id)).size}</td>
+                  <td className="p-4 text-blue-800 text-right">{breakdownLines.reduce((sum, line) => sum + line.units, 0)}</td>
+                  <td className="p-4 text-blue-900 text-right">{formatCurrency(breakdownLines.reduce((sum, line) => sum + line.amount, 0))}</td>
+                </tr></tfoot>}
               </table>
             </div>
           )}
@@ -716,15 +874,33 @@ export function SalesHistory() {
         {/* Export Modal */}
         {showExportModal && (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
-            <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-md overflow-hidden">
+            <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-md overflow-hidden max-h-[92vh] flex flex-col">
               <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                 <div>
                   <h2 className="text-lg font-bold text-gray-900">Export Sales</h2>
-                  <p className="text-sm text-gray-500 mt-0.5">Each item sold will be a separate row</p>
+                  <p className="text-sm text-gray-500 mt-0.5">Download all sales or a selected medicine/supplier history</p>
                 </div>
                 <button onClick={() => setShowExportModal(false)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full"><X className="w-5 h-5" /></button>
               </div>
-              <div className="p-5 space-y-5">
+              <div className="p-5 space-y-5 overflow-y-auto">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Report</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { value: 'all', label: 'All Sales', icon: Table2 },
+                      { value: 'medicine', label: 'Medicine PDF', icon: Pill },
+                      { value: 'supplier', label: 'Supplier PDF', icon: Truck },
+                    ] as const).map(option => <button key={option.value}
+                      onClick={() => {
+                        setExportReport(option.value);
+                        if (option.value === 'medicine' && !exportMedicine) setExportMedicine(medicineOptions[0]?.key || '');
+                        if (option.value === 'supplier' && !exportSupplier) setExportSupplier(supplierOptions[0]?.key || '');
+                      }}
+                      className={`flex flex-col items-center gap-2 p-3 rounded-lg border-2 text-center transition-all ${exportReport === option.value ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                      <option.icon className="w-5 h-5" /><span className="text-xs font-semibold leading-tight">{option.label}</span>
+                    </button>)}
+                  </div>
+                </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Sale Type</label>
                   <div className="grid grid-cols-3 gap-2">
@@ -747,6 +923,24 @@ export function SalesHistory() {
                     ))}
                   </div>
                 </div>
+                {exportReport === 'medicine' && <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Medicine and Batch</label>
+                  <select value={exportMedicine} onChange={event => setExportMedicine(event.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                    <option value="">Select medicine</option>
+                    {medicineOptions.map(option => <option key={option.key} value={option.key}>
+                      {option.medicineName} — Batch {option.batchNo} — {option.supplierName}
+                    </option>)}
+                  </select>
+                </div>}
+                {exportReport === 'supplier' && <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Supplier</label>
+                  <select value={exportSupplier} onChange={event => setExportSupplier(event.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                    <option value="">Select supplier</option>
+                    {supplierOptions.map(option => <option key={option.key} value={option.key}>{option.supplierName}</option>)}
+                  </select>
+                </div>}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Date Range <span className="text-gray-400 font-normal">(optional)</span></label>
                   <div className="grid grid-cols-2 gap-3">
@@ -762,13 +956,16 @@ export function SalesHistory() {
                   )}
                 </div>
                 <div className="bg-blue-50 rounded-lg px-4 py-3 text-sm text-blue-700">
-                  Will export <span className="font-bold">{exportPreviewCount}</span> sales with all items
+                  Will export <span className="font-bold">{exportPreview.sales}</span> sales and{' '}
+                  <span className="font-bold">{exportPreview.lines}</span> item rows
                 </div>
               </div>
-              <div className="p-5 pt-0 flex gap-3">
+              <div className="p-5 pt-3 flex gap-3 border-t border-gray-100 shrink-0">
                 <button onClick={() => setShowExportModal(false)} className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium">Cancel</button>
-                <button onClick={doExport} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">
-                  <Download className="w-4 h-4" /> Download CSV
+                <button onClick={exportReport === 'all' ? doExport : doPdfExport}
+                  disabled={exportPreview.lines === 0 || (exportReport === 'medicine' && !exportMedicine) || (exportReport === 'supplier' && !exportSupplier)}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium">
+                  <Download className="w-4 h-4" /> {exportReport === 'all' ? 'Download CSV' : 'Download PDF'}
                 </button>
               </div>
             </div>
