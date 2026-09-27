@@ -178,7 +178,12 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
               </div>
             )}
             {cache.lastError && (
-              <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg p-2.5">{cache.lastError}</p>
+              <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg p-2.5">
+                <p>{cache.lastError}</p>
+                {cache.pendingCollections.length > 0 && (
+                  <p className="mt-1 font-medium">Affected data: {cache.pendingCollections.join(', ')}</p>
+                )}
+              </div>
             )}
 
             <div className="border border-gray-100 rounded-lg p-3">

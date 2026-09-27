@@ -188,6 +188,50 @@ describe('incremental mirror bootstrap', () => {
     });
   });
 
+  it('clears a stale permission marker when authoritative cloud data already matches the protected edit', async () => {
+    await upsertLocalRecords('sales', [{ id: 'sale-1', data: { total: 900 }, pending: false }], {
+      seedComplete: true,
+      generation: 7,
+      pending: {
+        hasPendingWrites: false,
+        rejectedRecordIds: ['sale-1'],
+        rejectedActivities: [{ collection: 'sales', recordId: 'sale-1', changedFields: ['total'] }],
+        recoveryRecords: [{ id: 'sale-1', data: { total: 900 }, pending: true }],
+        lastError: 'Missing or insufficient permissions.',
+      },
+    });
+
+    await __offlineCacheInternals.reconcileAuthoritativeRejectedWrites('sales');
+
+    expect((await getLocalSyncStatus('sales')).pending).toMatchObject({
+      hasPendingWrites: false,
+      rejectedRecordIds: [],
+      recoveryRecords: [],
+      lastError: '',
+    });
+  });
+
+  it('preserves a rejected edit when authoritative cloud data does not match it', async () => {
+    await upsertLocalRecords('sales', [{ id: 'sale-1', data: { total: 100 }, pending: false }], {
+      seedComplete: true,
+      generation: 7,
+      pending: {
+        hasPendingWrites: false,
+        rejectedRecordIds: ['sale-1'],
+        rejectedActivities: [{ collection: 'sales', recordId: 'sale-1', changedFields: ['total'] }],
+        recoveryRecords: [{ id: 'sale-1', data: { total: 900 }, pending: true }],
+        lastError: 'Missing or insufficient permissions.',
+      },
+    });
+
+    await __offlineCacheInternals.reconcileAuthoritativeRejectedWrites('sales');
+
+    expect((await getLocalSyncStatus('sales')).pending).toMatchObject({
+      rejectedRecordIds: ['sale-1'],
+      lastError: 'Missing or insufficient permissions.',
+    });
+  });
+
   it('retains recovery data when a successful write does not cover rejected fields', async () => {
     await upsertLocalRecords('sales', [{ id: 'sale-1', data: { total: 900 }, pending: true }], {
       seedComplete: true,
