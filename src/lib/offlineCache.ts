@@ -266,6 +266,89 @@ function recoveryRecordId(value: unknown) {
   return String(value && typeof value === 'object' && 'id' in value ? (value as { id?: unknown }).id || '' : '');
 }
 
+function recoveryRecordData(value: unknown) {
+  if (!value || typeof value !== 'object' || !('data' in value)) return null;
+  const data = (value as { data?: unknown }).data;
+  return data && typeof data === 'object' ? data as Record<string, unknown> : null;
+}
+
+function comparableValue(value: unknown): unknown {
+  const parts = timestampParts(value);
+  if (parts) return parts;
+  if (Array.isArray(value)) return value.map(comparableValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, comparableValue(nested)]));
+  }
+  return value;
+}
+
+function equalFieldValue(left: unknown, right: unknown) {
+  return JSON.stringify(comparableValue(left)) === JSON.stringify(comparableValue(right));
+}
+
+async function clearRejectedRecordIds(collectionName: string, clearedIds: Set<string>) {
+  if (!clearedIds.size) return;
+  const status = await getLocalSyncStatus(collectionName);
+  const rejectedIds = Array.isArray(status.pending.rejectedRecordIds)
+    ? status.pending.rejectedRecordIds.map(String) : [];
+  const rejectedActivities = Array.isArray(status.pending.rejectedActivities)
+    ? status.pending.rejectedActivities as WriteActivity[] : [];
+  const remainingIds = rejectedIds.filter(id => !clearedIds.has(id));
+  const recoveryRecords = Array.isArray(status.pending.recoveryRecords)
+    ? status.pending.recoveryRecords.filter(value => !clearedIds.has(recoveryRecordId(value)))
+    : [];
+  const remainingActivities = rejectedActivities.filter(activity => (
+    !clearedIds.has(String(activity.recordId || ''))
+  ));
+  await setLocalSyncMetadata(collectionName, {
+    pending: {
+      hasPendingWrites: remainingIds.length > 0,
+      count: remainingIds.length > 0 ? 1 : 0,
+      lastError: remainingIds.length > 0 ? String(status.pending.lastError || '') : '',
+      rejectedRecordIds: remainingIds,
+      rejectedActivities: remainingActivities,
+      recoveryRecords,
+    },
+  });
+  if (remainingIds.length === 0) rejected.delete(collectionName);
+}
+
+async function reconcileAuthoritativeRejectedWrites(collectionName: string) {
+  const status = await getLocalSyncStatus(collectionName);
+  const rejectedIds = Array.isArray(status.pending.rejectedRecordIds)
+    ? status.pending.rejectedRecordIds.map(String) : [];
+  if (!rejectedIds.length) return;
+  const rejectedActivities = Array.isArray(status.pending.rejectedActivities)
+    ? status.pending.rejectedActivities as WriteActivity[] : [];
+  const recoveryRecords = Array.isArray(status.pending.recoveryRecords)
+    ? status.pending.recoveryRecords : [];
+  const authoritative = await queryLocalRecords<Record<string, unknown>>(collectionName, {
+    includeDeleted: true,
+    filter: record => rejectedIds.includes(record.id),
+  });
+  const clearedIds = new Set<string>();
+
+  for (const recordId of rejectedIds) {
+    const recovery = [...recoveryRecords].reverse().find(value => recoveryRecordId(value) === recordId) as
+      | { data?: Record<string, unknown>; pending?: boolean } | undefined;
+    const current = authoritative.find(record => record.id === recordId);
+    const recoveryData = recoveryRecordData(recovery);
+    if (!current || !recoveryData || recovery?.pending !== true) continue;
+    const activity = [...rejectedActivities].reverse().find(value => String(value.recordId || '') === recordId);
+    const candidateFields = activityFields(activity || {});
+    const fields = (candidateFields.length ? candidateFields : Object.keys(recoveryData))
+      .filter(field => field !== 'syncUpdatedAt' && field !== 'syncProtocolVersion' && !field.endsWith('At'));
+    if (fields.length > 0 && fields.every(field => equalFieldValue(recoveryData[field], current.data[field]))) {
+      clearedIds.add(recordId);
+    }
+  }
+
+  await clearRejectedRecordIds(collectionName, clearedIds);
+  if (rejected.size === 0 && /permission|cloud write needs attention|queued write/i.test(lastError)) lastError = '';
+}
+
 async function clearConfirmedRejectedWrites(activities: WriteActivity[]) {
   const byCollection = new Map<string, WriteActivity[]>();
   for (const activity of activities) {
@@ -293,26 +376,7 @@ async function clearConfirmedRejectedWrites(activities: WriteActivity[]) {
         ));
         if (confirmedActivitySupersedes(rejectedActivity, confirmed)) clearedIds.add(recordId);
       }
-      if (!clearedIds.size) return;
-
-      const remainingIds = rejectedIds.filter(id => !clearedIds.has(id));
-      const recoveryRecords = Array.isArray(status.pending.recoveryRecords)
-        ? status.pending.recoveryRecords.filter(value => !clearedIds.has(recoveryRecordId(value)))
-        : [];
-      const remainingActivities = rejectedActivities.filter(activity => (
-        !clearedIds.has(String(activity.recordId || ''))
-      ));
-      await setLocalSyncMetadata(collectionName, {
-        pending: {
-          hasPendingWrites: remainingIds.length > 0,
-          count: remainingIds.length > 0 ? 1 : 0,
-          lastError: remainingIds.length > 0 ? String(status.pending.lastError || '') : '',
-          rejectedRecordIds: remainingIds,
-          rejectedActivities: remainingActivities,
-          recoveryRecords,
-        },
-      });
-      if (remainingIds.length === 0) rejected.delete(collectionName);
+      await clearRejectedRecordIds(collectionName, clearedIds);
     })
   )));
 
@@ -450,6 +514,7 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
             ] } : {}),
           },
         });
+        await reconcileAuthoritativeRejectedWrites(collectionName);
         if (run !== lifecycle) return;
         if (hasPendingWrites) serverReconciled.delete(collectionName);
         else serverReconciled.add(collectionName);
@@ -588,6 +653,7 @@ export const __offlineCacheInternals = {
   notify,
   waitForPersistence,
   clearConfirmedRejectedWrites,
+  reconcileAuthoritativeRejectedWrites,
 };
 
 async function startIncrementalListener(collectionName: string, control: SyncControl, run: number) {
@@ -733,6 +799,7 @@ async function startIncrementalListener(collectionName: string, control: SyncCon
             ] } : {}),
           },
         });
+        if (caughtUp) await reconcileAuthoritativeRejectedWrites(collectionName);
         if (run !== lifecycle) return;
         if (caughtUp) {
           ready.add(collectionName);
