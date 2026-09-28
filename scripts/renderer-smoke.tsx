@@ -6,7 +6,9 @@ import { collection, doc, getDocFromServer, getDocsFromServer, disableNetwork, e
 import { getOfflineCacheStatus, startFullOfflineCache } from '../src/lib/offlineCache';
 import { setActiveAuthSession } from '../src/lib/offlineAuth';
 import { getLocalCollectionOnce } from '../src/lib/collectionRepository';
-import { listPendingPosSales, replayPendingPosSaleRecords, removePendingPosSale } from '../src/pos/lib/offlineSalesOutbox';
+import { listPendingPosSales, replayPendingPosSaleRecords, removePendingPosSale, queuePendingPosSale, confirmPendingPosSale } from '../src/pos/lib/offlineSalesOutbox';
+import { recoverPosSaleToCloud } from '../src/pos/lib/cloudSaleRecovery';
+import { reconcileRecoveredSaleStock } from '../src/pos/lib/stockReconciliation';
 import {
   listPendingSaleReturns,
   removePendingSaleReturn,
@@ -172,5 +174,44 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
       throw new Error('Generation/rollback changed sales or stock');
     }
     return { tombstoneRestored: true, generation: previous.datasetGeneration + 1, sales: 2, returns: 1, stock: 19 };
+  },
+  async verifyShortageRecovery() {
+    online = true; window.dispatchEvent(new Event('online'));
+    await enableNetwork(db);
+    await waitForPendingWrites(db);
+    // A completed receipt may survive only in its outbox after a rejected SDK
+    // batch. It must stay visible and upload even when current stock is lower.
+    await trackedUpdateDoc(doc(db, 'medicines', 'smoke-med'), { stock: 4, bonusStockUnits: 0 });
+    const record = {
+      saleId: 'shortage-sale', createdAt: '2026-09-28T04:51:00Z',
+      saleData: { receiptNo: 'SALE-R1W4-002483', date: '2026-09-28T04:51:00Z', businessDate: '2026-09-28', total: 500,
+        items: [{ medicineId: 'smoke-med', name: 'Smoke Medicine', quantity: 5, sellType: 'unit', unitsPerBox: 1,
+          price: 100, total: 500, costPrice: 60, paidUnitsSold: 5, bonusUnitsSold: 0, costTotal: 300 }] },
+      stockAdjustments: [{ medicineId: 'smoke-med', units: 5 }],
+      movements: [{ id: 'shortage-movement', data: { medicineId: 'smoke-med', quantity: -5, type: 'sale', saleId: 'shortage-sale' } }],
+    };
+    await queuePendingPosSale(record);
+    location.hash = '/sales';
+    await waitFor(() => document.body.innerText.includes('SALE-R1W4-002483')
+      && document.body.innerText.includes('Saved on this PC'), 'queued receipt visible in Sales History');
+    await Promise.all([recoverPosSaleToCloud(record), recoverPosSaleToCloud(record)]);
+    const sale = await getDocFromServer(doc(db, 'sales', record.saleId));
+    const medicine = await getDocFromServer(doc(db, 'medicines', 'smoke-med'));
+    if (medicine.data()?.stock !== 0 || sale.data()?.total !== 500 || sale.data()?.businessDate !== '2026-09-28'
+      || sale.data()?.items[0].costTotal !== 300 || sale.data()?.stockReconciliation[0].unappliedUnits !== 1) {
+      throw new Error('Shortage recovery changed the original bill or lost the stock discrepancy');
+    }
+    await confirmPendingPosSale(record.saleId, sale.data()!);
+    await waitFor(() => document.body.innerText.includes('Sale saved · stock review required')
+      && !document.body.innerText.includes('Saved on this PC'), 'confirmed sale remains visible after outbox removal');
+    const issueId = 'sale-stock-shortage-sale-shortage-movement';
+    await reconcileRecoveredSaleStock(issueId, 0, 0, 'Smoke test physical count verified');
+    await recoverPosSaleToCloud(record);
+    if ((await getDocFromServer(doc(db, 'syncIssues', issueId))).data()?.status !== 'resolved'
+      || (await getDocFromServer(doc(db, 'medicines', 'smoke-med'))).data()?.stock !== 0) {
+      throw new Error('Retry changed reconciled stock or reopened the same issue');
+    }
+    return { preservedReceipt: record.saleData.receiptNo, cloudSales: (await getDocsFromServer(collection(db, 'sales'))).size,
+      preservedCost: sale.data()?.items[0].costTotal, stock: 0, auditedShortfall: 1, reconciliation: 'resolved' };
   },
 };

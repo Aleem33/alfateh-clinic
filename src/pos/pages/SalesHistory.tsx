@@ -58,6 +58,14 @@ function saleDateSortKey(sale: any): string {
   return `${recordClinicDateKey(sale)}|${timestamp?.toISOString() || ''}`;
 }
 
+function SaleSyncLabel({ sale }: { sale: any }) {
+  if (sale._pendingUpload) return <span className="block text-xs text-blue-700 font-sans mt-1">Saved on this PC · upload pending</span>;
+  if (sale.stockReconciliation?.some((entry: any) => entry.status === 'pending')) {
+    return <span className="block text-xs text-amber-700 font-sans mt-1">Sale saved · stock review required</span>;
+  }
+  return null;
+}
+
 export function SalesHistory() {
   const [sales, setSales]               = useState<any[]>([]);
   const [saleReturns, setSaleReturns]   = useState<any[]>([]);
@@ -85,6 +93,7 @@ export function SalesHistory() {
   const [exportDateTo,    setExportDateTo]    = useState('');
 
   const openSaleEditor = (sale: any) => {
+    if (sale._pendingUpload) return;
     const type: BillDiscountType = sale.orderDiscountType === 'rs' ? 'rs' : 'pct';
     const inferredPercentage = sale.subtotal > 0 ? (Number(sale.orderDiscount || 0) / sale.subtotal) * 100 : 0;
     setEditingSale({
@@ -229,7 +238,7 @@ export function SalesHistory() {
     if (!editingSale) return;
     setEditSaving(true);
     try {
-      const { id, ...data } = editingSale;
+      const { id, _pendingUpload, ...data } = editingSale;
       // Recalculate totals from items
       const grossSubtotal     = editingSale.items.reduce((s: number, i: any) => s + i.quantity * i.price, 0);
       const totalItemDiscounts = editingSale.items.reduce((s: number, i: any) => s + (i.itemDiscount || 0), 0);
@@ -570,6 +579,8 @@ export function SalesHistory() {
                     <p className="text-sm font-semibold text-gray-900">
                       {formatSaleDate(sale)}
                     </p>
+                    <p className="text-xs font-mono">{getSaleReceiptNo(sale)}</p>
+                    <SaleSyncLabel sale={sale} />
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${sale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                         {sale.customerType || 'customer'}
@@ -596,7 +607,7 @@ export function SalesHistory() {
                       className="flex items-center gap-1 text-blue-600 text-xs font-medium">
                       <Eye className="w-3.5 h-3.5" /> View
                     </button>
-                    <button onClick={() => openSaleEditor(sale)}
+                    <button disabled={sale._pendingUpload} title={sale._pendingUpload ? 'Wait for upload before editing this receipt' : 'Edit receipt'} onClick={() => openSaleEditor(sale)}
                       className="flex items-center gap-1 text-orange-600 text-xs font-medium">
                       <Edit2 className="w-3.5 h-3.5" /> Edit
                     </button>
@@ -634,7 +645,7 @@ export function SalesHistory() {
                   {sortedSummary.map(sale => (
                     <tr key={sale.id} className="hover:bg-gray-50">
                       <td className="p-4 text-gray-900 font-medium">{formatSaleDate(sale)}</td>
-                      <td className="p-4 text-gray-500 font-mono text-sm">{getSaleReceiptNo(sale)}</td>
+                      <td className="p-4 text-gray-500 font-mono text-sm">{getSaleReceiptNo(sale)}<SaleSyncLabel sale={sale} /></td>
                       <td className="p-4 text-sm">
                         {sale.customerName ? <span className="font-medium text-gray-800">{sale.customerName}</span> : <span className="text-gray-300 italic text-xs">—</span>}
                         {sale.pendingAmount > 0 && <span className="ml-1.5 inline-block px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold">Due {formatCurrency(sale.pendingAmount)}</span>}
@@ -649,7 +660,7 @@ export function SalesHistory() {
                           <button onClick={() => setSelectedSale(sale)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded flex items-center gap-1 text-sm font-medium">
                             <Eye className="w-4 h-4" /> View
                           </button>
-                          <button onClick={() => openSaleEditor(sale)} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded flex items-center gap-1 text-sm font-medium">
+                          <button disabled={sale._pendingUpload} title={sale._pendingUpload ? 'Wait for upload before editing this receipt' : 'Edit receipt'} onClick={() => openSaleEditor(sale)} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded flex items-center gap-1 text-sm font-medium disabled:opacity-40">
                             <Edit2 className="w-4 h-4" /> Edit
                           </button>
                         </div>
@@ -704,7 +715,7 @@ export function SalesHistory() {
                   {sortedExcel.map(({ sale, item }, idx) => (
                     <tr key={`${sale.id}-${idx}`} className="hover:bg-gray-50">
                       <td className="p-3 text-gray-700 whitespace-nowrap">{formatSaleDate(sale)}</td>
-                      <td className="p-3 text-gray-400 font-mono text-xs">{getSaleReceiptNo(sale)}</td>
+                      <td className="p-3 text-gray-400 font-mono text-xs">{getSaleReceiptNo(sale)}<SaleSyncLabel sale={sale} /></td>
                       <td className="p-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${sale.customerType === 'hospital' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{sale.customerType || 'customer'}</span></td>
                       <td className="p-3 text-gray-900 font-medium">{item?.name || <span className="text-gray-400 italic">—</span>}</td>
                       <td className="p-3 text-gray-600 whitespace-nowrap">{item?.supplierName || 'Unknown supplier'}</td>

@@ -41,7 +41,8 @@ app.whenReady().then(async () => {
       await delay(100);
     }
     const restarted = await primary.webContents.executeJavaScript('window.smoke.verifyReplica()');
-    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted }));
+    const shortageRecovery = await primary.webContents.executeJavaScript('window.smoke.verifyShortageRecovery()');
+    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted, shortageRecovery }));
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });

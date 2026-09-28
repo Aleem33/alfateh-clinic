@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   assertFails,
   assertSucceeds,
@@ -18,8 +18,12 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
+  runTransaction,
+  increment,
 } from 'firebase/firestore';
 import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
+import { recoverSaleTransaction } from '../pos/lib/saleRecovery';
+import type { PendingPosSale } from '../pos/lib/offlineSalesOutbox';
 
 const emulatorAddress = process.env.FIRESTORE_EMULATOR_HOST || '';
 const integrationDescribe = emulatorAddress ? describe : describe.skip;
@@ -37,7 +41,7 @@ integrationDescribe('Firestore offline operational rules', () => {
         rules: readFileSync('firestore.rules', 'utf8'),
       },
     });
-  });
+  }, 30000);
 
   beforeEach(async () => {
     await environment.clearFirestore();
@@ -77,6 +81,39 @@ integrationDescribe('Firestore offline operational rules', () => {
     batch.update(doc(database, 'medicines', 'batch-a'), { stock: 90, bonusStockUnits: 5 });
     batch.update(doc(database, 'customers', 'customer-1'), { creditBalance: 100 });
     await assertSucceeds(batch.commit());
+  });
+
+  it('recovers a completed sale with a stock shortfall atomically and concurrent retries never charge twice', async () => {
+    const admin = environment.authenticatedContext('admin-1').firestore();
+    await updateDoc(doc(admin, 'medicines', 'batch-a'), { stock: 4, bonusStockUnits: 0 });
+    await setDoc(doc(admin, 'syncControl', 'current'), activatedControl());
+    const database = environment.authenticatedContext('cashier-1').firestore();
+    const record: PendingPosSale = {
+      saleId: 'recovery-483', createdAt: '2026-09-28T04:51:00Z',
+      saleData: { receiptNo: 'SALE-R1W4-002483', businessDate: '2026-09-28', total: 500,
+        items: [{ medicineId: 'batch-a', name: 'Medicine', quantity: 5, sellType: 'unit', paidUnitsSold: 5, bonusUnitsSold: 0, costTotal: 250 }] },
+      movements: [{ id: 'recovery-movement', data: { medicineId: 'batch-a', quantity: -5 } }],
+      stockAdjustments: [{ medicineId: 'batch-a', units: 5 }],
+      customerAdjustment: { customerId: 'customer-1', pendingAmount: 50 },
+    };
+    const tracked = (data: any) => ({ ...data, syncUpdatedAt: serverTimestamp(), syncProtocolVersion: 2 });
+    const recover = () => runTransaction(database, transaction => recoverSaleTransaction({
+      get: reference => transaction.get(reference),
+      set: (reference, data) => transaction.set(reference, tracked(data)),
+      update: (reference, data) => transaction.update(reference, tracked(data)),
+    }, record, (collection, id) => doc(database, collection, id), increment, '2026-09-29T06:00:00Z'));
+    const attempts = await Promise.allSettled([recover(), recover()]);
+    expect(attempts.map(result => result.status)).toContain('fulfilled');
+    await assertSucceeds(recover());
+    expect((await getDocFromServer(doc(admin, 'sales', record.saleId))).data()).toMatchObject(record.saleData);
+    expect((await getDocFromServer(doc(admin, 'medicines', 'batch-a'))).data()?.stock).toBe(0);
+    expect((await getDocFromServer(doc(admin, 'customers', 'customer-1'))).data()?.creditBalance).toBe(50);
+    expect((await getDocFromServer(doc(admin, 'stockMovements', 'recovery-movement'))).data()).toMatchObject({
+      quantity: -5, appliedQuantity: -4, unappliedUnits: 1,
+    });
+    expect((await getDocFromServer(doc(admin, 'syncIssues', 'sale-stock-recovery-483-recovery-movement'))).data()).toMatchObject({
+      status: 'open', unappliedUnits: 1,
+    });
   });
 
   it('accepts validated protocol-v2 metadata on permitted medicine stock and cost writes', async () => {

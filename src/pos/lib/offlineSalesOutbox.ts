@@ -1,3 +1,5 @@
+import { upsertLocalRecords } from '../../lib/localMirror';
+
 export type PendingPosSale = {
   saleId: string;
   saleData: Record<string, any>;
@@ -10,6 +12,13 @@ export type PendingPosSale = {
 const DB_NAME = 'alfateh-pos-outbox';
 const DB_VERSION = 1;
 const STORE_NAME = 'pendingSales';
+const activeCheckouts = new Set<string>();
+
+export function beginPendingSaleCheckout(saleId: string) { activeCheckouts.add(saleId); }
+export function endPendingSaleCheckout(saleId: string) {
+  activeCheckouts.delete(saleId);
+  notifyChanged();
+}
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -63,6 +72,12 @@ export async function removePendingPosSale(saleId: string) {
   notifyChanged();
 }
 
+export async function confirmPendingPosSale(saleId: string, data: Record<string, any>) {
+  // Persist the confirmed copy before removing its durable recovery copy.
+  await upsertLocalRecords('sales', [{ id: saleId, data, pending: false }]);
+  await removePendingPosSale(saleId);
+}
+
 export async function listPendingPosSales() {
   return useStore<PendingPosSale[]>('readonly', store => store.getAll());
 }
@@ -104,10 +119,12 @@ export async function replayPendingPosSaleRecords(
     || left.saleId.localeCompare(right.saleId)
   ));
   const missing: PendingPosSale[] = [];
+  const errors: string[] = [];
   // First remove every durable recovery copy whose exact ID already reached
   // Firestore. One genuinely blocked sale must not make all later confirmed
   // entries continue appearing as pending.
   for (const record of ordered) {
+    if (activeCheckouts.has(record.saleId)) continue;
     if (await adapter.saleExists(record.saleId)) {
       await adapter.remove(record.saleId);
       continue;
@@ -115,10 +132,16 @@ export async function replayPendingPosSaleRecords(
     missing.push(record);
   }
   for (const record of missing) {
-    await adapter.replay(record);
-    if (!(await adapter.saleExists(record.saleId))) {
-      throw new Error(`Offline sale ${record.saleId} could not be confirmed after replay.`);
+    if (activeCheckouts.has(record.saleId)) continue;
+    try {
+      await adapter.replay(record);
+      if (!(await adapter.saleExists(record.saleId))) {
+        throw new Error(`Offline sale ${record.saleId} could not be confirmed after replay.`);
+      }
+      await adapter.remove(record.saleId);
+    } catch (error) {
+      errors.push(`${record.saleData.receiptNo || record.saleId}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    await adapter.remove(record.saleId);
   }
+  if (errors.length) throw new Error(`${errors.length} sale(s) still saved locally and awaiting upload. ${errors[0]}`);
 }
