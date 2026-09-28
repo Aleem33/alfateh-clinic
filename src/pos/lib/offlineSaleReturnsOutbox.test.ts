@@ -87,4 +87,18 @@ describe('offline sales-return outbox', () => {
     ]);
     await expect(recoverPendingSaleReturnsFromMirror()).resolves.toBe(0);
   });
+
+  it('removes confirmed returns first and replays missing returns chronologically', async () => {
+    const first = { ...sample('first'), createdAt: '2026-09-18T08:00:00.000Z' };
+    const second = { ...sample('second'), createdAt: '2026-09-18T09:00:00.000Z' };
+    const confirmedRecord = { ...sample('confirmed'), createdAt: '2026-09-18T10:00:00.000Z' };
+    const confirmed = new Set(['confirmed']);
+    const replayed: string[] = [];
+    await replayPendingSaleReturnRecords([confirmedRecord, second, first], {
+      returnExists: async id => confirmed.has(id),
+      replay: async record => { replayed.push(record.returnId); confirmed.add(record.returnId); },
+      remove: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(replayed).toEqual(['first', 'second']);
+  });
 });

@@ -112,4 +112,18 @@ describe('offline sales outbox', () => {
     })).rejects.toThrow('could not be confirmed');
     expect(remove).not.toHaveBeenCalled();
   });
+
+  it('removes all cloud-confirmed records before replaying missing sales in creation order', async () => {
+    const laterConfirmed = { ...sampleSale('confirmed'), createdAt: '2026-08-25T12:00:00.000Z' };
+    const firstMissing = { ...sampleSale('first'), createdAt: '2026-08-25T09:00:00.000Z' };
+    const secondMissing = { ...sampleSale('second'), createdAt: '2026-08-25T10:00:00.000Z' };
+    const confirmed = new Set(['confirmed']);
+    const replayed: string[] = [];
+    await replayPendingPosSaleRecords([laterConfirmed, secondMissing, firstMissing], {
+      saleExists: async id => confirmed.has(id),
+      replay: async record => { replayed.push(record.saleId); confirmed.add(record.saleId); },
+      remove: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(replayed).toEqual(['first', 'second']);
+  });
 });
