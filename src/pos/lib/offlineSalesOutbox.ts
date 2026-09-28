@@ -99,11 +99,22 @@ export async function replayPendingPosSaleRecords(
   records: PendingPosSale[],
   adapter: PendingPosSaleReplayAdapter,
 ) {
-  for (const record of records) {
+  const ordered = [...records].sort((left, right) => (
+    String(left.createdAt || '').localeCompare(String(right.createdAt || ''))
+    || left.saleId.localeCompare(right.saleId)
+  ));
+  const missing: PendingPosSale[] = [];
+  // First remove every durable recovery copy whose exact ID already reached
+  // Firestore. One genuinely blocked sale must not make all later confirmed
+  // entries continue appearing as pending.
+  for (const record of ordered) {
     if (await adapter.saleExists(record.saleId)) {
       await adapter.remove(record.saleId);
       continue;
     }
+    missing.push(record);
+  }
+  for (const record of missing) {
     await adapter.replay(record);
     if (!(await adapter.saleExists(record.saleId))) {
       throw new Error(`Offline sale ${record.saleId} could not be confirmed after replay.`);

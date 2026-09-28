@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CloudOff, RefreshCw, Wifi, X } from 'lucide-react';
-import { subscribeSyncStatus, type SyncSnapshot } from '../lib/offlineSync';
+import { runOfflineSyncNow, subscribeSyncStatus, type SyncSnapshot } from '../lib/offlineSync';
 import { getLanStatus, subscribeLanStatus } from '../lib/lanCoordinator';
 import type { LanStatus } from '../types/electron';
 import { subscribeOfflineCache, type OfflineCacheStatus } from '../lib/offlineCache';
@@ -18,6 +18,10 @@ const initial: SyncSnapshot = {
   issueCount: 0,
   lastError: '',
   devicePrefix: '',
+  pendingSales: 0,
+  pendingReturns: 0,
+  pendingLabReports: 0,
+  pendingCollections: [],
 };
 
 export function useSyncStatus() {
@@ -183,6 +187,28 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
                 {cache.pendingCollections.length > 0 && (
                   <p className="mt-1 font-medium">Affected data: {cache.pendingCollections.join(', ')}</p>
                 )}
+              </div>
+            )}
+            {status.lastError && (
+              <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg p-2.5">
+                <p className="font-semibold">Upload failed</p>
+                <p className="mt-1 break-words">{status.lastError}</p>
+              </div>
+            )}
+            {status.pendingCount > 0 && (
+              <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg p-2.5">
+                <p className="font-semibold">Pending upload breakdown</p>
+                <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1">
+                  <span>Sales: {status.pendingSales}</span>
+                  <span>Returns: {status.pendingReturns}</span>
+                  <span>Lab reports: {status.pendingLabReports}</span>
+                  <span>Data collections: {status.pendingCollections.length}</span>
+                </div>
+                {status.pendingCollections.length > 0 && <p className="mt-1 break-words">Collections: {status.pendingCollections.join(', ')}</p>}
+                {status.online && <button type="button" disabled={status.syncing} onClick={() => void runOfflineSyncNow()}
+                  className="mt-2 rounded-md bg-blue-600 px-3 py-1.5 font-medium text-white disabled:opacity-50">
+                  {status.syncing ? 'Retrying…' : 'Retry uploads now'}
+                </button>}
               </div>
             )}
 

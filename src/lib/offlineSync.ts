@@ -8,7 +8,7 @@ import { subscribeOfflineCache } from './offlineCache';
 import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
 import { getActiveAuthSession, isCloudAuthReady } from './offlineAuth';
 import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
-import { waitForSyncStep } from './syncTiming';
+import { SyncTimeoutError, waitForSyncStep } from './syncTiming';
 import { trustedNowISO } from './trustedClock';
 import { allocateCartBonusCost } from '../pos/lib/bonusInventory';
 import { aggregateSaleStockAdjustments } from '../pos/lib/offlineSalesOutbox';
@@ -35,6 +35,10 @@ export type SyncSnapshot = {
   issueCount: number;
   lastError: string;
   devicePrefix: string;
+  pendingSales: number;
+  pendingReturns: number;
+  pendingLabReports: number;
+  pendingCollections: string[];
 };
 
 type PendingLabReport = {
@@ -78,7 +82,13 @@ function scheduleSafeRetry() {
 }
 
 function currentSnapshot(): SyncSnapshot {
-  return { online, syncing, pendingCount, issueCount, lastError, devicePrefix: device.prefix };
+  return {
+    online, syncing, pendingCount, issueCount, lastError, devicePrefix: device.prefix,
+    pendingSales: posSalePendingCount,
+    pendingReturns: saleReturnPendingCount,
+    pendingLabReports: labPendingCount,
+    pendingCollections: [...pendingWriteCollections].sort(),
+  };
 }
 
 function recomputePendingCount() {
@@ -127,10 +137,13 @@ async function refreshPendingCount() {
     labPendingCount = records.length;
     posSalePendingCount = await countPendingPosSales();
     saleReturnPendingCount = await countPendingSaleReturns();
-  } catch {
-    labPendingCount = 0;
-    posSalePendingCount = 0;
-    saleReturnPendingCount = 0;
+  } catch (error: any) {
+    // Never turn a local queue read failure into a false "0 pending" state.
+    // Keeping the last known counts and surfacing the error ensures LAN
+    // coordination remains locked until the durable queues can be verified.
+    lastError = error?.message
+      ? `Could not verify the pending upload queue: ${error.message}`
+      : 'Could not verify the pending upload queue.';
   }
   notify();
 }
@@ -375,15 +388,16 @@ export async function runOfflineSyncNow() {
     // queue or an authoritative snapshot replaces operational mirror records.
     await recoverPendingSaleReturnsFromMirror();
     try {
-      await waitForSyncStep(waitForPendingWrites(db), 15_000, 'Queued cloud writes');
+      await waitForSyncStep(waitForPendingWrites(db), 30_000, 'Queued cloud writes');
     } catch (error: any) {
-      lastError = error?.message || 'Queued cloud writes could not be confirmed yet.';
       console.warn('Queued Firestore writes are still unresolved; durable sales remain in the outbox and will be verified on the next pass:', error);
       // Never replay the durable sale outbox while the SDK's original offline
       // batch may still commit. Both batches contain stock increments, so racing
       // them could deduct the same stock twice. Keeping the outbox is lossless;
       // a later pass first drains/rejects the SDK queue, then checks saleId.
       scheduleSafeRetry();
+      if (error instanceof SyncTimeoutError) return;
+      lastError = error?.message || 'Queued cloud writes could not be confirmed yet.';
       throw error;
     }
     await replayPendingPosSales();
@@ -394,7 +408,7 @@ export async function runOfflineSyncNow() {
   } finally {
     syncing = false;
     await refreshPendingCount();
-    await completeLanCloudSync();
+    if (!lastError && pendingCount === 0) await completeLanCloudSync();
     notify();
   }
 }

@@ -191,11 +191,19 @@ export async function replayPendingSaleReturnRecords(
   records: PendingSaleReturn[],
   adapter: PendingSaleReturnReplayAdapter,
 ) {
-  for (const record of records) {
+  const ordered = [...records].sort((left, right) => (
+    String(left.createdAt || '').localeCompare(String(right.createdAt || ''))
+    || left.returnId.localeCompare(right.returnId)
+  ));
+  const missing: PendingSaleReturn[] = [];
+  for (const record of ordered) {
     if (await adapter.returnExists(record.returnId)) {
       await adapter.remove(record.returnId);
       continue;
     }
+    missing.push(record);
+  }
+  for (const record of missing) {
     await adapter.replay(record);
     if (!(await adapter.returnExists(record.returnId))) {
       throw new Error(`Sales return ${record.returnData.returnNo || record.returnId} could not be confirmed after replay.`);
