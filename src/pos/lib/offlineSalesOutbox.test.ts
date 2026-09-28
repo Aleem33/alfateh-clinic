@@ -6,6 +6,8 @@ import {
   queuePendingPosSale,
   replayPendingPosSaleRecords,
   type PendingPosSale,
+  beginPendingSaleCheckout,
+  endPendingSaleCheckout,
 } from './offlineSalesOutbox';
 
 const sampleSale = (saleId = 'sale-offline-1'): PendingPosSale => ({
@@ -37,6 +39,41 @@ afterEach(async () => {
 });
 
 describe('offline sales outbox', () => {
+  it('continues later missing receipts while retaining a failed earlier sale for retry', async () => {
+    const records = Array.from({ length: 20 }, (_, index) => sampleSale(`sale-${String(index).padStart(3, '0')}`));
+    const cloud = new Set<string>();
+    for (const record of records) await queuePendingPosSale(record);
+    const remove = async (id: string) => {
+      const { removePendingPosSale } = await import('./offlineSalesOutbox');
+      await removePendingPosSale(id);
+    };
+    const adapter = {
+      saleExists: async (id: string) => cloud.has(id),
+      replay: async (record: PendingPosSale) => {
+        if (record.saleId === 'sale-000') throw new Error('Needs review');
+        cloud.add(record.saleId);
+      }, remove,
+    };
+    await expect(replayPendingPosSaleRecords(await listPendingPosSales(), adapter)).rejects.toThrow('1 sale(s) still saved locally');
+    expect(cloud.size).toBe(19);
+    expect((await listPendingPosSales()).map(record => record.saleId)).toEqual(['sale-000']);
+    adapter.replay = async record => { cloud.add(record.saleId); };
+    await replayPendingPosSaleRecords(await listPendingPosSales(), adapter);
+    expect(cloud.size).toBe(20);
+    expect(await listPendingPosSales()).toEqual([]);
+  });
+
+  it('does not race a checkout still waiting for its original transaction', async () => {
+    const record = sampleSale();
+    const adapter = { saleExists: vi.fn(), replay: vi.fn(), remove: vi.fn() };
+    beginPendingSaleCheckout(record.saleId);
+    try {
+      await replayPendingPosSaleRecords([record], adapter);
+      expect(adapter.saleExists).not.toHaveBeenCalled();
+      expect(adapter.replay).not.toHaveBeenCalled();
+      expect(adapter.remove).not.toHaveBeenCalled();
+    } finally { endPendingSaleCheckout(record.saleId); }
+  });
   it('aggregates box and loose-unit deductions for the same medicine batch', () => {
     expect(aggregateSaleStockAdjustments([
       { medicineId: 'batch-a', quantity: 2, sellType: 'box', unitsPerBox: 10 },

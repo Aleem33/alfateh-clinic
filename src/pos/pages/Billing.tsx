@@ -16,7 +16,7 @@ import { subscribeToMedicines } from '../../lib/medicineStore';
 import { calculateBillDiscount, normalizeBillDiscountValue, type BillDiscountType } from '../lib/billDiscount';
 import { PHARMACY_RECEIPT_NAME, PHARMACY_RETURN_POLICY_URDU } from '../lib/receiptBrand';
 import { cartItemUnits, findCartStockProblem, InsufficientStockError } from '../lib/billingCart';
-import { aggregateSaleStockAdjustments, queuePendingPosSale, removePendingPosSale } from '../lib/offlineSalesOutbox';
+import { aggregateSaleStockAdjustments, queuePendingPosSale, removePendingPosSale, confirmPendingPosSale, beginPendingSaleCheckout, endPendingSaleCheckout } from '../lib/offlineSalesOutbox';
 import { allocateCartBonusCost } from '../lib/bonusInventory';
 import { isCloudOnline } from '../../lib/lanCoordinator';
 import { clinicDateKey, clinicTimeLabel, recordClinicDateTimeLabel } from '../../lib/clinicDate';
@@ -433,6 +433,8 @@ export function Billing() {
       setIsCheckingOut(false);
       return;
     }
+    let checkoutSaleId = '';
+    let pendingCommit: Promise<any> | undefined;
     try {
       const receiptNo = await getNextPosReceiptNo();
       const saleClock = await getTrustedClockReading();
@@ -461,6 +463,8 @@ export function Billing() {
       }
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'sales'));
+      checkoutSaleId = docRef.id;
+      beginPendingSaleCheckout(docRef.id);
       const stockAdjustments = aggregateSaleStockAdjustments(saleItems);
       const movements: Array<{ id: string; data: Record<string, any> }> = [];
       batch.set(docRef, saleData);
@@ -507,6 +511,8 @@ export function Billing() {
       let finalSaleData = saleData;
       const commitPromise = startedOnline
         ? runTransaction(db, async transaction => {
+          const existingSale = await transaction.get(docRef);
+          if (existingSale.exists()) return existingSale.data();
           const medicineRefs = stockAdjustments.map(adjustment => doc(db, 'medicines', adjustment.medicineId));
           const medicineSnapshots = await Promise.all(medicineRefs.map(reference => transaction.get(reference)));
           const authoritativeMedicines: Array<{ id: string; stock?: number; bonusStockUnits?: number; [key: string]: unknown }> = medicineSnapshots.map((snapshot, index) => ({
@@ -542,6 +548,7 @@ export function Billing() {
           return authoritativeSaleData;
         })
         : waitForOnlineWrite(batch.commit()).then(() => saleData);
+      pendingCommit = commitPromise;
       let serverConfirmed = false;
       try {
         if (startedOnline) {
@@ -565,7 +572,10 @@ export function Billing() {
           handleFirestoreError(error, OperationType.CREATE, `sales/${docRef.id}`);
         }
       }
-      if (serverConfirmed) await removePendingPosSale(docRef.id);
+      if (serverConfirmed) {
+        try { await confirmPendingPosSale(docRef.id, finalSaleData); }
+        catch (error) { console.warn('Confirmed sale retained in recovery queue until local confirmation succeeds:', error); }
+      }
       setLastReceipt({ ...finalSaleData, id: docRef.id });
       setCart([]); setOrderDiscountType('rs'); setOrderDiscountValue(0); setAmountPaid('');
       setSelectedCustomer(null); setCustomerSearch('');
@@ -577,6 +587,12 @@ export function Billing() {
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'sales');
     } finally {
+      if (checkoutSaleId) {
+        if (pendingCommit) void pendingCommit.then(
+          () => endPendingSaleCheckout(checkoutSaleId), () => endPendingSaleCheckout(checkoutSaleId),
+        );
+        else endPendingSaleCheckout(checkoutSaleId);
+      }
       checkoutInFlightRef.current = false;
       setIsCheckingOut(false);
     }

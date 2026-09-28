@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocFromServer, getDocsFromServer, increment, query, runTransaction, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
+import { collection, doc, getDocFromServer, getDocsFromServer, query, runTransaction, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
@@ -10,9 +10,8 @@ import { getActiveAuthSession, isCloudAuthReady } from './offlineAuth';
 import { countPendingPosSales, listPendingPosSales, removePendingPosSale, replayPendingPosSaleRecords } from '../pos/lib/offlineSalesOutbox';
 import { SyncTimeoutError, waitForSyncStep } from './syncTiming';
 import { trustedNowISO } from './trustedClock';
-import { allocateCartBonusCost } from '../pos/lib/bonusInventory';
-import { aggregateSaleStockAdjustments } from '../pos/lib/offlineSalesOutbox';
-import { findCartStockProblem, InsufficientStockError } from '../pos/lib/billingCart';
+import { recoverPosSaleToCloud } from '../pos/lib/cloudSaleRecovery';
+import { upsertLocalRecords } from './localMirror';
 import {
   countPendingSaleReturns,
   listPendingSaleReturns,
@@ -221,47 +220,13 @@ async function processLabReportQueue() {
 async function replayPendingPosSales() {
   const records = await listPendingPosSales();
   await replayPendingPosSaleRecords(records, {
-    saleExists: async saleId => (await getDocFromServer(doc(db, 'sales', saleId))).exists(),
-    replay: async record => {
-      await runTransaction(db, async transaction => {
-        const saleRef = doc(db, 'sales', record.saleId);
-        const medicineRefs = record.stockAdjustments.map(adjustment => doc(db, 'medicines', adjustment.medicineId));
-        const [saleSnapshot, ...medicineSnapshots] = await Promise.all([
-          transaction.get(saleRef),
-          ...medicineRefs.map(reference => transaction.get(reference)),
-        ]);
-        if (saleSnapshot.exists()) return;
-        const medicines: Array<{ id: string; stock?: number; bonusStockUnits?: number; [key: string]: unknown }> = medicineSnapshots.map((snapshot, index) => ({
-          id: record.stockAdjustments[index].medicineId,
-          ...(snapshot.exists() ? snapshot.data() : {}),
-        }));
-        const items = Array.isArray(record.saleData.items) ? record.saleData.items : [];
-        const stockProblem = findCartStockProblem(items, medicines);
-        if (stockProblem) throw new InsufficientStockError(`Offline sale ${record.saleData.receiptNo || record.saleId}: ${stockProblem}`);
-        const authoritativeItems = allocateCartBonusCost(items, medicines);
-        const authoritativeAdjustments = aggregateSaleStockAdjustments(authoritativeItems);
-        transaction.set(saleRef, { ...record.saleData, items: authoritativeItems });
-        authoritativeItems.forEach((item: any, index: number) => {
-          transaction.set(doc(db, 'stockMovements', record.movements[index].id), {
-            ...record.movements[index].data,
-            paidUnits: -Number(item.paidUnitsSold || 0),
-            bonusUnits: -Number(item.bonusUnitsSold || 0),
-          });
-        });
-        authoritativeAdjustments.forEach(adjustment => {
-          const medicine = medicines.find(entry => entry.id === adjustment.medicineId)!;
-          transaction.update(doc(db, 'medicines', adjustment.medicineId), {
-            stock: Number(medicine.stock || 0) - adjustment.units,
-            bonusStockUnits: Number(medicine.bonusStockUnits || 0) - Number(adjustment.bonusUnits || 0),
-          });
-        });
-        if (record.customerAdjustment && record.customerAdjustment.pendingAmount > 0) {
-          transaction.update(doc(db, 'customers', record.customerAdjustment.customerId), {
-            creditBalance: increment(record.customerAdjustment.pendingAmount),
-          });
-        }
-      });
+    saleExists: async saleId => {
+      const snapshot = await getDocFromServer(doc(db, 'sales', saleId));
+      if (!snapshot.exists()) return false;
+      await upsertLocalRecords('sales', [{ id: saleId, data: snapshot.data(), pending: false }]);
+      return true;
     },
+    replay: recoverPosSaleToCloud,
     remove: removePendingPosSale,
   });
 }
@@ -270,7 +235,12 @@ async function replayPendingSaleReturns() {
   await recoverPendingSaleReturnsFromMirror();
   const records = await listPendingSaleReturns();
   await replayPendingSaleReturnRecords(records, {
-    returnExists: async returnId => (await getDocFromServer(doc(db, 'saleReturns', returnId))).exists(),
+    returnExists: async returnId => {
+      const snapshot = await getDocFromServer(doc(db, 'saleReturns', returnId));
+      if (!snapshot.exists()) return false;
+      await upsertLocalRecords('saleReturns', [{ id: returnId, data: snapshot.data(), pending: false }]);
+      return true;
+    },
     replay: async record => {
       await runTransaction(db, async transaction => {
         const returnRef = doc(db, 'saleReturns', record.returnId);
@@ -347,7 +317,9 @@ async function checkStockConflicts() {
     });
   }
 
-  issueCount = activeMedicines.length;
+  issueCount = activeMedicines.length + existingIssues.filter(issue => (
+    issue.type === 'sale-stock-reconciliation' && issue.status !== 'resolved'
+  )).length;
   for (const medicine of activeMedicines) {
     const data = medicine.data();
     const stock = Number(data.stock || 0);
@@ -376,14 +348,12 @@ export async function runOfflineSyncNow() {
   if (!auth.currentUser) {
     lastError = '';
     notify();
-    await completeLanCloudSync();
     return;
   }
   syncing = true;
   lastError = '';
   notify();
   try {
-    await processLabReportQueue();
     // Capture legacy pending/rejected returns before Firestore drains its SDK
     // queue or an authoritative snapshot replaces operational mirror records.
     await recoverPendingSaleReturnsFromMirror();
@@ -400,15 +370,20 @@ export async function runOfflineSyncNow() {
       lastError = error?.message || 'Queued cloud writes could not be confirmed yet.';
       throw error;
     }
-    await replayPendingPosSales();
-    await replayPendingSaleReturns();
-    await checkStockConflicts();
+    const errors: string[] = [];
+    // A failure in one durable queue must not starve other completed entries.
+    for (const step of [replayPendingPosSales, replayPendingSaleReturns, processLabReportQueue, checkStockConflicts]) {
+      try { await step(); }
+      catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
+    }
+    if (errors.length) throw new Error(errors.join(' | '));
   } catch (error: any) {
     lastError = error?.message || 'Offline sync failed.';
   } finally {
     syncing = false;
     await refreshPendingCount();
     if (!lastError && pendingCount === 0) await completeLanCloudSync();
+    if (pendingCount > 0) scheduleSafeRetry();
     notify();
   }
 }
@@ -438,8 +413,12 @@ export function startOfflineSyncService() {
     window.addEventListener('offline', () => updateOnline(false));
   }
   window.addEventListener('alfateh:auth-sync-ready', () => void runOfflineSyncNow());
-  window.addEventListener('alfateh:pos-outbox-changed', () => void refreshPendingCount());
-  window.addEventListener('alfateh:return-outbox-changed', () => void refreshPendingCount());
+  const onOutboxChanged = () => {
+    void refreshPendingCount();
+    if (online) scheduleSafeRetry();
+  };
+  window.addEventListener('alfateh:pos-outbox-changed', onOutboxChanged);
+  window.addEventListener('alfateh:return-outbox-changed', onOutboxChanged);
   subscribeLanStatus(lanStatus => updateOnline(lanStatus.online));
   subscribeOfflineCache(cacheStatus => {
     pendingWriteCollections.clear();

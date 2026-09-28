@@ -9,7 +9,8 @@ vi.mock('./syncProtocol', () => ({
   subscribeSyncControl: (listener: () => void) => { listener(); return () => undefined; },
 }));
 
-import { resetLocalMirrorForTests, setLocalSyncMetadata, upsertLocalRecords } from './localMirror';
+import { resetLocalMirrorForTests, setLocalSyncMetadata, upsertLocalRecords, replaceLocalCollection } from './localMirror';
+import { queuePendingPosSale, confirmPendingPosSale, listPendingPosSales, removePendingPosSale } from '../pos/lib/offlineSalesOutbox';
 import { subscribeToSales, subscribeToSaleReturns } from './salesStore';
 
 const unsubscribers: Array<() => void> = [];
@@ -22,11 +23,38 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   unsubscribers.splice(0).forEach(unsubscribe => unsubscribe());
+  for (const record of await listPendingPosSales()) await removePendingPosSale(record.saleId);
   await resetLocalMirrorForTests();
   vi.unstubAllGlobals();
 });
 
 describe('shared complete sales mirror', () => {
+  it('shows missing 002483–002487 from the durable queue after a server snapshot and deduplicates confirmation', async () => {
+    const cloud = [{ id: 's482', data: { receiptNo: 'SALE-R1W4-002482', total: 70 } },
+      { id: 's488', data: { receiptNo: 'SALE-R1W4-002488', total: 1175.48 } }];
+    await upsertLocalRecords('sales', cloud, complete);
+    for (let index = 483; index <= 487; index++) await queuePendingPosSale({
+      saleId: `s${index}`, saleData: { receiptNo: `SALE-R1W4-002${index}`, total: 100, businessDate: '2026-09-28' },
+      movements: [], stockAdjustments: [], createdAt: '2026-09-28T05:00:00Z',
+    });
+    const onData = vi.fn();
+    const stop = subscribeToSales(onData);
+    unsubscribers.push(stop);
+    await vi.waitFor(() => expect(onData.mock.lastCall?.[0]).toHaveLength(7));
+    await replaceLocalCollection('sales', cloud, complete);
+    await vi.waitFor(() => expect(onData.mock.lastCall?.[0].filter((sale: any) => sale._pendingUpload)).toHaveLength(5));
+    await confirmPendingPosSale('s483', { receiptNo: 'SALE-R1W4-002483', total: 100, businessDate: '2026-09-28' });
+    await vi.waitFor(() => {
+      const sales = onData.mock.lastCall?.[0];
+      expect(sales).toHaveLength(7);
+      expect(sales.filter((sale: any) => sale._pendingUpload)).toHaveLength(4);
+      expect(sales.filter((sale: any) => sale.id === 's483')).toHaveLength(1);
+    });
+    stop();
+    const reopened = vi.fn();
+    unsubscribers.push(subscribeToSales(reopened));
+    await vi.waitFor(() => expect(reopened.mock.lastCall?.[0]).toHaveLength(7));
+  });
   it('keeps complete offline history when the Firestore cache delivers only one changed sale', async () => {
     await upsertLocalRecords('sales', [
       { id: 'sale-a', data: { total: 100 } },
