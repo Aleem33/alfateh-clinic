@@ -11,6 +11,10 @@ import { calculatePurchaseQuantities, getEditedBatchSellingPriceUpdate, hasDupli
 import { clinicDateKey } from '../../lib/clinicDate';
 import { getTrustedClockReading, trustedNow } from '../../lib/trustedClock';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { MonthSelector } from '../../components/MonthSelector';
+import { historyDateKey, matchesMonth } from '../../lib/monthFilter';
+import { PurchaseReports } from '../components/PurchaseReports';
+import { purchaseReportLine } from '../lib/purchaseReporting';
 
 const today = () => clinicDateKey(trustedNow());
 const emptyPurchaseForm = () => ({
@@ -26,6 +30,9 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
   const [search, setSearch] = useState('');
+  const [month, setMonth] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [medicineFilter, setMedicineFilter] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [formError, setFormError] = useState('');
@@ -46,17 +53,18 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       e => handleFirestoreError(e, OperationType.GET, 'suppliers'));
     const u3 = subscribeToLocalCollection('purchases', records => {
       const list = [...records];
-      list.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      list.sort((a: any, b: any) => historyDateKey(b).localeCompare(historyDateKey(a)));
       setPurchases(list);
     }, e => handleFirestoreError(e, OperationType.GET, 'purchases'));
     return () => { u1(); u2(); u3(); };
   }, []);
 
-  const filteredPurchases = purchases.filter(p =>
-    p.medicineName?.toLowerCase().includes(search.toLowerCase()) ||
-    p.batchNo?.toLowerCase().includes(search.toLowerCase()) ||
-    p.supplierName?.toLowerCase().includes(search.toLowerCase())
-  );
+  const purchaseOptions = purchases.map(purchaseReportLine);
+  const filteredPurchases = purchases.filter(p => matchesMonth(p, month)
+    && (!supplierFilter || purchaseReportLine(p).supplierKey === supplierFilter)
+    && (!medicineFilter || purchaseReportLine(p).medicineKey === medicineFilter)
+    && (!search.trim() || [p.medicineName, p.batchNo, p.supplierName]
+      .some(value => String(value || '').toLowerCase().includes(search.trim().toLowerCase()))));
 
   const filteredMeds = searchMedicines(medicines, medSearch);
 
@@ -389,6 +397,19 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         </button>
       </div>
 
+      <div className="flex items-center gap-3 flex-wrap">
+        <MonthSelector value={month} onChange={setMonth} />
+        <select aria-label="Purchase supplier" value={supplierFilter} onChange={event => setSupplierFilter(event.target.value)} className="border rounded-lg px-3 py-2 text-sm max-w-full">
+          <option value="">All suppliers</option>
+          {[...new Map(purchaseOptions.map(line => [line.supplierKey, line.supplier])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+        <select aria-label="Purchase medicine batch" value={medicineFilter} onChange={event => setMedicineFilter(event.target.value)} className="border rounded-lg px-3 py-2 text-sm max-w-full">
+          <option value="">All medicine batches</option>
+          {[...new Map(purchaseOptions.map(line => [line.medicineKey, `${line.medicine} · Batch ${line.batch} · ${line.supplier}`])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+        {(month || supplierFilter || medicineFilter || search) && <button type="button" onClick={() => { setMonth(''); setSupplierFilter(''); setMedicineFilter(''); setSearch(''); }} className="text-sm text-blue-600">Clear all filters</button>}
+      </div>
+      <PurchaseReports records={filteredPurchases} period={month} />
       {/* List */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 border-b border-gray-100">
@@ -407,7 +428,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-semibold text-gray-900">{p.medicineName}</p>
-                  <p className="text-xs text-gray-400">{p.date ? format(new Date(p.date), 'MMM dd, yyyy') : 'N/A'}</p>
+                  <p className="text-xs text-gray-400">{historyDateKey(p) || 'N/A'}</p>
                 </div>
                 <span className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(p.totalCost)}</span>
               </div>
@@ -433,7 +454,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
           {filteredPurchases.length === 0 && (
             <div className="p-8 text-center text-gray-500">
               <PackagePlus className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-              No purchase records yet.
+              No purchases match these filters.
             </div>
           )}
         </div>
@@ -456,7 +477,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
             <tbody className="divide-y divide-gray-100">
               {filteredPurchases.map(p => (
                 <tr key={p.id} className="hover:bg-gray-50">
-                  <td className="p-4 text-gray-600 text-sm">{p.date ? format(new Date(p.date), 'MMM dd, yyyy') : 'N/A'}</td>
+                  <td className="p-4 text-gray-600 text-sm">{historyDateKey(p) || 'N/A'}</td>
                   <td className="p-4">
                     <p className="font-medium text-gray-900">{p.medicineName}</p>
                     {p.expiryDate && <p className="text-xs text-gray-400">Exp: {format(new Date(p.expiryDate), 'MMM yyyy')}</p>}
@@ -484,7 +505,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               ))}
               {filteredPurchases.length === 0 && (
                 <tr><td colSpan={canEdit ? 8 : 7} className="p-8 text-center text-gray-500">
-                  <PackagePlus className="w-10 h-10 text-gray-300 mx-auto mb-2" />No purchase records yet.
+                  <PackagePlus className="w-10 h-10 text-gray-300 mx-auto mb-2" />No purchases match these filters.
                 </td></tr>
               )}
             </tbody>

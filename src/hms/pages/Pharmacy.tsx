@@ -17,6 +17,9 @@ import { createMedicineSafely, ensureMedicinePurchaseBatch, findMedicinePurchase
 import { trustedNow } from '../../lib/trustedClock';
 import { calculatePurchaseQuantities } from '../../pos/lib/purchaseInvoice';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { MonthSelector } from '../../components/MonthSelector';
+import { historyDateKey, matchesMonth } from '../../lib/monthFilter';
+import { PurchaseReports } from '../../pos/components/PurchaseReports';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -76,6 +79,7 @@ export function Pharmacy({
   const [medicines, setMedicines]           = useState<any[]>([]);
   const [suppliers, setSuppliers]           = useState<any[]>([]);
   const [purchases, setPurchases]           = useState<any[]>([]);
+  const [purchaseMonth, setPurchaseMonth] = useState('');
   const [pharmacyOrders, setPharmacyOrders] = useState<any[]>([]);
 
   const [tab, setTab]               = useState<'stock' | 'purchases' | 'rx'>('stock');
@@ -188,7 +192,7 @@ export function Pharmacy({
     return matchFilter;
   });
 
-  const filteredPurchases = purchases.filter(p => !search || p.medicineName?.toLowerCase().includes(search.toLowerCase()));
+  const filteredPurchases = purchases.filter(p => matchesMonth(p, purchaseMonth) && (!search || p.medicineName?.toLowerCase().includes(search.toLowerCase())));
   const filteredOrders    = pharmacyOrders.filter(o =>
     !rxSearch || o.patientName?.toLowerCase().includes(rxSearch.toLowerCase()) || o.patientMRN?.includes(rxSearch)
   );
@@ -577,6 +581,9 @@ export function Pharmacy({
 
       {/* Purchases Tab */}
       {tab === 'purchases' && (
+        <div className="space-y-4">
+        <MonthSelector value={purchaseMonth} onChange={setPurchaseMonth} />
+        <PurchaseReports records={filteredPurchases} period={purchaseMonth} />
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-100">
@@ -589,7 +596,7 @@ export function Pharmacy({
                 ? <tr><td colSpan={canEditPurchases ? 9 : 8} className="text-center py-12 text-gray-400">No purchases yet</td></tr>
                 : filteredPurchases.map(p => (
                   <tr key={p.id} className="hover:bg-gray-50/50">
-                    <td className="px-4 py-3 text-sm text-gray-600">{formatDate(p.date)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{formatDate(historyDateKey(p))}</td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{p.medicineName}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{p.supplierName || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{p.paidUnits ?? p.totalUnitsAdded} / {p.bonusUnits || 0} units</td>
@@ -606,6 +613,7 @@ export function Pharmacy({
                 ))}
             </tbody>
           </table>
+        </div>
         </div>
       )}
 

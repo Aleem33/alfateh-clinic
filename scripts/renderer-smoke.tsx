@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { POSApp } from '../src/pos/POSApp';
+import { Reports as HMSReports } from '../src/hms/pages/Reports';
 import { db } from '../src/firebase';
 import { collection, doc, getDocFromServer, getDocsFromServer, disableNetwork, enableNetwork, waitForPendingWrites } from 'firebase/firestore';
 import { getOfflineCacheStatus, startFullOfflineCache } from '../src/lib/offlineCache';
@@ -48,7 +49,8 @@ setActiveAuthSession({ mode: 'online', profile: {
 } });
 startFullOfflineCache('admin');
 location.hash = '/billing';
-createRoot(document.getElementById('root')!).render(<POSApp userRole="admin" onSwitchApp={() => {}} onLoginSuccess={() => {}} />);
+const smokeRoot = createRoot(document.getElementById('root')!);
+smokeRoot.render(<POSApp userRole="admin" onSwitchApp={() => {}} onLoginSuccess={() => {}} />);
 
 const ready = async () => {
   await waitFor(() => { const status = getOfflineCacheStatus(); return status.totalCollections > 0 && status.readyCollections === status.totalCollections; }, 'complete mirror');
@@ -65,6 +67,59 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
 };
 (window as any).smoke = {
   ready,
+  async verifyMonthReporting() {
+    const fixtures = [
+      { id: 'report-jan', date: '2001-01-31T18:59:59Z', medicineName: 'January Report Medicine', supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-jan', totalCost: 100, paidUnits: 10, bonusUnits: 2, totalUnitsAdded: 12, invoiceId: 'report-invoice-jan' },
+      { id: 'report-feb', date: '2001-01-31T19:00:00Z', medicineName: 'February Report Medicine', supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-feb', totalCost: 200, paidUnits: 20, bonusUnits: 0, totalUnitsAdded: 20, invoiceId: 'report-invoice-feb' },
+    ];
+    for (const fixture of fixtures) {
+      await trackedSetDoc(doc(db, 'purchases', fixture.id), fixture);
+      await trackedSetDoc(doc(db, 'sales', fixture.id), {
+        receiptNo: fixture.id, date: fixture.date, total: fixture.totalCost, amountPaid: fixture.totalCost,
+        items: [{ medicineId: fixture.medicineId, name: fixture.medicineName, quantity: 1, price: fixture.totalCost, total: fixture.totalCost }],
+      });
+      await trackedSetDoc(doc(db, 'bills', fixture.id), { billNo: fixture.id, patientName: fixture.medicineName, date: fixture.date, total: fixture.totalCost, paid: fixture.totalCost, paymentStatus: 'paid' });
+    }
+    const before = (await getDocsFromServer(collection(db, 'sales'))).docs.map(record => ({ id: record.id, data: record.data() }));
+    const selectMonth = async (month: string) => {
+      const input = document.querySelector('input[type="month"]') as HTMLInputElement;
+      if (!input) throw new Error('Month selector unavailable');
+      setInputValue(input, month);
+      await waitFor(() => input.value === month, 'month selected');
+    };
+    location.hash = '/purchases';
+    await waitFor(() => document.body.innerText.includes('January Report Medicine') && document.body.innerText.includes('February Report Medicine'), 'purchase fixtures');
+    await selectMonth('2001-01');
+    await waitFor(() => [...document.querySelectorAll('tbody')].some(body => body.innerText.includes('January Report Medicine') && !body.innerText.includes('February Report Medicine')), 'January purchases');
+    click('By supplier');
+    await waitFor(() => [...document.querySelectorAll('tbody')].some(body => body.innerText.includes('Report Supplier') && body.innerText.includes('100')), 'supplier report totals');
+    click('By medicine');
+    await waitFor(() => document.body.innerText.includes('By medicine'), 'medicine report');
+    click('By invoice');
+    await waitFor(() => document.body.innerText.includes('report-invoice-jan'), 'invoice report');
+    click('Clear all filters');
+    await waitFor(() => document.body.innerText.includes('February Report Medicine'), 'purchase month cleared');
+    location.hash = '/sales';
+    await waitFor(() => document.body.innerText.includes('report-jan') && document.body.innerText.includes('report-feb'), 'sales fixtures');
+    await selectMonth('2001-02');
+    await waitFor(() => document.body.innerText.includes('report-feb') && !document.body.innerText.includes('report-jan'), 'Pakistan February sales');
+    click('Export');
+    await waitFor(() => document.querySelector('input[type="date"]')?.getAttribute('value') === '2001-02-01', 'export month range inherited');
+    click('Cancel');
+    location.hash = '/reports';
+    await waitFor(() => document.body.innerText.includes('Revenue Trend'), 'POS analytics');
+    await selectMonth('2001-02');
+    await waitFor(() => document.body.innerText.includes('1 transactions'), 'POS monthly analytics');
+    smokeRoot.render(<HMSReports />);
+    await waitFor(() => document.body.innerText.includes('OPD REVENUE') && document.body.innerText.includes('Reports & Analytics'), 'HMS analytics');
+    await selectMonth('2001-02');
+    await waitFor(() => document.body.innerText.includes('1 bills') && document.body.innerText.includes('2001-02'), 'HMS monthly totals');
+    click('Advanced Generator');
+    await waitFor(() => document.body.innerText.includes('report-feb') && !document.body.innerText.includes('report-jan'), 'HMS advanced monthly report');
+    const after = (await getDocsFromServer(collection(db, 'sales'))).docs.map(record => ({ id: record.id, data: record.data() }));
+    if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('Report filters changed sale documents');
+    return { purchaseBreakdowns: 3, pakistanMonthBoundary: true, exportRange: '2001-02-01 to 2001-02-28', posAndHmsAnalytics: true, recordsUnchanged: true };
+  },
   async primary() {
     await ready();
     await checkout(1, 5);
