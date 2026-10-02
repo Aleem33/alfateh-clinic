@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
-import { format, subDays, subMonths, startOfMonth, endOfMonth, differenceInDays, parseISO } from 'date-fns';
+import { format, subDays, subMonths, differenceInDays, parseISO } from 'date-fns';
 import { Download, TrendingUp, AlertCircle, DollarSign, Activity, FileText, Search, CalendarDays } from 'lucide-react';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
@@ -10,6 +10,8 @@ import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../../pos/lib/salesFinancials';
 import { getBonusAwareStockValue } from '../../pos/lib/bonusInventory';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { MonthSelector } from '../../components/MonthSelector';
+import { historyDateKey, matchesMonth, monthDateRange } from '../../lib/monthFilter';
 
 function exportCSV(filename: string, rows: any[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','));
@@ -42,15 +44,16 @@ type AdvancedReportType = 'billing' | 'pos' | 'consultations' | 'patients' | 'la
 export function Reports() {
   const todayKey = useClinicTodayKey();
   const [tab, setTab] = useState<Tab>('overview');
-  const [bills, setBills] = useState<any[]>([]);
-  const [patients, setPatients] = useState<any[]>([]);
-  const [consultations, setConsultations] = useState<any[]>([]);
-  const [admissions, setAdmissions] = useState<any[]>([]);
-  const [labOrders, setLabOrders] = useState<any[]>([]);
-  const [expenses, setExpenses] = useState<any[]>([]);
+  const [allBills, setBills] = useState<any[]>([]);
+  const [allPatients, setPatients] = useState<any[]>([]);
+  const [allConsultations, setConsultations] = useState<any[]>([]);
+  const [allAdmissions, setAdmissions] = useState<any[]>([]);
+  const [allLabOrders, setLabOrders] = useState<any[]>([]);
+  const [allExpenses, setExpenses] = useState<any[]>([]);
   const [medicines, setMedicines] = useState<any[]>([]);
-  const [posSales, setPosSales] = useState<any[]>([]);
-  const [posReturns, setPosReturns] = useState<any[]>([]);
+  const [allPosSales, setPosSales] = useState<any[]>([]);
+  const [allPosReturns, setPosReturns] = useState<any[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState('');
   const [period, setPeriod] = useState<'7d' | '30d' | '3m'>('30d');
   const [outstandingSearch, setOutstandingSearch] = useState('');
   const [advancedType, setAdvancedType] = useState<AdvancedReportType>('billing');
@@ -74,6 +77,15 @@ export function Reports() {
   }, []);
 
   // ── Computed values ──────────────────────────────────────────────────────────
+  const bills = allBills.filter(record => matchesMonth(record, selectedMonth));
+  const patients = allPatients.filter(record => matchesMonth(record, selectedMonth));
+  const consultations = allConsultations.filter(record => matchesMonth(record, selectedMonth));
+  const admissions = allAdmissions.filter(record => matchesMonth({ ...record, date: record.admissionDate || record.date }, selectedMonth));
+  const labOrders = allLabOrders.filter(record => matchesMonth(record, selectedMonth));
+  const expenses = allExpenses.filter(record => matchesMonth(record, selectedMonth));
+  const posSales = allPosSales.filter(record => matchesMonth(record, selectedMonth));
+  const posReturns = allPosReturns.filter(record => matchesMonth(record, selectedMonth));
+  const selectedRange = monthDateRange(selectedMonth);
   const activeBills = bills.filter(bill => bill.paymentStatus !== 'cancelled' && bill.paymentStatus !== 'no-show');
   const posFinancials = summarizeSalesFinancials(posSales, posReturns);
   const totalOpdRevenue  = sumFinancialValues(activeBills, bill => bill.total);
@@ -88,27 +100,27 @@ export function Reports() {
   const completedLab     = labOrders.filter(l => l.status === 'completed').length;
 
   // Revenue chart (days)
-  const days = period === '7d' ? 7 : period === '30d' ? 30 : 90;
+  const days = selectedRange ? Number(selectedRange.end.slice(-2)) : period === '7d' ? 7 : period === '30d' ? 30 : 90;
   const dailyPosRevenue = netSalesByDate(posSales, posReturns, recordClinicDateKey);
   const revenueChart = Array.from({ length: days }).map((_, i) => {
-    const d = subDays(parseISO(todayKey), (days - 1) - i);
-    const dateStr = clinicDateKey(d);
-    const opd     = sumFinancialValues(activeBills.filter(b => clinicDateKey(b.date) === dateStr), bill => bill.total);
+    const dateStr = selectedRange ? `${selectedMonth}-${String(i + 1).padStart(2, '0')}` : clinicDateKey(subDays(parseISO(todayKey), (days - 1) - i));
+    const d = parseISO(dateStr);
+    const opd     = sumFinancialValues(activeBills.filter(b => historyDateKey(b) === dateStr), bill => bill.total);
     const pos     = dailyPosRevenue.get(dateStr) || 0;
-    const exp     = sumFinancialValues(expenses.filter(e => clinicDateKey(e.date) === dateStr), expense => expense.amount);
+    const exp     = sumFinancialValues(expenses.filter(e => historyDateKey(e) === dateStr), expense => expense.amount);
     return { date: format(d, 'MMM dd'), opd, pos, total: opd + pos, expenses: exp };
   });
 
   // Monthly P&L (last 6 months)
-  const monthlyPL = Array.from({ length: 6 }).map((_, i) => {
-    const d     = subMonths(parseISO(todayKey), 5 - i);
-    const start = clinicDateKey(startOfMonth(d));
-    const end   = clinicDateKey(endOfMonth(d));
-    const opd   = sumFinancialValues(activeBills.filter(b => { const key = clinicDateKey(b.date); return key >= start && key <= end; }), bill => bill.total);
+  const monthlyPL = Array.from({ length: selectedRange ? 1 : 6 }).map((_, i) => {
+    const d     = selectedRange ? parseISO(selectedRange.start) : subMonths(parseISO(todayKey), 5 - i);
+    const range = selectedRange || monthDateRange(format(d, 'yyyy-MM'))!;
+    const { start, end } = range;
+    const opd   = sumFinancialValues(activeBills.filter(b => { const key = historyDateKey(b); return key >= start && key <= end; }), bill => bill.total);
     const monthSales = posSales.filter(p => { const key = recordClinicDateKey(p); return key >= start && key <= end; });
     const monthReturns = posReturns.filter(entry => { const key = recordClinicDateKey(entry); return key >= start && key <= end; });
     const monthPos = summarizeSalesFinancials(monthSales, monthReturns);
-    const exp   = sumFinancialValues(expenses.filter(e => { const key = clinicDateKey(e.date); return key >= start && key <= end; }), expense => expense.amount);
+    const exp   = sumFinancialValues(expenses.filter(e => { const key = historyDateKey(e); return key >= start && key <= end; }), expense => expense.amount);
     const revenue = opd + monthPos.netRevenue;
     return { month: format(d, 'MMM yy'), revenue, cost: monthPos.netCost, expenses: exp, profit: revenue - monthPos.netCost - exp };
   });
@@ -156,7 +168,7 @@ export function Reports() {
     billing: {
       label: 'Clinic Billing',
       headers: ['Bill No', 'Patient', 'MRN', 'Date', 'Total', 'Paid', 'Balance', 'Status'],
-      rows: bills.map(b => [b.billNo || b.id, b.patientName, b.patientMRN, b.date?.split('T')[0], b.total || 0, b.paid || 0, b.balance || 0, b.paymentStatus || '']),
+      rows: bills.map(b => [b.billNo || b.id, b.patientName, b.patientMRN, historyDateKey(b), b.total || 0, b.paid || 0, b.balance || 0, b.paymentStatus || '']),
       dateIndex: 3,
       moneyIndexes: [4, 5, 6],
     },
@@ -170,26 +182,26 @@ export function Reports() {
     consultations: {
       label: 'OPD Consultations',
       headers: ['Patient', 'MRN', 'Doctor', 'Department', 'Date', 'Diagnosis', 'Fee', 'Medicines', 'Lab Tests'],
-      rows: consultations.map(c => [c.patientName, c.patientMRN, c.doctorName, c.department, c.date || c.createdAt?.split('T')[0], c.diagnosis || '', c.fee || 0, c.prescriptions?.length || 0, c.labOrders?.length || 0]),
+      rows: consultations.map(c => [c.patientName, c.patientMRN, c.doctorName, c.department, historyDateKey(c), c.diagnosis || '', c.fee || 0, c.prescriptions?.length || 0, c.labOrders?.length || 0]),
       dateIndex: 4,
       moneyIndexes: [6],
     },
     patients: {
       label: 'Patient Registry',
       headers: ['MRN', 'Name', 'Age', 'Gender', 'Phone', 'Blood Group', 'Registered'],
-      rows: patients.map(p => [p.mrn, p.name, p.age, p.gender, p.phone, p.bloodGroup, p.createdAt?.split('T')[0]]),
+      rows: patients.map(p => [p.mrn, p.name, p.age, p.gender, p.phone, p.bloodGroup, historyDateKey(p)]),
       dateIndex: 6,
     },
     lab: {
       label: 'Laboratory Orders',
       headers: ['Patient', 'MRN', 'Doctor', 'Date', 'Tests', 'Status', 'Result Date', 'PDF'],
-      rows: labOrders.map(l => [l.patientName, l.patientMRN, l.doctorName, l.date || l.createdAt?.split('T')[0], (l.tests || []).map((t: any) => t.testName || t.name).join(', '), l.status, l.resultDate || l.completedAt?.split('T')[0] || '', l.reportPdf?.url ? 'Uploaded' : l.reportPdf?.pendingUpload ? 'Pending upload' : '']),
+      rows: labOrders.map(l => [l.patientName, l.patientMRN, l.doctorName, historyDateKey(l), (l.tests || []).map((t: any) => t.testName || t.name).join(', '), l.status, clinicDateKey(l.resultDate || l.completedAt) || '', l.reportPdf?.url ? 'Uploaded' : l.reportPdf?.pendingUpload ? 'Pending upload' : '']),
       dateIndex: 3,
     },
     expenses: {
       label: 'Expenses',
       headers: ['Date', 'Category', 'Description', 'Amount', 'Created By'],
-      rows: expenses.map(e => [e.date?.split('T')[0], e.category, e.description || e.title || '', Number(e.amount) || 0, e.createdBy || '']),
+      rows: expenses.map(e => [historyDateKey(e), e.category, e.description || e.title || '', Number(e.amount) || 0, e.createdBy || '']),
       dateIndex: 0,
       moneyIndexes: [3],
     },
@@ -220,7 +232,9 @@ export function Reports() {
   const activeReport = reportConfigs[advancedType];
   const advancedRows = activeReport.rows.filter(row => {
     const rowDate = activeReport.dateIndex !== undefined ? String(row[activeReport.dateIndex] || '').slice(0, 10) : '';
-    const inRange = !rowDate || ((!advancedFrom || rowDate >= advancedFrom) && (!advancedTo || rowDate <= advancedTo));
+    const from = selectedRange?.start || advancedFrom;
+    const to = selectedRange?.end || advancedTo;
+    const inRange = rowDate ? ((!from || rowDate >= from) && (!to || rowDate <= to)) : !from && !to;
     const haystack = row.map(v => String(v ?? '').toLowerCase()).join(' ');
     return inRange && (!advancedSearch || haystack.includes(advancedSearch.toLowerCase()));
   });
@@ -230,7 +244,7 @@ export function Reports() {
   }));
 
   const exportAdvancedReport = () => {
-    exportCSV(`${advancedType}-report-${todayKey}.csv`, advancedRows, activeReport.headers);
+    exportCSV(`${advancedType}-report-${selectedMonth || todayKey}.csv`, advancedRows, activeReport.headers);
   };
 
   return (
@@ -242,21 +256,21 @@ export function Reports() {
           <p className="text-sm text-gray-500">{bills.length} bills · {patients.length} patients · {completedLab} lab tests</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => exportCSV(`bills-${todayKey}.csv`,
-            bills.map(b => [b.billNo, b.patientName, b.patientMRN, b.date?.split('T')[0], b.total, b.paid, b.balance, b.paymentStatus]),
+          <button onClick={() => exportCSV(`bills-${selectedMonth || todayKey}.csv`,
+            bills.map(b => [b.billNo, b.patientName, b.patientMRN, historyDateKey(b), b.total, b.paid, b.balance, b.paymentStatus]),
             ['Bill No','Patient','MRN','Date','Total','Paid','Balance','Status'])}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 bg-white rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             <Download className="w-4 h-4" /> Bills
           </button>
-          <button onClick={() => exportCSV(`patients-${todayKey}.csv`,
-            patients.map(p => [p.mrn, p.name, p.age, p.gender, p.phone, p.address, p.bloodGroup, p.createdAt?.split('T')[0]]),
+          <button onClick={() => exportCSV(`patients-${selectedMonth || todayKey}.csv`,
+            patients.map(p => [p.mrn, p.name, p.age, p.gender, p.phone, p.address, p.bloodGroup, historyDateKey(p)]),
             ['MRN','Name','Age','Gender','Phone','Address','Blood Group','Registered'])}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 bg-white rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             <Download className="w-4 h-4" /> Patients
           </button>
           <div className="flex bg-white border border-gray-200 rounded-lg p-1 gap-1">
             {(['7d','30d','3m'] as const).map(p => (
-              <button key={p} onClick={() => setPeriod(p)}
+              <button key={p} onClick={() => { setSelectedMonth(''); setPeriod(p); }}
                 className={`px-3 py-1.5 rounded-md text-xs font-medium ${period === p ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-700'}`}>
                 {p === '7d' ? '7 Days' : p === '30d' ? '30 Days' : '3 Months'}
               </button>
@@ -265,6 +279,8 @@ export function Reports() {
         </div>
       </div>
 
+      <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
+      <p className="text-xs text-gray-500">{selectedMonth ? `History, totals and exports for ${selectedMonth}.` : 'Totals include all dates; the day buttons control the revenue chart.'} Inventory and expiry tracking show current stock.</p>
       {/* Tab bar */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
         {tabs.map(t => (
@@ -286,7 +302,7 @@ export function Reports() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-            <h2 className="font-semibold text-gray-900 mb-4">OPD + POS Revenue ({period})</h2>
+            <h2 className="font-semibold text-gray-900 mb-4">OPD + POS Revenue ({selectedMonth || period})</h2>
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={revenueChart}>
@@ -390,7 +406,7 @@ export function Reports() {
               <label className="block text-xs font-medium text-gray-600 mb-1">From</label>
               <div className="relative">
                 <CalendarDays className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="date" value={advancedFrom} onChange={e => setAdvancedFrom(e.target.value)}
+                <input type="date" value={selectedRange?.start || advancedFrom} onChange={e => { setAdvancedFrom(e.target.value); if (selectedRange) setAdvancedTo(selectedRange.end); setSelectedMonth(''); }}
                   className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </div>
@@ -398,7 +414,7 @@ export function Reports() {
               <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
               <div className="relative">
                 <CalendarDays className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="date" value={advancedTo} onChange={e => setAdvancedTo(e.target.value)}
+                <input type="date" value={selectedRange?.end || advancedTo} onChange={e => { setAdvancedTo(e.target.value); if (selectedRange) setAdvancedFrom(selectedRange.start); setSelectedMonth(''); }}
                   className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </div>
@@ -470,8 +486,8 @@ export function Reports() {
 
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-900">Monthly P&L (Last 6 Months)</h2>
-            <button onClick={() => exportCSV(`pl-${todayKey}.csv`,
+            <h2 className="font-semibold text-gray-900">{selectedMonth ? `Monthly P&L (${selectedMonth})` : 'Monthly P&L (Last 6 Months)'}</h2>
+            <button onClick={() => exportCSV(`pl-${selectedMonth || todayKey}.csv`,
               monthlyPL.map(m => [m.month, m.revenue, m.cost, m.expenses, m.profit]),
               ['Month','Revenue','Pharmacy COGS','Expenses','Net Profit'])}
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">
@@ -531,8 +547,8 @@ export function Reports() {
             <input value={outstandingSearch} onChange={e => setOutstandingSearch(e.target.value)}
               placeholder="Search patient name or MRN..."
               className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <button onClick={() => exportCSV(`outstanding-${todayKey}.csv`,
-              outstanding.map(b => [b.billNo, b.patientName, b.patientMRN, b.date?.split('T')[0], b.total, b.paid, b.balance, b.paymentStatus]),
+            <button onClick={() => exportCSV(`outstanding-${selectedMonth || todayKey}.csv`,
+              outstanding.map(b => [b.billNo, b.patientName, b.patientMRN, historyDateKey(b), b.total, b.paid, b.balance, b.paymentStatus]),
               ['Bill No','Patient','MRN','Date','Total','Paid','Balance','Status'])}
               className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 whitespace-nowrap">
               <Download className="w-4 h-4" /> Export
@@ -555,7 +571,7 @@ export function Reports() {
                   <td className="px-4 py-3 font-mono text-xs text-gray-500">{b.billNo || '—'}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{b.patientName}</td>
                   <td className="px-4 py-3 text-xs text-gray-500 font-mono">{b.patientMRN}</td>
-                  <td className="px-4 py-3 text-xs text-gray-500">{b.date?.split('T')[0] || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{historyDateKey(b) || '—'}</td>
                   <td className="px-4 py-3 text-gray-700">{formatCurrency(b.total || 0)}</td>
                   <td className="px-4 py-3 text-green-600">{formatCurrency(b.paid || 0)}</td>
                   <td className="px-4 py-3 font-semibold text-red-600">{formatCurrency(b.balance || 0)}</td>

@@ -15,6 +15,8 @@ import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { isExpenseInScope } from '../../lib/expenseScope';
 import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../lib/salesFinancials';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { MonthSelector } from '../../components/MonthSelector';
+import { monthDateRange } from '../../lib/monthFilter';
 
 type PeriodFilter = 'daily' | 'weekly' | 'monthly' | 'custom' | 'all';
 
@@ -26,6 +28,7 @@ export function Reports() {
   const [returns, setReturns]     = useState<any[]>([]);
 
   const [period, setPeriod]     = useState<PeriodFilter>('all');
+  const [selectedMonth, setSelectedMonth] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [showCustom, setShowCustom] = useState(false);
@@ -39,6 +42,8 @@ export function Reports() {
   }, []);
 
   const getDateRange = (): { start: string; end: string } | null => {
+    const monthRange = monthDateRange(selectedMonth);
+    if (monthRange) return monthRange;
     const now = parseISO(todayKey);
     if (period === 'daily')   return { start: todayKey, end: todayKey };
     if (period === 'weekly')  return { start: clinicDateKey(startOfWeek(now, { weekStartsOn: 1 })), end: clinicDateKey(endOfWeek(now, { weekStartsOn: 1 })) };
@@ -97,6 +102,7 @@ export function Reports() {
   };
 
   const setPeriodAndClose = (p: PeriodFilter) => {
+    setSelectedMonth('');
     setPeriod(p);
     if (p !== 'custom') { setDateFrom(''); setDateTo(''); setShowCustom(false); }
     else setShowCustom(true);
@@ -125,6 +131,7 @@ export function Reports() {
           ))}
         </div>
 
+        <MonthSelector value={selectedMonth} onChange={month => { setSelectedMonth(month); setPeriod('all'); setDateFrom(''); setDateTo(''); }} />
         {/* Custom date range */}
         {period === 'custom' && (
           <div className="flex items-center gap-2 flex-wrap">
@@ -145,7 +152,7 @@ export function Reports() {
         {/* Active period badge */}
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-medium">
-            {periodLabels[period]}
+            {selectedMonth || periodLabels[period]}
             {period === 'custom' && dateFrom && dateTo
               ? `: ${format(parseISO(dateFrom), 'MMM dd')} – ${format(parseISO(dateTo), 'MMM dd, yyyy')}`
               : ''}

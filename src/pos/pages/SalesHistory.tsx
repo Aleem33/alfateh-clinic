@@ -18,6 +18,8 @@ import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { summarizeSalesFinancials } from '../lib/salesFinancials';
 import { trustedNowISO } from '../../lib/trustedClock';
 import { saleBreakdownLines, summarizeSalesByMedicine, summarizeSalesBySupplier } from '../lib/salesBreakdown';
+import { MonthSelector } from '../../components/MonthSelector';
+import { monthDateRange } from '../../lib/monthFilter';
 
 type ExportType = 'all' | 'customer' | 'hospital';
 type ExportReport = 'all' | 'medicine' | 'supplier';
@@ -476,7 +478,7 @@ export function SalesHistory() {
                 <Truck className="w-4 h-4" /> Suppliers
               </button>
             </div>
-            <button onClick={() => setShowExportModal(true)}
+            <button onClick={() => { setExportDateFrom(dateFrom); setExportDateTo(dateTo); setExportType(typeFilter); setShowExportModal(true); }}
               className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">
               <Download className="w-4 h-4" /> <span className="hidden sm:inline">Export</span>
             </button>
@@ -527,6 +529,10 @@ export function SalesHistory() {
               )}
             </div>
 
+            <div className="px-4 pb-3">
+              <MonthSelector value={monthDateRange(dateFrom.slice(0, 7))?.start === dateFrom && monthDateRange(dateFrom.slice(0, 7))?.end === dateTo ? dateFrom.slice(0, 7) : ''}
+                onChange={month => { const range = monthDateRange(month); setDateFrom(range?.start || ''); setDateTo(range?.end || ''); }} />
+            </div>
             {/* Expanded filters */}
             {showFilters && (
               <div className="space-y-3 pt-1">
@@ -960,6 +966,8 @@ export function SalesHistory() {
                     <div><label className="block text-xs text-gray-500 mb-1">To</label>
                       <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
                   </div>
+                  <MonthSelector value={monthDateRange(exportDateFrom.slice(0, 7))?.start === exportDateFrom && monthDateRange(exportDateFrom.slice(0, 7))?.end === exportDateTo ? exportDateFrom.slice(0, 7) : ''}
+                      onChange={month => { const range = monthDateRange(month); setExportDateFrom(range?.start || ''); setExportDateTo(range?.end || ''); }} />
                   {(exportDateFrom || exportDateTo) && (
                     <button onClick={() => { setExportDateFrom(''); setExportDateTo(''); }} className="mt-2 text-xs text-red-500 hover:underline flex items-center gap-1">
                       <X className="w-3 h-3" /> Clear dates
