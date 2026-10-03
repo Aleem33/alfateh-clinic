@@ -27,7 +27,7 @@ beforeEach(() => {
   mocks.lan = { online: true };
   mocks.status = { active: true, mode: 'legacy', readyCollections: 33, serverConfirmedCollections: 10,
     totalCollections: 33, fromCacheCollections: 0, pendingCollections: [], incompleteCollections: [],
-    unreconciledCollections: [], lastError: '' };
+    unreconciledCollections: [], mirrorError: '', registrationError: '', lastError: '' };
 });
 
 const render = () => renderToStaticMarkup(<InitialSyncGate onLogout={() => undefined}><div>Operational inventory</div></InitialSyncGate>);
