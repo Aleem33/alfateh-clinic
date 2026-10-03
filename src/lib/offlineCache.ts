@@ -52,6 +52,10 @@ export type OfflineCacheStatus = {
   pendingCollections: string[];
   incompleteCollections: string[];
   unreconciledCollections: string[];
+  /** A real mirror/listener or rejected-write problem affecting application data. */
+  mirrorError: string;
+  /** A retryable device heartbeat problem; it never means records are missing. */
+  registrationError: string;
   lastError: string;
 };
 
@@ -96,6 +100,8 @@ function snapshot(): OfflineCacheStatus {
     pendingCollections: [...new Set([...pending, ...rejected])],
     incompleteCollections: activeCollections.filter(name => !ready.has(name)),
     unreconciledCollections: activeCollections.filter(name => !serverReconciled.has(name)),
+    mirrorError: lastError,
+    registrationError,
     lastError: lastError || registrationError,
   };
 }
@@ -133,6 +139,19 @@ function notify() {
         if (run === lifecycle && auth.currentUser?.uid === uid) notify();
       }, REGISTRATION_RETRY_DELAY);
     });
+  }
+}
+
+function clearRecoveredTransientSyncError() {
+  // Firestore listeners reconnect themselves after a temporary transport
+  // failure. Do not leave the application red forever once every permitted
+  // collection has subsequently been persisted from an authoritative server
+  // snapshot. Permission and rejected-write messages intentionally remain: a
+  // successful snapshot of another collection must never hide those.
+  if (serverReconciled.size < activeCollections.length) return;
+  if (lastError === 'Could not synchronize offline data.'
+    || /^(Could not synchronize offline data(?::|\.)?|Incremental sync .* needs retry: ).*(unavailable|network|connection|timeout|deadline|offline|transport)/i.test(lastError)) {
+    lastError = '';
   }
 }
 
@@ -518,6 +537,7 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
         if (run !== lifecycle) return;
         if (hasPendingWrites) serverReconciled.delete(collectionName);
         else serverReconciled.add(collectionName);
+        clearRecoveredTransientSyncError();
         ready.add(collectionName);
         notify();
       }).catch(handleError);
@@ -804,6 +824,7 @@ async function startIncrementalListener(collectionName: string, control: SyncCon
         if (caughtUp) {
           ready.add(collectionName);
           serverReconciled.add(collectionName);
+          clearRecoveredTransientSyncError();
         } else if (!result.metadata.fromCache) {
           serverReconciled.delete(collectionName);
         }
@@ -953,6 +974,19 @@ export function subscribeOfflineCache(listener: (status: OfflineCacheStatus) => 
 
 export function getOfflineCacheStatus() {
   return snapshot();
+}
+
+/**
+ * Re-attempt the small per-device heartbeat after a role change, rules update,
+ * or temporary connection failure. It never clears the local mirror or any
+ * durable business-data outbox.
+ */
+export function retryOfflineCacheRegistration() {
+  if (!activeRole || !auth.currentUser) return;
+  clearRegistrationRetry();
+  registrationError = '';
+  registeredReadyState = null;
+  notify();
 }
 
 export async function markDatasetGeneration(generation: number) {

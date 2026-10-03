@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, CloudOff, RefreshCw, Wifi, X } from 'lucid
 import { runOfflineSyncNow, subscribeSyncStatus, type SyncSnapshot } from '../lib/offlineSync';
 import { getLanStatus, subscribeLanStatus } from '../lib/lanCoordinator';
 import type { LanStatus } from '../types/electron';
-import { subscribeOfflineCache, type OfflineCacheStatus } from '../lib/offlineCache';
+import { retryOfflineCacheRegistration, subscribeOfflineCache, type OfflineCacheStatus } from '../lib/offlineCache';
 import {
   getFirestoreReadDiagnostics,
   resetFirestoreReadDiagnostics,
@@ -46,6 +46,8 @@ const initialCacheStatus: OfflineCacheStatus = {
   pendingCollections: [],
   incompleteCollections: [],
   unreconciledCollections: [],
+  mirrorError: '',
+  registrationError: '',
   lastError: '',
 };
 
@@ -83,8 +85,10 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
 
   const hasStockIssue = status.issueCount > 0;
   const hasUploadIssue = Boolean(status.lastError);
-  const hasDataSyncIssue = Boolean(cache.lastError);
-  const hasIssue = hasStockIssue || hasUploadIssue || hasDataSyncIssue;
+  const hasDataSyncIssue = Boolean(cache.mirrorError);
+  const hasRegistrationIssue = Boolean(cache.registrationError);
+  const hasCriticalIssue = hasStockIssue || hasUploadIssue || hasDataSyncIssue;
+  const hasIssue = hasCriticalIssue || hasRegistrationIssue;
   const lanSyncBarrier = lan.role === 'syncing-primary' || lan.role === 'sync-wait';
   const label = lan.role === 'syncing-primary'
     ? 'Uploading offline entries'
@@ -108,6 +112,8 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
           ? 'Upload issue'
           : hasDataSyncIssue
             ? 'Data sync issue'
+            : hasRegistrationIssue
+              ? 'Device sync retry'
         : status.pendingCount > 0
           ? 'Pending changes'
           : 'Online';
@@ -117,8 +123,10 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
     ? 'bg-amber-50 text-amber-700 border-amber-200'
     : !status.online
     ? 'bg-amber-50 text-amber-700 border-amber-200'
-    : hasIssue
+    : hasCriticalIssue
       ? 'bg-red-50 text-red-700 border-red-200'
+      : hasRegistrationIssue
+        ? 'bg-amber-50 text-amber-700 border-amber-200'
       : status.pendingCount > 0 || status.syncing || lanSyncBarrier
         ? 'bg-blue-50 text-blue-700 border-blue-200'
         : 'bg-green-50 text-green-700 border-green-200';
@@ -181,12 +189,29 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
                 )}
               </div>
             )}
-            {cache.lastError && (
+            {cache.mirrorError && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg p-2.5">
-                <p>{cache.lastError}</p>
+                <p>{cache.mirrorError}</p>
                 {cache.pendingCollections.length > 0 && (
                   <p className="mt-1 font-medium">Affected data: {cache.pendingCollections.join(', ')}</p>
                 )}
+                {status.online && <button type="button" onClick={() => {
+                  retryOfflineCacheRegistration();
+                  void runOfflineSyncNow();
+                }} className="mt-2 rounded-md border border-red-200 bg-white px-3 py-1.5 font-medium text-red-700">
+                  Retry data synchronization
+                </button>}
+              </div>
+            )}
+            {cache.registrationError && (
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+                <p className="font-semibold">Device sync registration needs retry</p>
+                <p className="mt-1">{cache.registrationError}</p>
+                <p className="mt-1">No clinical, billing, or stock data is missing because of this device heartbeat warning.</p>
+                {status.online && <button type="button" onClick={() => retryOfflineCacheRegistration()}
+                  className="mt-2 rounded-md border border-amber-200 bg-white px-3 py-1.5 font-medium text-amber-800">
+                  Retry device registration
+                </button>}
               </div>
             )}
             {status.lastError && (

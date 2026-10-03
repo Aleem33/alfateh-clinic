@@ -104,11 +104,36 @@ describe('incremental mirror bootstrap', () => {
     startFullOfflineCache('admin');
     __offlineCacheInternals.notify();
     await vi.advanceTimersByTimeAsync(0);
-    expect(getOfflineCacheStatus().lastError).toContain('Device sync registration failed');
+    expect(getOfflineCacheStatus().registrationError).toContain('Device sync registration failed');
+    expect(getOfflineCacheStatus().mirrorError).toBe('');
 
     await vi.advanceTimersByTimeAsync(30_000);
     expect(syncProtocol.registerSyncClient).toHaveBeenCalledTimes(2);
+    expect(getOfflineCacheStatus().registrationError).toBe('');
+  });
+
+  it('clears a recovered temporary listener error only after every active collection is server-confirmed', async () => {
+    __offlineCacheInternals.startLegacyListener('sales', control);
+    const [,, onData, onError] = (firestore.onSnapshot.mock.calls as any).at(-1);
+    onError(new Error('Could not synchronize offline data: network unavailable'));
+    expect(getOfflineCacheStatus().lastError).toContain('network unavailable');
+
+    const serverRecord = document('sale-server', { total: 20 });
+    onData({ ...result([serverRecord]), metadata: { fromCache: false },
+      docChanges: () => [{ type: 'added', doc: serverRecord }] });
+    await __offlineCacheInternals.waitForPersistence('sales');
     expect(getOfflineCacheStatus().lastError).toBe('');
+  });
+
+  it('does not clear a permission error merely because a later collection snapshot succeeds', async () => {
+    __offlineCacheInternals.startLegacyListener('sales', control);
+    const [,, onData, onError] = (firestore.onSnapshot.mock.calls as any).at(-1);
+    onError(new Error('Missing or insufficient permissions.'));
+    const serverRecord = document('sale-server', { total: 20 });
+    onData({ ...result([serverRecord]), metadata: { fromCache: false },
+      docChanges: () => [{ type: 'added', doc: serverRecord }] });
+    await __offlineCacheInternals.waitForPersistence('sales');
+    expect(getOfflineCacheStatus().lastError).toContain('Missing or insufficient permissions');
   });
 
   it('marks a collection cloud-confirmed only after its authoritative snapshot is persisted', async () => {
