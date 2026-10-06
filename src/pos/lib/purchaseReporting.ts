@@ -11,7 +11,8 @@ export function purchaseReportLine(record: Record<string, any>) {
   const paid = number(record.paidUnits ?? Math.max(0, total - bonus));
   return {
     id: String(record.id), date: historyDateKey(record),
-    invoice: String(record.invoiceId || record.id),
+    invoiceKey: String(record.invoiceId || record.id),
+    invoice: String(record.invoiceNo || record.supplierInvoiceNo || record.invoiceId || record.id),
     medicine: String(record.medicineName || 'Unknown medicine'),
     supplier: String(record.supplierName || 'Unknown supplier'),
     supplierKey: String(record.supplierId || record.supplierName || 'unknown'),
@@ -26,7 +27,7 @@ export type PurchaseReportLine = ReturnType<typeof purchaseReportLine>;
 export function summarizePurchases(lines: PurchaseReportLine[], by: 'medicine' | 'supplier' | 'invoice') {
   const groups = new Map<string, { key: string; label: string; detail: string; lines: number; paid: number; bonus: number; total: number; payable: number }>();
   for (const line of lines) {
-    const key = by === 'medicine' ? line.medicineKey : by === 'supplier' ? line.supplierKey : line.invoice;
+    const key = by === 'medicine' ? line.medicineKey : by === 'supplier' ? line.supplierKey : line.invoiceKey;
     const current = groups.get(key) || {
       key, label: by === 'medicine' ? line.medicine : by === 'supplier' ? line.supplier : line.invoice,
       detail: by === 'medicine' ? `${line.supplier} · Batch ${line.batch}` : by === 'invoice' ? line.date : '',
@@ -37,4 +38,59 @@ export function summarizePurchases(lines: PurchaseReportLine[], by: 'medicine' |
     groups.set(key, current);
   }
   return [...groups.values()].sort((a, b) => b.payable - a.payable || a.label.localeCompare(b.label));
+}
+
+export type PurchaseInvoiceSummary = {
+  key: string;
+  invoiceNumber: string;
+  internalInvoiceId: string;
+  date: string;
+  supplier: string;
+  supplierKey: string;
+  lineCount: number;
+  paidUnits: number;
+  bonusUnits: number;
+  receivedUnits: number;
+  payable: number;
+  records: Record<string, any>[];
+};
+
+export function groupPurchaseInvoices(records: Record<string, any>[]): PurchaseInvoiceSummary[] {
+  const groups = new Map<string, PurchaseInvoiceSummary>();
+  for (const record of records) {
+    const line = purchaseReportLine(record);
+    const current = groups.get(line.invoiceKey) || {
+      key: line.invoiceKey,
+      invoiceNumber: line.invoice,
+      internalInvoiceId: line.invoiceKey,
+      date: line.date,
+      supplier: line.supplier,
+      supplierKey: line.supplierKey,
+      lineCount: 0,
+      paidUnits: 0,
+      bonusUnits: 0,
+      receivedUnits: 0,
+      payable: 0,
+      records: [],
+    };
+    current.lineCount += 1;
+    current.paidUnits += line.paid;
+    current.bonusUnits += line.bonus;
+    current.receivedUnits += line.total;
+    current.payable += line.payable;
+    current.records.push(record);
+    // Prefer a user-entered supplier bill number if a legacy line in the same
+    // invoice did not have it yet.
+    if (record.invoiceNo || record.supplierInvoiceNo) current.invoiceNumber = line.invoice;
+    if (line.date > current.date) current.date = line.date;
+    groups.set(line.invoiceKey, current);
+  }
+  return [...groups.values()].map(group => ({
+    ...group,
+    records: [...group.records].sort((left, right) => (
+      Number(left.invoiceLineNumber || 0) - Number(right.invoiceLineNumber || 0)
+      || String(left.medicineName || '').localeCompare(String(right.medicineName || ''))
+    )),
+  })).sort((left, right) => right.date.localeCompare(left.date)
+    || right.internalInvoiceId.localeCompare(left.internalInvoiceId));
 }

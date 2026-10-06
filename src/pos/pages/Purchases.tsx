@@ -14,14 +14,15 @@ import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 import { MonthSelector } from '../../components/MonthSelector';
 import { historyDateKey, matchesMonth } from '../../lib/monthFilter';
 import { PurchaseReports } from '../components/PurchaseReports';
-import { purchaseReportLine } from '../lib/purchaseReporting';
+import { PurchaseInvoiceHistory } from '../components/PurchaseInvoiceHistory';
+import { groupPurchaseInvoices, purchaseReportLine } from '../lib/purchaseReporting';
 
 const today = () => clinicDateKey(trustedNow());
 const emptyPurchaseForm = () => ({
   supplierId: '', boxesPurchased: '', looseUnitsPurchased: '0',
   bonusBoxes: '0', bonusLooseUnits: '0',
   unitsPerBox: '1', costPrice: '', retailPrice: '', unitPrice: '',
-  batchNo: '', expiryDate: '', date: today(), notes: '',
+  batchNo: '', expiryDate: '', date: today(), invoiceNo: '', notes: '',
 });
 
 
@@ -60,11 +61,20 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   }, []);
 
   const purchaseOptions = purchases.map(purchaseReportLine);
-  const filteredPurchases = purchases.filter(p => matchesMonth(p, month)
+  const scopedPurchases = purchases.filter(p => matchesMonth(p, month)
     && (!supplierFilter || purchaseReportLine(p).supplierKey === supplierFilter)
-    && (!medicineFilter || purchaseReportLine(p).medicineKey === medicineFilter)
-    && (!search.trim() || [p.medicineName, p.batchNo, p.supplierName]
-      .some(value => String(value || '').toLowerCase().includes(search.trim().toLowerCase()))));
+    && (!medicineFilter || purchaseReportLine(p).medicineKey === medicineFilter));
+  const filteredPurchases = scopedPurchases.filter(p => !search.trim() || [
+    p.medicineName, p.batchNo, p.supplierName, p.invoiceNo, p.supplierInvoiceNo, p.invoiceId,
+  ].some(value => String(value || '').toLowerCase().includes(search.trim().toLowerCase())));
+
+  const todayPurchases = purchases.filter(purchase => historyDateKey(purchase) === today());
+  const todayInvoices = groupPurchaseInvoices(todayPurchases);
+  const todaySummary = todayPurchases.reduce((summary, purchase) => ({
+    lines: summary.lines + 1,
+    units: summary.units + Number(purchase.totalUnitsAdded ?? purchase.unitsAdded ?? 0),
+    payable: summary.payable + Number(purchase.totalCost || 0),
+  }), { lines: 0, units: 0, payable: 0 });
 
   const filteredMeds = searchMedicines(medicines, medSearch);
 
@@ -164,6 +174,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       supplierId: previous.supplierId,
       date: previous.date,
       notes: previous.notes,
+      invoiceNo: previous.invoiceNo,
     }));
   };
 
@@ -204,6 +215,14 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       }
       const timestamp = (await getTrustedClockReading()).nowIso;
       const batch = writeBatch(db);
+      const sharedInvoiceUpdate = {
+        invoiceNo: formData.invoiceNo.trim(),
+        supplierInvoiceNo: formData.invoiceNo.trim(),
+        date: formData.date || today(),
+        notes: formData.notes,
+        updatedAt: timestamp,
+        updatedBy: auth.currentUser?.uid || 'unknown',
+      };
       batch.update(doc(db, 'purchases', editingPurchase.id), {
         medicineId: editingPurchase.medicineId || line.medicineId,
         medicineName: line.medicineName,
@@ -225,12 +244,15 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         unitPrice: line.unitPrice,
         batchNo: line.batchNo,
         expiryDate: line.expiryDate,
-        notes: formData.notes,
+        ...sharedInvoiceUpdate,
         totalCost: line.totalCost,
-        date: formData.date || today(),
-        updatedAt: timestamp,
-        updatedBy: auth.currentUser?.uid || 'unknown',
       });
+      if (editingPurchase.invoiceId) {
+        purchases.filter(purchase => purchase.id !== editingPurchase.id
+          && purchase.invoiceId === editingPurchase.invoiceId).forEach(purchase => {
+          batch.update(doc(db, 'purchases', purchase.id), sharedInvoiceUpdate);
+        });
+      }
       batch.update(doc(db, 'medicines', line.medicineId), {
         stock: increment(stockDelta),
         bonusStockUnits: increment(bonusDelta),
@@ -298,6 +320,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
           batchNo: line.batchNo,
           expiryDate: line.expiryDate,
           notes: formData.notes,
+          invoiceNo: formData.invoiceNo.trim(),
+          supplierInvoiceNo: formData.invoiceNo.trim(),
           totalCost: line.totalCost,
           date: formData.date || today(),
           addedBy: auth.currentUser?.uid || 'unknown',
@@ -349,8 +373,9 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       unitPrice: String(purchase.unitPrice ?? medicine.unitPrice ?? ''),
       batchNo: purchase.batchNo || medicine.batchNo || '',
       expiryDate: purchase.expiryDate || medicine.expiryDate || '',
-      date: purchase.date || today(),
+      date: historyDateKey(purchase) || today(),
       notes: purchase.notes || '',
+      invoiceNo: purchase.invoiceNo || purchase.supplierInvoiceNo || '',
     });
     setFormError('');
     setIsModalOpen(true);
@@ -397,6 +422,17 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         </button>
       </div>
 
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          ["Today's Purchase", formatCurrency(todaySummary.payable)],
+          ["Today's Bills", todayInvoices.length],
+          ['Medicine Items', todaySummary.lines],
+          ['Units Received', todaySummary.units],
+        ].map(([label, value]) => <div key={label} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+          <p className="text-sm text-gray-500">{label}</p><p className="text-xl md:text-2xl font-bold text-gray-900 mt-1">{value}</p>
+        </div>)}
+      </div>
+
       <div className="flex items-center gap-3 flex-wrap">
         <MonthSelector value={month} onChange={setMonth} />
         <select aria-label="Purchase supplier" value={supplierFilter} onChange={event => setSupplierFilter(event.target.value)} className="border rounded-lg px-3 py-2 text-sm max-w-full">
@@ -410,12 +446,13 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         {(month || supplierFilter || medicineFilter || search) && <button type="button" onClick={() => { setMonth(''); setSupplierFilter(''); setMedicineFilter(''); setSearch(''); }} className="text-sm text-blue-600">Clear all filters</button>}
       </div>
       <PurchaseReports records={filteredPurchases} period={month} />
+      <PurchaseInvoiceHistory records={scopedPurchases} canEdit={canEdit} onEdit={openEditPurchase} />
       {/* List */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 border-b border-gray-100">
           <div className="relative">
             <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" placeholder="Search by medicine, batch, or supplier..."
+            <input type="text" placeholder="Search individual lines by medicine, batch, supplier, or bill number..."
               value={search} onChange={e => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
@@ -623,11 +660,22 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               </div>
 
               {/* Purchase Date */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
-                <input type="date" value={formData.date}
-                  onChange={e => setFormData({ ...formData, date: e.target.value })}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
+                  <input type="date" value={formData.date}
+                    onChange={e => setFormData({ ...formData, date: e.target.value })}
+                    disabled={!editingPurchase && invoiceLines.length > 0}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Bill / Invoice No.</label>
+                  <input type="text" value={formData.invoiceNo}
+                    onChange={e => setFormData({ ...formData, invoiceNo: e.target.value })}
+                    disabled={!editingPurchase && invoiceLines.length > 0}
+                    placeholder="e.g. CASE-1234"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100" />
+                </div>
               </div>
 
               {/* Quantity */}
