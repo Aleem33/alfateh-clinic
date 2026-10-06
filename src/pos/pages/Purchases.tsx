@@ -16,6 +16,7 @@ import { historyDateKey, matchesMonth } from '../../lib/monthFilter';
 import { PurchaseReports } from '../components/PurchaseReports';
 import { PurchaseInvoiceHistory } from '../components/PurchaseInvoiceHistory';
 import { groupPurchaseInvoices, purchaseReportLine } from '../lib/purchaseReporting';
+import { getNextPurchaseBillNo } from '../lib/purchaseBillNumbers';
 
 const today = () => clinicDateKey(trustedNow());
 const emptyPurchaseForm = () => ({
@@ -65,7 +66,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     && (!supplierFilter || purchaseReportLine(p).supplierKey === supplierFilter)
     && (!medicineFilter || purchaseReportLine(p).medicineKey === medicineFilter));
   const filteredPurchases = scopedPurchases.filter(p => !search.trim() || [
-    p.medicineName, p.batchNo, p.supplierName, p.invoiceNo, p.supplierInvoiceNo, p.invoiceId,
+    p.medicineName, p.batchNo, p.supplierName, p.purchaseBillNo, p.invoiceNo, p.supplierInvoiceNo, p.invoiceId,
   ].some(value => String(value || '').toLowerCase().includes(search.trim().toLowerCase())));
 
   const todayPurchases = purchases.filter(purchase => historyDateKey(purchase) === today());
@@ -276,6 +277,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     try {
       const timestamp = (await getTrustedClockReading()).nowIso;
       const invoiceId = doc(collection(db, 'purchases')).id;
+      const purchaseBillNo = getNextPurchaseBillNo();
       const batch = writeBatch(db);
 
       for (let index = 0; index < invoiceLines.length; index += 1) {
@@ -297,6 +299,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         const purchaseRef = doc(db, 'purchases', line.id);
         batch.set(purchaseRef, {
           invoiceId,
+          purchaseBillNo,
           invoiceLineNumber: index + 1,
           invoiceLineCount: invoiceLines.length,
           medicineId: batchTarget.medicineId,

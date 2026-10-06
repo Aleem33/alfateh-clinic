@@ -14,6 +14,7 @@ export function PurchaseInvoiceHistory({ records, canEdit, onEdit }: {
   const normalized = query.trim().toLowerCase();
   const visible = invoices.filter(invoice => !normalized || [
     invoice.invoiceNumber,
+    invoice.supplierInvoiceNumber,
     invoice.internalInvoiceId,
     invoice.supplier,
     invoice.date,
@@ -42,6 +43,7 @@ export function PurchaseInvoiceHistory({ records, canEdit, onEdit }: {
             <div className="min-w-0">
               <p className="font-semibold text-gray-900 truncate">Bill {invoice.invoiceNumber}</p>
               <p className="text-xs text-gray-500 truncate">{invoice.date || 'No date'} · {invoice.supplier} · {invoice.lineCount} medicine item{invoice.lineCount === 1 ? '' : 's'}</p>
+              {invoice.supplierInvoiceNumber && <p className="text-xs text-gray-400 truncate">Supplier invoice {invoice.supplierInvoiceNumber}</p>}
             </div>
           </div>
           <div className="text-right shrink-0">
@@ -58,7 +60,7 @@ export function PurchaseInvoiceHistory({ records, canEdit, onEdit }: {
         <div className="p-5 border-b flex justify-between gap-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Purchase Bill {selected.invoiceNumber}</h2>
-            <p className="text-sm text-gray-500">{selected.date || 'No date'} · {selected.supplier} · Internal reference {selected.internalInvoiceId}</p>
+            <p className="text-sm text-gray-500">{selected.date || 'No date'} · {selected.supplier}{selected.supplierInvoiceNumber ? ` · Supplier invoice ${selected.supplierInvoiceNumber}` : ''}</p>
           </div>
           <button type="button" aria-label="Close purchase bill" onClick={() => setSelected(null)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
         </div>

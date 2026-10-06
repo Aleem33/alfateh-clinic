@@ -69,7 +69,7 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
   ready,
   async verifyMonthReporting() {
     const fixtures = [
-      { id: 'report-jan', date: '2001-01-31T18:59:59Z', medicineName: 'January Report Medicine', supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-jan', totalCost: 100, paidUnits: 10, bonusUnits: 2, totalUnitsAdded: 12, invoiceId: 'report-invoice-jan', invoiceNo: 'CASE-2001' },
+      { id: 'report-jan', date: '2001-01-31T18:59:59Z', medicineName: 'January Report Medicine', supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-jan', totalCost: 100, paidUnits: 10, bonusUnits: 2, totalUnitsAdded: 12, invoiceId: 'report-invoice-jan', purchaseBillNo: 'PUR-RSMK-000001', invoiceNo: 'CASE-2001' },
       { id: 'report-feb', date: '2001-01-31T19:00:00Z', medicineName: 'February Report Medicine', supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-feb', totalCost: 200, paidUnits: 20, bonusUnits: 0, totalUnitsAdded: 20, invoiceId: 'report-invoice-feb' },
     ];
     for (const fixture of fixtures) {
@@ -84,7 +84,7 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
       id: 'report-jan-second', date: '2001-01-31T18:59:59Z', medicineName: 'Second January Medicine',
       supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-jan-second',
       totalCost: 50, paidUnits: 5, bonusUnits: 0, totalUnitsAdded: 5,
-      invoiceId: 'report-invoice-jan', invoiceNo: 'CASE-2001', invoiceLineNumber: 2,
+      invoiceId: 'report-invoice-jan', purchaseBillNo: 'PUR-RSMK-000001', invoiceNo: 'CASE-2001', invoiceLineNumber: 2,
     });
     const before = (await getDocsFromServer(collection(db, 'sales'))).docs.map(record => ({ id: record.id, data: record.data() }));
     const purchasesBeforeViewing = (await getDocsFromServer(collection(db, 'purchases'))).docs.map(record => ({ id: record.id, data: record.data() }));
@@ -106,11 +106,11 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
     await waitFor(() => document.body.innerText.includes('CASE-2001'), 'invoice report');
     const billSearch = document.querySelector('input[aria-label="Find purchase bill"]') as HTMLInputElement;
     setInputValue(billSearch, 'CASE-2001');
-    await waitFor(() => document.body.innerText.includes('Bill CASE-2001'), 'purchase bill search');
-    click('Bill CASE-2001');
+    await waitFor(() => document.body.innerText.includes('Bill PUR-RSMK-000001'), 'purchase bill search');
+    click('Bill PUR-RSMK-000001');
     await waitFor(() => document.body.innerText.includes('January Report Medicine')
       && document.body.innerText.includes('Second January Medicine')
-      && document.body.innerText.includes('Internal reference report-invoice-jan'), 'complete purchase bill');
+      && document.body.innerText.includes('Supplier invoice CASE-2001'), 'complete purchase bill');
     const purchasesAfterViewing = (await getDocsFromServer(collection(db, 'purchases'))).docs.map(record => ({ id: record.id, data: record.data() }));
     if (JSON.stringify(purchasesBeforeViewing) !== JSON.stringify(purchasesAfterViewing)) throw new Error('Viewing a purchase bill changed purchase records');
     (document.querySelector('button[aria-label="Close purchase bill"]') as HTMLButtonElement).click();

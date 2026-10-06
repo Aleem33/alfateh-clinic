@@ -17,6 +17,7 @@ import {
 import { clinicDateKey } from '../lib/clinicDate';
 import { getTrustedClockReading, trustedNow } from '../lib/trustedClock';
 import { calculatePurchaseQuantities } from '../pos/lib/purchaseInvoice';
+import { getNextPurchaseBillNo } from '../pos/lib/purchaseBillNumbers';
 
 type Supplier = {
   id: string;
@@ -289,7 +290,12 @@ export function SupplierMedicinesPanel({
       }, medicines);
       const batch = writeBatch(db);
       const purchaseRef = doc(collection(db, 'purchases'));
+      const purchaseBillNo = getNextPurchaseBillNo();
       batch.set(purchaseRef, {
+        invoiceId: purchaseRef.id,
+        purchaseBillNo,
+        invoiceLineNumber: 1,
+        invoiceLineCount: 1,
         medicineId: batchTarget.medicineId,
         medicineName: purchasingMedicine.name,
         supplierId: supplier.id,
@@ -316,6 +322,7 @@ export function SupplierMedicinesPanel({
         batchNo,
         expiryDate: purchaseForm.expiryDate || '',
         invoiceNo: purchaseForm.invoiceNo.trim(),
+        supplierInvoiceNo: purchaseForm.invoiceNo.trim(),
         notes: purchaseForm.notes.trim(),
         date: purchaseForm.date || today(),
         addedBy: auth.currentUser?.uid || 'unknown',

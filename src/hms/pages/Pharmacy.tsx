@@ -20,6 +20,7 @@ import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 import { MonthSelector } from '../../components/MonthSelector';
 import { historyDateKey, matchesMonth } from '../../lib/monthFilter';
 import { PurchaseReports } from '../../pos/components/PurchaseReports';
+import { getNextPurchaseBillNo, getPurchaseBillNo } from '../../pos/lib/purchaseBillNumbers';
 
 const emptyMed = { name: '', nameUrdu: '', category: 'Tablet', manufacturer: '', batchNo: '', expiryDate: '', costPrice: '', retailPrice: '', unitPrice: '', unitsPerBox: '1', stockBoxes: '0', stockLoose: '0', reorderLevel: '10', supplierId: '', supplierName: '' };
 
@@ -357,8 +358,15 @@ export function Pharmacy({
         supplierName: purchaseForm.supplierName || med.supplierName || '',
       }, medicines);
       const batch = writeBatch(db);
-      batch.set(doc(collection(db, 'purchases')), {
+      const purchaseRef = doc(collection(db, 'purchases'));
+      const purchaseBillNo = getNextPurchaseBillNo();
+      batch.set(purchaseRef, {
         ...purchaseForm,
+        invoiceId: purchaseRef.id,
+        purchaseBillNo,
+        invoiceLineNumber: 1,
+        invoiceLineCount: 1,
+        supplierInvoiceNo: purchaseForm.invoiceNo.trim(),
         medicineId: batchTarget.medicineId,
         batchNo,
         boxes: boxesPurchased,
@@ -587,7 +595,7 @@ export function Pharmacy({
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>{['Date', 'Medicine', 'Supplier', 'Paid / Bonus', 'Cost/Box', 'Payable', 'Invoice', 'Batch', ...(canEditPurchases ? ['Actions'] : [])].map(h => (
+              <tr>{['Date', 'Medicine', 'Supplier', 'Paid / Bonus', 'Cost/Box', 'Payable', 'Bill / Supplier Invoice', 'Batch', ...(canEditPurchases ? ['Actions'] : [])].map(h => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
               ))}</tr>
             </thead>
@@ -602,7 +610,10 @@ export function Pharmacy({
                     <td className="px-4 py-3 text-sm text-gray-600">{p.paidUnits ?? p.totalUnitsAdded} / {p.bonusUnits || 0} units</td>
                     <td className="px-4 py-3 text-sm text-gray-600">Rs. {p.costPerBox}</td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-800">Rs. {p.totalCost?.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-xs text-gray-400">{p.invoiceNo || '—'}</td>
+                    <td className="px-4 py-3 text-xs">
+                      <p className="font-mono font-semibold text-gray-700">{getPurchaseBillNo(p)}</p>
+                      {p.invoiceNo && <p className="text-gray-400">Supplier: {p.invoiceNo}</p>}
+                    </td>
                     <td className="px-4 py-3 text-xs font-mono text-gray-400">{p.batchNo || '—'}</td>
                     {canEditPurchases && (
                       <td className="px-4 py-3">

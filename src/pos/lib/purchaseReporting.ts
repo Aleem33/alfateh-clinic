@@ -1,4 +1,5 @@
 import { historyDateKey } from '../../lib/monthFilter';
+import { getPurchaseBillNo } from './purchaseBillNumbers';
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
@@ -12,7 +13,8 @@ export function purchaseReportLine(record: Record<string, any>) {
   return {
     id: String(record.id), date: historyDateKey(record),
     invoiceKey: String(record.invoiceId || record.id),
-    invoice: String(record.invoiceNo || record.supplierInvoiceNo || record.invoiceId || record.id),
+    invoice: getPurchaseBillNo(record),
+    supplierInvoice: String(record.supplierInvoiceNo || record.invoiceNo || ''),
     medicine: String(record.medicineName || 'Unknown medicine'),
     supplier: String(record.supplierName || 'Unknown supplier'),
     supplierKey: String(record.supplierId || record.supplierName || 'unknown'),
@@ -43,6 +45,7 @@ export function summarizePurchases(lines: PurchaseReportLine[], by: 'medicine' |
 export type PurchaseInvoiceSummary = {
   key: string;
   invoiceNumber: string;
+  supplierInvoiceNumber: string;
   internalInvoiceId: string;
   date: string;
   supplier: string;
@@ -62,6 +65,7 @@ export function groupPurchaseInvoices(records: Record<string, any>[]): PurchaseI
     const current = groups.get(line.invoiceKey) || {
       key: line.invoiceKey,
       invoiceNumber: line.invoice,
+      supplierInvoiceNumber: line.supplierInvoice,
       internalInvoiceId: line.invoiceKey,
       date: line.date,
       supplier: line.supplier,
@@ -79,9 +83,7 @@ export function groupPurchaseInvoices(records: Record<string, any>[]): PurchaseI
     current.receivedUnits += line.total;
     current.payable += line.payable;
     current.records.push(record);
-    // Prefer a user-entered supplier bill number if a legacy line in the same
-    // invoice did not have it yet.
-    if (record.invoiceNo || record.supplierInvoiceNo) current.invoiceNumber = line.invoice;
+    if (!current.supplierInvoiceNumber && line.supplierInvoice) current.supplierInvoiceNumber = line.supplierInvoice;
     if (line.date > current.date) current.date = line.date;
     groups.set(line.invoiceKey, current);
   }

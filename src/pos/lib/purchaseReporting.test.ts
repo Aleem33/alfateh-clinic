@@ -28,7 +28,7 @@ describe('purchase reports', () => {
     const groups = groupPurchaseInvoices(records);
     expect(groups).toHaveLength(2);
     expect(groups.find(group => group.key === 'internal-a')).toMatchObject({
-      invoiceNumber: 'CASE-123', lineCount: 2, paidUnits: 30, bonusUnits: 2,
+      invoiceNumber: expect.stringMatching(/^PUR-OLD-\d{8}$/), supplierInvoiceNumber: 'CASE-123', lineCount: 2, paidUnits: 30, bonusUnits: 2,
       receivedUnits: 32, payable: 300,
     });
   });
