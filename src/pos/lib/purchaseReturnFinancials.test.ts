@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePurchaseReturnFinancials, resolvePurchaseUnitCost } from './purchaseReturnFinancials';
+import { findPurchaseReturnMedicine, resolvePurchaseReturnFinancials, resolvePurchaseUnitCost } from './purchaseReturnFinancials';
 
 describe('purchase return financials', () => {
   it('uses the frozen unit cost when available', () => {
@@ -48,6 +48,45 @@ describe('purchase return financials', () => {
       null,
       { costPrice: 100, unitsPerBox: 10 },
     ).refundAmount).toBe(0);
+  });
+
+  it('recovers cost from the exact linked medicine even when that batch is archived', () => {
+    const linked = findPurchaseReturnMedicine(
+      { medicineId: 'archived-batch', medicineName: 'Nuberol P 1gm /100ml' },
+      null,
+      [
+        { id: 'active-batch', name: 'Nuberol P 1gm /100ml', costPrice: 500 },
+        { id: 'archived-batch', name: 'Nuberol P 1gm /100ml', archived: true, costPrice: 420 },
+      ],
+    );
+    expect(linked).toMatchObject({ id: 'archived-batch', archived: true });
+    expect(resolvePurchaseReturnFinancials(
+      { refundAmount: 0, paidUnitsReturned: 20 },
+      null,
+      linked,
+    )).toMatchObject({ costPricePerUnit: 420, refundAmount: 8400, reconstructed: true });
+  });
+
+  it('uses legacy name, supplier and batch identity only when the match is unambiguous', () => {
+    expect(findPurchaseReturnMedicine(
+      { medicineName: 'Nuberol P 1gm /100ml', supplierName: 'Aslam traders' },
+      { batchNo: 'NB-10' },
+      [
+        { id: 'batch-a', name: 'Nuberol P 1gm /100ml', supplierName: 'Aslam traders', batchNo: 'NB-10' },
+        { id: 'batch-b', name: 'Nuberol P 1gm /100ml', supplierName: 'Aslam traders', batchNo: 'NB-11' },
+      ],
+    )?.id).toBe('batch-a');
+  });
+
+  it('does not guess a cost when a legacy return matches multiple batches', () => {
+    expect(findPurchaseReturnMedicine(
+      { medicineName: 'Nuberol P 1gm /100ml', supplierName: 'Aslam traders' },
+      null,
+      [
+        { id: 'batch-a', name: 'Nuberol P 1gm /100ml', supplierName: 'Aslam traders' },
+        { id: 'batch-b', name: 'Nuberol P 1gm /100ml', supplierName: 'Aslam traders' },
+      ],
+    )).toBeUndefined();
   });
 });
 

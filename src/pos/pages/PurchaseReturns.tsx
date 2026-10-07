@@ -6,11 +6,11 @@ import { formatCurrency } from '../lib/utils';
 import { getReturnNo } from '../lib/receiptNumbers';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer } from 'lucide-react';
 import { format } from 'date-fns';
-import { subscribeToMedicines } from '../../lib/medicineStore';
+import { subscribeToAllMedicines } from '../../lib/medicineStore';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { getTrustedClockReading } from '../../lib/trustedClock';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
-import { resolvePurchaseReturnFinancials, resolvePurchaseUnitCost } from '../lib/purchaseReturnFinancials';
+import { findPurchaseReturnMedicine, resolvePurchaseReturnFinancials, resolvePurchaseUnitCost } from '../lib/purchaseReturnFinancials';
 
 // ── Print via hidden iframe ───────────────────────────────────────────────────
 function printSlip(slipHtml: string) {
@@ -72,6 +72,13 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
 export function PurchaseReturns() {
   const [purchases, setPurchases] = useState<any[]>([]);
   const [medicines, setMedicines] = useState<Record<string, {
+    [key: string]: any;
+    id: string;
+    name: string;
+    batchNo?: string;
+    supplierId?: string;
+    supplierName?: string;
+    archived: boolean;
     stock: number;
     bonusStockUnits: number;
     costPrice: number;
@@ -89,10 +96,17 @@ export function PurchaseReturns() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const unsubMedicines = subscribeToMedicines((medicineList) => {
-      const stockMap: Record<string, { stock: number; bonusStockUnits: number; costPrice: number; unitsPerBox: number }> = {};
+    const unsubMedicines = subscribeToAllMedicines((medicineList) => {
+      const stockMap: typeof medicines = {};
       medicineList.forEach(medicine => {
         stockMap[medicine.id] = {
+          ...medicine,
+          id: medicine.id,
+          name: String(medicine.name || ''),
+          batchNo: medicine.batchNo,
+          supplierId: medicine.supplierId,
+          supplierName: medicine.supplierName,
+          archived: medicine.archived === true,
           stock: Number(medicine.stock || 0),
           bonusStockUnits: Math.min(Number(medicine.stock || 0), Math.max(0, Number(medicine.bonusStockUnits || 0))),
           costPrice: Number(medicine.costPrice || 0),
@@ -141,7 +155,10 @@ export function PurchaseReturns() {
   };
 
   const unitsPerBox = selectedPurchase?.unitsPerBox || 1;
-  const selectedMedicine = selectedPurchase ? medicines[selectedPurchase.medicineId] : undefined;
+  const medicineList = Object.values(medicines);
+  const selectedMedicine = selectedPurchase
+    ? findPurchaseReturnMedicine(selectedPurchase, selectedPurchase, medicineList)
+    : undefined;
   const costPricePerUnit = resolvePurchaseUnitCost(selectedPurchase)
     || resolvePurchaseUnitCost(selectedMedicine);
   const boxes = parseInt(returnBoxes || '0');
@@ -154,7 +171,9 @@ export function PurchaseReturns() {
   const alreadyReturned = selectedPurchase ? getAlreadyReturnedUnits(selectedPurchase.id) : 0;
   const alreadyPaidReturned = selectedPurchase ? getAlreadyReturnedUnits(selectedPurchase.id, 'paid') : 0;
   const alreadyBonusReturned = selectedPurchase ? getAlreadyReturnedUnits(selectedPurchase.id, 'bonus') : 0;
-  const currentBuckets = selectedPurchase ? medicines[selectedPurchase.medicineId] : undefined;
+  // Archived batches are loaded only for historical financial reconstruction;
+  // they remain unavailable for a new operational supplier return.
+  const currentBuckets = selectedMedicine?.archived ? undefined : selectedMedicine;
   const currentStock = currentBuckets?.stock || 0;
   const currentBonusStock = currentBuckets?.bonusStockUnits || 0;
   const currentPaidStock = Math.max(0, currentStock - currentBonusStock);
@@ -298,7 +317,7 @@ export function PurchaseReturns() {
           <div className="flex-1 overflow-auto divide-y divide-gray-100">
             {returns.map(r => {
               const originalPurchase = purchases.find(purchase => purchase.id === r.originalPurchaseId);
-              const linkedMedicine = medicines[r.medicineId];
+              const linkedMedicine = findPurchaseReturnMedicine(r, originalPurchase, medicineList);
               const financials = resolvePurchaseReturnFinancials(r, originalPurchase, linkedMedicine);
               const printableReturn = { ...r, ...financials };
               return (

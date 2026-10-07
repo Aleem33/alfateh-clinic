@@ -90,6 +90,27 @@ export function subscribeToArchivedMedicines(
   };
 }
 
+/**
+ * Subscribe to every non-deleted medicine batch, including archived batches.
+ * Historical/accounting screens need this view so an archived batch does not
+ * lose its supplier, cost, or batch context. Operational selectors should keep
+ * using subscribeToMedicines(), which intentionally exposes active stock only.
+ */
+export function subscribeToAllMedicines(
+  onData: (medicines: MedicineRecord[]) => void,
+  onError?: (error: unknown) => void,
+): Unsubscribe {
+  const subscriber: Subscriber = { onData, onError, select: 'all' };
+  subscribers.add(subscriber);
+  if (hasLoaded) onData(currentSnapshot().all);
+  startListener();
+
+  return () => {
+    subscribers.delete(subscriber);
+    if (subscribers.size === 0) stopListenerWhenIdle();
+  };
+}
+
 export function getMedicineStoreSnapshot(): MedicineStoreSnapshot {
   return currentSnapshot();
 }

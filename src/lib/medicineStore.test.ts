@@ -9,7 +9,7 @@ vi.mock('./syncProtocol', () => ({
   subscribeSyncControl: (listener: () => void) => { listener(); return () => undefined; },
 }));
 import { resetLocalMirrorForTests, upsertLocalRecords } from './localMirror';
-import { getMedicinesOnce, getMedicineStoreSnapshot, subscribeToArchivedMedicines, subscribeToMedicines } from './medicineStore';
+import { getMedicinesOnce, getMedicineStoreSnapshot, subscribeToAllMedicines, subscribeToArchivedMedicines, subscribeToMedicines } from './medicineStore';
 
 const unsubscribers: Array<() => void> = [];
 const complete = { seedComplete: true, generation: 1 };
@@ -47,10 +47,15 @@ describe('complete medicine mirror', () => {
     ], complete);
     const active = vi.fn();
     const archived = vi.fn();
-    unsubscribers.push(subscribeToMedicines(active), subscribeToArchivedMedicines(archived));
+    const all = vi.fn();
+    unsubscribers.push(subscribeToMedicines(active), subscribeToArchivedMedicines(archived), subscribeToAllMedicines(all));
     await vi.waitFor(() => {
       expect(active).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'active' })]);
       expect(archived).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'archived' })]);
+      expect(all).toHaveBeenLastCalledWith([
+        expect.objectContaining({ id: 'active' }),
+        expect.objectContaining({ id: 'archived' }),
+      ]);
     });
     expect(getMedicineStoreSnapshot().all).toHaveLength(2);
   });

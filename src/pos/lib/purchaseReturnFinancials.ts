@@ -47,3 +47,45 @@ export function resolvePurchaseReturnFinancials(
   };
 }
 
+/**
+ * Resolve the original batch without guessing across different batches. Old
+ * return rows can point at an archived batch, or can predate a stable medicine
+ * ID. Exact IDs win; the legacy fallback is accepted only when name plus any
+ * available batch/supplier identity leaves one unambiguous medicine record.
+ */
+export function findPurchaseReturnMedicine(
+  purchaseReturn: Record<string, any>,
+  originalPurchase: Record<string, any> | null | undefined,
+  medicines: Array<Record<string, any>>,
+): Record<string, any> | undefined {
+  const candidateIds = [
+    purchaseReturn.medicineId,
+    originalPurchase?.medicineId,
+  ].filter(Boolean).map(String);
+
+  for (const id of candidateIds) {
+    const exact = medicines.find(medicine => String(medicine.id) === id);
+    if (exact) return exact;
+  }
+
+  const targetName = normalizeMedicineText(
+    purchaseReturn.medicineName || originalPurchase?.medicineName,
+  );
+  if (!targetName) return undefined;
+
+  let matches = medicines.filter(medicine => normalizeMedicineText(medicine.name) === targetName);
+  const narrow = (target: unknown, getValue: (medicine: Record<string, any>) => unknown) => {
+    const normalizedTarget = normalizeMedicineText(target);
+    if (!normalizedTarget) return;
+    matches = matches.filter(medicine => normalizeMedicineText(getValue(medicine)) === normalizedTarget);
+  };
+
+  narrow(purchaseReturn.batchNo || originalPurchase?.batchNo, medicine => medicine.batchNo);
+  narrow(purchaseReturn.supplierId || originalPurchase?.supplierId, medicine => medicine.supplierId);
+  narrow(purchaseReturn.supplierName || originalPurchase?.supplierName, medicine => medicine.supplierName);
+
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+import { normalizeMedicineText } from '../../lib/medicineIndex';
+
