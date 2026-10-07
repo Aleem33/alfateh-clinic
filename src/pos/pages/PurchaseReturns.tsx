@@ -10,6 +10,7 @@ import { subscribeToMedicines } from '../../lib/medicineStore';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { getTrustedClockReading } from '../../lib/trustedClock';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { resolvePurchaseReturnFinancials, resolvePurchaseUnitCost } from '../lib/purchaseReturnFinancials';
 
 // ── Print via hidden iframe ───────────────────────────────────────────────────
 function printSlip(slipHtml: string) {
@@ -70,7 +71,12 @@ function buildPurchaseReturnSlip(data: any, upb: number) {
 
 export function PurchaseReturns() {
   const [purchases, setPurchases] = useState<any[]>([]);
-  const [medicines, setMedicines] = useState<Record<string, { stock: number; bonusStockUnits: number }>>({});
+  const [medicines, setMedicines] = useState<Record<string, {
+    stock: number;
+    bonusStockUnits: number;
+    costPrice: number;
+    unitsPerBox: number;
+  }>>({});
   const [returns, setReturns] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [selectedPurchase, setSelectedPurchase] = useState<any>(null);
@@ -84,11 +90,13 @@ export function PurchaseReturns() {
 
   useEffect(() => {
     const unsubMedicines = subscribeToMedicines((medicineList) => {
-      const stockMap: Record<string, { stock: number; bonusStockUnits: number }> = {};
+      const stockMap: Record<string, { stock: number; bonusStockUnits: number; costPrice: number; unitsPerBox: number }> = {};
       medicineList.forEach(medicine => {
         stockMap[medicine.id] = {
           stock: Number(medicine.stock || 0),
           bonusStockUnits: Math.min(Number(medicine.stock || 0), Math.max(0, Number(medicine.bonusStockUnits || 0))),
+          costPrice: Number(medicine.costPrice || 0),
+          unitsPerBox: Math.max(1, Number(medicine.unitsPerBox || 1)),
         };
       });
       setMedicines(stockMap);
@@ -133,8 +141,9 @@ export function PurchaseReturns() {
   };
 
   const unitsPerBox = selectedPurchase?.unitsPerBox || 1;
-  const costPricePerUnit = selectedPurchase?.costPricePerUnit
-    ?? (selectedPurchase ? (selectedPurchase.costPrice || 0) / unitsPerBox : 0);
+  const selectedMedicine = selectedPurchase ? medicines[selectedPurchase.medicineId] : undefined;
+  const costPricePerUnit = resolvePurchaseUnitCost(selectedPurchase)
+    || resolvePurchaseUnitCost(selectedMedicine);
   const boxes = parseInt(returnBoxes || '0');
   const loose = parseInt(returnLoose || '0');
   const bonusBoxes = parseInt(bonusReturnBoxes || '0');
@@ -154,7 +163,9 @@ export function PurchaseReturns() {
   const maxPaidReturnable = Math.min(Math.max(0, purchasedPaidUnits - alreadyPaidReturned), currentPaidStock);
   const maxBonusReturnable = Math.min(Math.max(0, purchasedBonusUnits - alreadyBonusReturned), currentBonusStock);
   const maxReturnable = maxPaidReturnable + maxBonusReturnable;
-  const isValid = totalUnitsToReturn > 0 && paidUnitsToReturn <= maxPaidReturnable && bonusUnitsToReturn <= maxBonusReturnable;
+  const hasPaidRefundRate = paidUnitsToReturn === 0 || costPricePerUnit > 0;
+  const isValid = totalUnitsToReturn > 0 && paidUnitsToReturn <= maxPaidReturnable
+    && bonusUnitsToReturn <= maxBonusReturnable && hasPaidRefundRate;
   const refundAmount = paidUnitsToReturn * costPricePerUnit;
 
   const formatUnits = (units: number, upb: number) => {
@@ -188,7 +199,7 @@ export function PurchaseReturns() {
         paidUnitsReturned: paidUnitsToReturn,
         bonusUnitsReturned: bonusUnitsToReturn,
         totalUnitsReturned: totalUnitsToReturn,
-        costPrice: selectedPurchase.costPrice || 0,
+        costPrice: costPricePerUnit * unitsPerBox,
         costPricePerUnit,
         refundAmount,
         reason: returnReason,
@@ -285,7 +296,12 @@ export function PurchaseReturns() {
             <h2 className="font-semibold text-gray-900">Return History</h2>
           </div>
           <div className="flex-1 overflow-auto divide-y divide-gray-100">
-            {returns.map(r => (
+            {returns.map(r => {
+              const originalPurchase = purchases.find(purchase => purchase.id === r.originalPurchaseId);
+              const linkedMedicine = medicines[r.medicineId];
+              const financials = resolvePurchaseReturnFinancials(r, originalPurchase, linkedMedicine);
+              const printableReturn = { ...r, ...financials };
+              return (
               <div key={r.id} className="p-4">
                 <div className="flex justify-between items-start gap-3">
                   <div className="min-w-0">
@@ -302,9 +318,9 @@ export function PurchaseReturns() {
                     {r.reason && <p className="text-xs italic text-gray-400">"{r.reason}"</p>}
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    <span className="text-orange-600 font-bold text-sm">{formatCurrency(r.refundAmount)}</span>
+                    <span className="text-orange-600 font-bold text-sm">{formatCurrency(financials.refundAmount)}</span>
                     <button
-                      onClick={() => printSlip(buildPurchaseReturnSlip(r, r.unitsPerBox || 1))}
+                      onClick={() => printSlip(buildPurchaseReturnSlip(printableReturn, r.unitsPerBox || originalPurchase?.unitsPerBox || 1))}
                       className="flex items-center gap-1 text-xs text-gray-500 hover:text-orange-600 border border-gray-200 hover:border-orange-300 px-2 py-1 rounded-md transition-colors"
                       title="Reprint receipt"
                     >
@@ -313,7 +329,7 @@ export function PurchaseReturns() {
                   </div>
                 </div>
               </div>
-            ))}
+            );})}
             {returns.length === 0 && (
               <div className="p-8 text-center text-gray-400 text-sm">No purchase returns yet.</div>
             )}
@@ -359,7 +375,7 @@ export function PurchaseReturns() {
                 </div>
                 <div className="flex justify-between text-gray-500 text-xs pt-1">
                   <span>Refund rate:</span>
-                  <span>{formatCurrency(costPricePerUnit)} per unit {unitsPerBox > 1 ? `(box price ${formatCurrency(selectedPurchase.costPrice)} ÷ ${unitsPerBox})` : ''}</span>
+                  <span>{formatCurrency(costPricePerUnit)} per unit {unitsPerBox > 1 ? `(box price ${formatCurrency(costPricePerUnit * unitsPerBox)} ÷ ${unitsPerBox})` : ''}</span>
                 </div>
               </div>
 
@@ -421,7 +437,9 @@ export function PurchaseReturns() {
               {!isValid && totalUnitsToReturn > 0 && (
                 <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 p-2 rounded-lg">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  Paid and bonus returns cannot exceed their separate available quantities.
+                  {!hasPaidRefundRate
+                    ? 'This purchase has no cost price. Ask an admin to edit the original purchase cost before returning paid stock.'
+                    : 'Paid and bonus returns cannot exceed their separate available quantities.'}
                 </div>
               )}
 
