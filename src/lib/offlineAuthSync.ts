@@ -147,7 +147,17 @@ export function startOfflineAuthSync(hooks: Hooks = {}) {
   const handleStatus = (online: boolean) => {
     cloudOnline = online;
     if (!online) {
-      void keepFirestoreOffline();
+      const session = getActiveAuthSession();
+      // Firestore already queues writes when an authenticated online session
+      // loses connectivity. Avoid forcing a disable/enable cycle for that
+      // ordinary case: repeated network flaps can churn live watch targets.
+      // An offline credential session is different and stays explicitly
+      // disabled until the same account has been verified in Firebase.
+      if (session?.mode === 'offline' || (session && auth.currentUser?.uid !== session.profile.uid)) {
+        void keepFirestoreOffline();
+      } else {
+        setCloudAuthReady(false);
+      }
       return;
     }
     void reconnectAuthenticatedSession(hooks);

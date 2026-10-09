@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, CloudOff, RefreshCw, Wifi, X } from 'lucid
 import { runOfflineSyncNow, subscribeSyncStatus, type SyncSnapshot } from '../lib/offlineSync';
 import { getLanStatus, subscribeLanStatus } from '../lib/lanCoordinator';
 import type { LanStatus } from '../types/electron';
-import { retryOfflineCacheRegistration, subscribeOfflineCache, type OfflineCacheStatus } from '../lib/offlineCache';
+import { retryOfflineCacheRegistration, retryOfflineCacheSynchronization, subscribeOfflineCache, type OfflineCacheStatus } from '../lib/offlineCache';
 import {
   getFirestoreReadDiagnostics,
   resetFirestoreReadDiagnostics,
@@ -196,7 +196,7 @@ export function SyncStatusBadge({ compact = false }: { compact?: boolean }) {
                   <p className="mt-1 font-medium">Affected data: {cache.pendingCollections.join(', ')}</p>
                 )}
                 {status.online && <button type="button" onClick={() => {
-                  retryOfflineCacheRegistration();
+                  retryOfflineCacheSynchronization();
                   void runOfflineSyncNow();
                 }} className="mt-2 rounded-md border border-red-200 bg-white px-3 py-1.5 font-medium text-red-700">
                   Retry data synchronization

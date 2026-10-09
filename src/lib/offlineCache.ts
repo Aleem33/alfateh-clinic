@@ -68,6 +68,7 @@ const activeUnsubscribers = new Map<string, Unsubscribe>();
 const persistenceQueues = new Map<string, Promise<void>>();
 const incrementalEpochs = new Map<string, number>();
 const incrementalRestarts = new Map<string, ReturnType<typeof setTimeout>>();
+const legacyRestarts = new Map<string, ReturnType<typeof setTimeout>>();
 let controlUnsubscribe: (() => void) | null = null;
 let lanUnsubscribe: (() => void) | null = null;
 let lastOnline: boolean | null = null;
@@ -150,12 +151,20 @@ function clearRecoveredTransientSyncError() {
   // successful snapshot of another collection must never hide those.
   if (serverReconciled.size < activeCollections.length) return;
   if (lastError === 'Could not synchronize offline data.'
+    || /target id already exists:\s*\d+/i.test(lastError)
     || /^(Could not synchronize offline data(?::|\.)?|Incremental sync .* needs retry: ).*(unavailable|network|connection|timeout|deadline|offline|transport)/i.test(lastError)) {
     lastError = '';
   }
 }
 
+function isDuplicateListenerTargetError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /target id already exists:\s*\d+/i.test(message);
+}
+
 function stopCollectionListeners() {
+  legacyRestarts.forEach(timer => clearTimeout(timer));
+  legacyRestarts.clear();
   incrementalRestarts.forEach(timer => clearTimeout(timer));
   incrementalRestarts.clear();
   incrementalEpochs.clear();
@@ -542,9 +551,30 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
         notify();
       }).catch(handleError);
     },
-    handleError,
+    error => {
+      if (run !== lifecycle) return;
+      serverReconciled.delete(collectionName);
+      handleError(error);
+      // Firestore Web can occasionally reject a re-established watch target
+      // after a network disable/enable cycle. The business data and local
+      // mirror are unaffected. Retire only this listener and require a fresh
+      // authoritative snapshot before reporting the collection as confirmed.
+      if (isDuplicateListenerTargetError(error)) scheduleLegacyRestart(collectionName, control, run);
+    },
   );
   activeUnsubscribers.set(collectionName, unsubscribe);
+}
+
+function scheduleLegacyRestart(collectionName: string, control: SyncControl, run: number, delay = 5_000) {
+  if (run !== lifecycle || legacyRestarts.has(collectionName)) return;
+  legacyRestarts.set(collectionName, setTimeout(() => {
+    legacyRestarts.delete(collectionName);
+    if (run !== lifecycle || mode !== 'legacy') return;
+    activeUnsubscribers.get(collectionName)?.();
+    activeUnsubscribers.delete(collectionName);
+    reconnectPending.add(collectionName);
+    startLegacyListener(collectionName, control, run);
+  }, delay));
 }
 
 function firestoreCursor(value: LocalMirrorCheckpointValue) {
@@ -987,6 +1017,18 @@ export function retryOfflineCacheRegistration() {
   registrationError = '';
   registeredReadyState = null;
   notify();
+}
+
+/**
+ * Reattach cloud listeners without clearing IndexedDB, outboxes, checkpoints,
+ * or any Firestore document. Intended for explicit recovery from listener
+ * errors shown in the status panel.
+ */
+export function retryOfflineCacheSynchronization() {
+  if (!activeRole || activeCollections.length === 0) return;
+  lastError = '';
+  notify();
+  void restartForControl(getSyncControl());
 }
 
 export async function markDatasetGeneration(generation: number) {

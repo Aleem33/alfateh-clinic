@@ -92,6 +92,23 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('offline account reconnect ownership', () => {
+  it('does not churn Firestore network targets for an already authenticated online session outage', async () => {
+    mocks.session = { ...offlineSession(), mode: 'online' };
+    mocks.auth.currentUser = { uid: mocks.session.profile.uid, email: mocks.session.profile.email };
+    const { startOfflineAuthSync } = await import('./offlineAuthSync');
+    startOfflineAuthSync();
+    mocks.status?.({ online: false });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(mocks.disableNetwork).not.toHaveBeenCalled();
+  });
+
+  it('keeps Firestore explicitly offline until an offline credential session is verified', async () => {
+    const { startOfflineAuthSync } = await import('./offlineAuthSync');
+    startOfflineAuthSync();
+    mocks.status?.({ online: false });
+    await vi.waitFor(() => expect(mocks.disableNetwork).toHaveBeenCalledOnce());
+  });
+
   it('applies the server-confirmed role to the same active session', async () => {
     const hooks = await beginReconnect();
     await vi.waitFor(() => expect(hooks.onSession).toHaveBeenCalledOnce());

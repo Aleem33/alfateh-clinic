@@ -125,6 +125,25 @@ describe('incremental mirror bootstrap', () => {
     expect(getOfflineCacheStatus().lastError).toBe('');
   });
 
+  it('reattaches a duplicate Firestore target and clears the warning only after fresh confirmation', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    __offlineCacheInternals.startLegacyListener('sales', control);
+    const first = (firestore.onSnapshot.mock.calls as any).at(-1);
+    first[3](new Error('Target ID already exists: 76'));
+    expect(getOfflineCacheStatus().lastError).toBe('Target ID already exists: 76');
+    expect(getOfflineCacheStatus().serverConfirmedCollections).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(firestore.onSnapshot).toHaveBeenCalledTimes(2);
+    const serverRecord = document('sale-server', { total: 20 });
+    const second = (firestore.onSnapshot.mock.calls as any).at(-1);
+    second[2]({ ...result([serverRecord]), metadata: { fromCache: false },
+      docChanges: () => [{ type: 'added', doc: serverRecord }] });
+    await __offlineCacheInternals.waitForPersistence('sales');
+    expect(getOfflineCacheStatus().lastError).toBe('');
+    expect(getOfflineCacheStatus().serverConfirmedCollections).toBe(1);
+  });
+
   it('does not clear a permission error merely because a later collection snapshot succeeds', async () => {
     __offlineCacheInternals.startLegacyListener('sales', control);
     const [,, onData, onError] = (firestore.onSnapshot.mock.calls as any).at(-1);
