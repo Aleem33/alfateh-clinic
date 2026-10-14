@@ -346,6 +346,9 @@ export function PurchaseReturns() {
                       {' '}({r.totalUnitsReturned} units)
                     </p>
                     <p className="text-xs text-gray-500">Paid {r.paidUnitsReturned ?? r.totalUnitsReturned} · Bonus {r.bonusUnitsReturned || 0}</p>
+                    {r.stockReconciliation?.some((entry: any) => entry.status === 'pending') && (
+                      <p className="text-xs text-amber-700 font-medium">Return saved · stock review required</p>
+                    )}
                     {r.reason && <p className="text-xs italic text-gray-400">"{r.reason}"</p>}
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">

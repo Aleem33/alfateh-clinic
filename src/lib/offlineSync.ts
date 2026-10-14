@@ -26,6 +26,7 @@ import {
   removePendingPurchaseReturn,
   replayPendingPurchaseReturnRecords,
 } from '../pos/lib/offlinePurchaseReturnsOutbox';
+import { buildPurchaseReturnRecoveryPlan } from '../pos/lib/purchaseReturnRecovery';
 import { getLocalCollectionOnce } from './collectionRepository';
 import {
   findClearedStockIssueIds,
@@ -310,25 +311,26 @@ async function replayPendingPurchaseReturns() {
           transaction.get(medicineRef),
         ]);
         if (returnSnapshot.exists()) return;
-        if (!medicineSnapshot.exists()) {
-          throw new Error(`Purchase return ${record.returnData.returnNo || record.returnId} references a medicine batch that no longer exists.`);
+        const recoveredAt = trustedNowISO();
+        const plan = buildPurchaseReturnRecoveryPlan(record, medicineSnapshot.exists()
+          ? { id: record.medicineId, ...medicineSnapshot.data() } : null, recoveredAt);
+        transaction.set(returnRef, plan.returnData);
+        if (plan.medicineUpdate) transaction.update(medicineRef, plan.medicineUpdate);
+        if (plan.discrepancy) {
+          transaction.set(doc(db, 'syncIssues', `purchase-return-stock-${record.returnId}`), {
+            ...plan.discrepancy,
+            type: 'purchase-return-stock-reconciliation',
+            status: 'open',
+            purchaseReturnId: record.returnId,
+            returnNo: record.returnData.returnNo || record.returnId,
+            devicePrefix: String(record.returnData.returnNo || '').split('-')[1] || '',
+            message: `Purchase return ${record.returnData.returnNo || record.returnId} was uploaded without loss. `
+              + `${plan.discrepancy.unappliedUnits} unit(s) could not be deducted because the cloud batch stock changed. `
+              + 'Verify the physical count for this batch.',
+            createdAt: recoveredAt,
+            updatedAt: recoveredAt,
+          });
         }
-        const medicine = medicineSnapshot.data();
-        const stock = Number(medicine.stock || 0);
-        const bonusStock = Math.min(stock, Math.max(0, Number(medicine.bonusStockUnits || 0)));
-        const paidUnits = Math.max(0, record.totalUnits - record.bonusUnits);
-        const paidStock = Math.max(0, stock - bonusStock);
-        if (paidUnits > paidStock || record.bonusUnits > bonusStock) {
-          throw new Error(
-            `Purchase return ${record.returnData.returnNo || record.returnId} is safely preserved, but the selected batch now has `
-            + `${paidStock} paid and ${bonusStock} bonus units available; it needs ${paidUnits} paid and ${record.bonusUnits} bonus units.`,
-          );
-        }
-        transaction.set(returnRef, record.returnData);
-        transaction.update(medicineRef, {
-          stock: stock - record.totalUnits,
-          bonusStockUnits: bonusStock - record.bonusUnits,
-        });
       });
     },
     remove: removePendingPurchaseReturn,
@@ -372,7 +374,8 @@ async function checkStockConflicts() {
   }
 
   issueCount = activeMedicines.length + existingIssues.filter(issue => (
-    issue.type === 'sale-stock-reconciliation' && issue.status !== 'resolved'
+    ['sale-stock-reconciliation', 'purchase-return-stock-reconciliation'].includes(String(issue.type))
+    && issue.status !== 'resolved'
   )).length;
   for (const medicine of activeMedicines) {
     const data = medicine.data();

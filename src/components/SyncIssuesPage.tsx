@@ -6,7 +6,7 @@ import { runOfflineSyncNow } from '../lib/offlineSync';
 import { isCloudOnline } from '../lib/lanCoordinator';
 import { trustedNowISO } from '../lib/trustedClock';
 import { subscribeToLocalCollection } from '../lib/collectionRepository';
-import { reconcileRecoveredSaleStock } from '../pos/lib/stockReconciliation';
+import { reconcileRecoveredStock } from '../pos/lib/stockReconciliation';
 
 export function SyncIssuesPage() {
   const [issues, setIssues] = useState<any[]>([]);
@@ -27,7 +27,7 @@ export function SyncIssuesPage() {
   const openIssues = issues.filter(i => i.status !== 'resolved');
 
   const resolveIssue = async (issue: any) => {
-    if (issue.type === 'sale-stock-reconciliation') {
+    if (issue.type === 'sale-stock-reconciliation' || issue.type === 'purchase-return-stock-reconciliation') {
       setReconciling(issue); setCountedStock(''); setCountedBonus(''); setNote(''); setError('');
       return;
     }
@@ -42,7 +42,7 @@ export function SyncIssuesPage() {
     setSaving(true); setError('');
     try {
       if (countedStock === '' || countedBonus === '') throw new Error('Enter both physical counts, including zero where appropriate.');
-      await reconcileRecoveredSaleStock(reconciling.id, Number(countedStock), Number(countedBonus), note);
+      await reconcileRecoveredStock(reconciling.id, Number(countedStock), Number(countedBonus), note);
       setReconciling(null);
       await runOfflineSyncNow();
     } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
@@ -100,7 +100,8 @@ export function SyncIssuesPage() {
                   onClick={() => resolveIssue(issue)}
                   className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
-                  {issue.type === 'sale-stock-reconciliation' ? 'Reconcile stock' : 'Mark Resolved'}
+                  {issue.type === 'sale-stock-reconciliation' || issue.type === 'purchase-return-stock-reconciliation'
+                    ? 'Reconcile stock' : 'Mark Resolved'}
                 </button>
               </div>
             ))}
@@ -110,7 +111,7 @@ export function SyncIssuesPage() {
       {reconciling && <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl p-6 max-w-lg w-full space-y-4">
           <h2 className="text-xl font-bold">Reconcile {reconciling.medicineName}</h2>
-          <p className="text-sm text-gray-600">Receipt {reconciling.receiptNo} is saved. Count the stock physically remaining in this exact batch ({reconciling.batchNo || 'no batch number'}), after all sales and returns. This saves an audited stock correction.</p>
+          <p className="text-sm text-gray-600">{reconciling.receiptNo ? `Receipt ${reconciling.receiptNo}` : `Purchase return ${reconciling.returnNo}`} is saved. Count the stock physically remaining in this exact batch ({reconciling.batchNo || 'no batch number'}), after all sales and returns. This saves an audited stock correction.</p>
           <label className="block text-sm">Total units counted<input type="number" min="0" step="1" value={countedStock} onChange={event => setCountedStock(event.target.value)} className="mt-1 w-full border rounded-lg p-2" /></label>
           <label className="block text-sm">Bonus units within that total<input type="number" min="0" step="1" value={countedBonus} onChange={event => setCountedBonus(event.target.value)} className="mt-1 w-full border rounded-lg p-2" /></label>
           <label className="block text-sm">Reconciliation note<textarea value={note} onChange={event => setNote(event.target.value)} className="mt-1 w-full border rounded-lg p-2" /></label>

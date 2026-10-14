@@ -240,6 +240,21 @@ integrationDescribe('Firestore offline operational rules', () => {
     await assertSucceeds(batch.commit());
   });
 
+  it('allows lossless purchase-return recovery with a non-negative partial stock adjustment', async () => {
+    const database = environment.authenticatedContext('pharmacist-1').firestore();
+    const batch = writeBatch(database);
+    batch.set(doc(database, 'purchaseReturns', 'purchase-return-shortage'), {
+      returnNo: 'PR-R0N2-000033', medicineId: 'batch-a', totalUnitsReturned: 119,
+      stockAppliedUnits: 100, stockUnappliedUnits: 19,
+      stockReconciliation: [{ medicineId: 'batch-a', requestedUnits: 119, appliedUnits: 100, unappliedUnits: 19 }],
+    });
+    batch.update(doc(database, 'medicines', 'batch-a'), { stock: 0, bonusStockUnits: 0 });
+    batch.set(doc(database, 'syncIssues', 'purchase-return-stock-purchase-return-shortage'), {
+      type: 'purchase-return-stock-reconciliation', status: 'open', medicineId: 'batch-a', unappliedUnits: 19,
+    });
+    await assertSucceeds(batch.commit());
+  });
+
   it('applies a customer payment record, balance, and due-sale update atomically', async () => {
     await environment.withSecurityRulesDisabled(async context => {
       await setDoc(doc(context.firestore(), 'sales', 'sale-due'), {
