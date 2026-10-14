@@ -82,7 +82,13 @@ export async function removePendingSaleReturn(returnId: string) {
       ? status.pending.rejectedRecordIds.map(String).filter(id => id !== returnId)
       : [];
     await setLocalSyncMetadata('saleReturns', {
-      pending: { recoveryRecords, rejectedRecordIds },
+      pending: {
+        recoveryRecords,
+        rejectedRecordIds,
+        hasPendingWrites: rejectedRecordIds.length > 0,
+        count: rejectedRecordIds.length > 0 ? 1 : 0,
+        lastError: rejectedRecordIds.length > 0 ? String(status.pending.lastError || '') : '',
+      },
     });
   } catch {
     // Cloud confirmation is authoritative. Metadata cleanup can safely retry

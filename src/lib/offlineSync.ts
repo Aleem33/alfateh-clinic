@@ -19,6 +19,13 @@ import {
   removePendingSaleReturn,
   replayPendingSaleReturnRecords,
 } from '../pos/lib/offlineSaleReturnsOutbox';
+import {
+  countPendingPurchaseReturns,
+  listPendingPurchaseReturns,
+  recoverPendingPurchaseReturnsFromMirror,
+  removePendingPurchaseReturn,
+  replayPendingPurchaseReturnRecords,
+} from '../pos/lib/offlinePurchaseReturnsOutbox';
 import { getLocalCollectionOnce } from './collectionRepository';
 import {
   findClearedStockIssueIds,
@@ -66,6 +73,7 @@ let syncing = false;
 let labPendingCount = 0;
 let posSalePendingCount = 0;
 let saleReturnPendingCount = 0;
+let purchaseReturnPendingCount = 0;
 let pendingCount = 0;
 let issueCount = 0;
 let lastError = '';
@@ -84,14 +92,15 @@ function currentSnapshot(): SyncSnapshot {
   return {
     online, syncing, pendingCount, issueCount, lastError, devicePrefix: device.prefix,
     pendingSales: posSalePendingCount,
-    pendingReturns: saleReturnPendingCount,
+    pendingReturns: saleReturnPendingCount + purchaseReturnPendingCount,
     pendingLabReports: labPendingCount,
     pendingCollections: [...pendingWriteCollections].sort(),
   };
 }
 
 function recomputePendingCount() {
-  pendingCount = labPendingCount + posSalePendingCount + saleReturnPendingCount + pendingWriteCollections.size;
+  pendingCount = labPendingCount + posSalePendingCount + saleReturnPendingCount
+    + purchaseReturnPendingCount + pendingWriteCollections.size;
 }
 
 function notify() {
@@ -136,6 +145,7 @@ async function refreshPendingCount() {
     labPendingCount = records.length;
     posSalePendingCount = await countPendingPosSales();
     saleReturnPendingCount = await countPendingSaleReturns();
+    purchaseReturnPendingCount = await countPendingPurchaseReturns();
   } catch (error: any) {
     // Never turn a local queue read failure into a false "0 pending" state.
     // Keeping the last known counts and surfacing the error ensures LAN
@@ -281,6 +291,50 @@ async function replayPendingSaleReturns() {
   });
 }
 
+async function replayPendingPurchaseReturns() {
+  await recoverPendingPurchaseReturnsFromMirror();
+  const records = await listPendingPurchaseReturns();
+  await replayPendingPurchaseReturnRecords(records, {
+    returnExists: async returnId => {
+      const snapshot = await getDocFromServer(doc(db, 'purchaseReturns', returnId));
+      if (!snapshot.exists()) return false;
+      await upsertLocalRecords('purchaseReturns', [{ id: returnId, data: snapshot.data(), pending: false }]);
+      return true;
+    },
+    replay: async record => {
+      await runTransaction(db, async transaction => {
+        const returnRef = doc(db, 'purchaseReturns', record.returnId);
+        const medicineRef = doc(db, 'medicines', record.medicineId);
+        const [returnSnapshot, medicineSnapshot] = await Promise.all([
+          transaction.get(returnRef),
+          transaction.get(medicineRef),
+        ]);
+        if (returnSnapshot.exists()) return;
+        if (!medicineSnapshot.exists()) {
+          throw new Error(`Purchase return ${record.returnData.returnNo || record.returnId} references a medicine batch that no longer exists.`);
+        }
+        const medicine = medicineSnapshot.data();
+        const stock = Number(medicine.stock || 0);
+        const bonusStock = Math.min(stock, Math.max(0, Number(medicine.bonusStockUnits || 0)));
+        const paidUnits = Math.max(0, record.totalUnits - record.bonusUnits);
+        const paidStock = Math.max(0, stock - bonusStock);
+        if (paidUnits > paidStock || record.bonusUnits > bonusStock) {
+          throw new Error(
+            `Purchase return ${record.returnData.returnNo || record.returnId} is safely preserved, but the selected batch now has `
+            + `${paidStock} paid and ${bonusStock} bonus units available; it needs ${paidUnits} paid and ${record.bonusUnits} bonus units.`,
+          );
+        }
+        transaction.set(returnRef, record.returnData);
+        transaction.update(medicineRef, {
+          stock: stock - record.totalUnits,
+          bonusStockUnits: bonusStock - record.bonusUnits,
+        });
+      });
+    },
+    remove: removePendingPurchaseReturn,
+  });
+}
+
 async function checkStockConflicts() {
   // Only admins can read/reconcile syncIssues. Running this scan on every staff
   // device previously multiplied reads and let cached negative results revive a
@@ -356,7 +410,10 @@ export async function runOfflineSyncNow() {
   try {
     // Capture legacy pending/rejected returns before Firestore drains its SDK
     // queue or an authoritative snapshot replaces operational mirror records.
-    await recoverPendingSaleReturnsFromMirror();
+    await Promise.all([
+      recoverPendingSaleReturnsFromMirror(),
+      recoverPendingPurchaseReturnsFromMirror(),
+    ]);
     try {
       await waitForSyncStep(waitForPendingWrites(db), 30_000, 'Queued cloud writes');
     } catch (error: any) {
@@ -372,7 +429,7 @@ export async function runOfflineSyncNow() {
     }
     const errors: string[] = [];
     // A failure in one durable queue must not starve other completed entries.
-    for (const step of [replayPendingPosSales, replayPendingSaleReturns, processLabReportQueue, checkStockConflicts]) {
+    for (const step of [replayPendingPosSales, replayPendingSaleReturns, replayPendingPurchaseReturns, processLabReportQueue, checkStockConflicts]) {
       try { await step(); }
       catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
     }
@@ -419,6 +476,7 @@ export function startOfflineSyncService() {
   };
   window.addEventListener('alfateh:pos-outbox-changed', onOutboxChanged);
   window.addEventListener('alfateh:return-outbox-changed', onOutboxChanged);
+  window.addEventListener('alfateh:purchase-return-outbox-changed', onOutboxChanged);
   subscribeLanStatus(lanStatus => updateOnline(lanStatus.online));
   subscribeOfflineCache(cacheStatus => {
     pendingWriteCollections.clear();

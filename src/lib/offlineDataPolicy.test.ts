@@ -13,6 +13,8 @@ describe('offline data access policy', () => {
     expect(canRoleReadOfflineCollection('pharmacist', 'auditLogs')).toBe(false);
     expect(canRoleReadOfflineCollection('pharmacist', 'syncIssues')).toBe(false);
     expect(canRoleReadOfflineCollection('pharmacist', 'expenses')).toBe(false);
+    expect(canRoleReadOfflineCollection('pharmacist', 'posExpenses')).toBe(true);
+    expect(canRoleReadOfflineCollection('cashier', 'posExpenses')).toBe(false);
     expect(canRoleReadOfflineCollection('pharmacist', 'users')).toBe(false);
   });
 

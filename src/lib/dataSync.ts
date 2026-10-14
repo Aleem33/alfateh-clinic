@@ -17,6 +17,9 @@ import { getSyncControl } from './syncProtocol';
 import { trustedNowISO } from './trustedClock';
 import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
 import { getActiveAuthSession } from './offlineAuth';
+import { countPendingPosSales } from '../pos/lib/offlineSalesOutbox';
+import { countPendingSaleReturns } from '../pos/lib/offlineSaleReturnsOutbox';
+import { countPendingPurchaseReturns } from '../pos/lib/offlinePurchaseReturnsOutbox';
 
 export { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
 
@@ -62,6 +65,7 @@ export const RESET_COLLECTIONS: Record<ResetScope, string[]> = {
     'medicines',
     'suppliers',
     'purchases',
+    'posPurchases',
     'purchaseReturns',
     'sales',
     'heldBills',
@@ -72,6 +76,7 @@ export const RESET_COLLECTIONS: Record<ResetScope, string[]> = {
     'customers',
     'customerPayments',
     'expenses',
+    'posExpenses',
     'pharmacyOrders',
   ],
 };
@@ -106,6 +111,30 @@ async function canExportCompleteLocalMirror() {
   }
 }
 
+async function assertNoPendingBusinessEntriesForBackup() {
+  const [pendingSales, pendingSaleReturns, pendingPurchaseReturns, statuses] = await Promise.all([
+    countPendingPosSales(),
+    countPendingSaleReturns(),
+    countPendingPurchaseReturns(),
+    Promise.all(GLOBAL_DATA_COLLECTIONS.map(getLocalSyncStatus)),
+  ]);
+  const pendingCollections = GLOBAL_DATA_COLLECTIONS.filter((_, index) => {
+    const pending = statuses[index].pending;
+    return pending.hasPendingWrites === true
+      || Number(pending.count || 0) > 0
+      || (Array.isArray(pending.rejectedRecordIds) && pending.rejectedRecordIds.length > 0)
+      || (Array.isArray(pending.recoveryRecords) && pending.recoveryRecords.length > 0);
+  });
+  const queued = pendingSales + pendingSaleReturns + pendingPurchaseReturns;
+  if (queued > 0 || pendingCollections.length > 0) {
+    const detail = [
+      queued > 0 ? `${queued} queued sale/return operation(s)` : '',
+      pendingCollections.length > 0 ? `unconfirmed data in ${pendingCollections.join(', ')}` : '',
+    ].filter(Boolean).join(' and ');
+    throw new Error(`A complete backup cannot be created while ${detail}. Connect to the internet, use Retry uploads now, and export again after Pending cloud changes is 0.`);
+  }
+}
+
 function isExpenseInScope(data: any, scope: ResetScope) {
   if (scope === 'lab') return false;
   const value = data?.scope || data?.app || data?.module || data?.source || data?.createdFrom;
@@ -124,6 +153,7 @@ export async function exportAllAppData(onProgress?: ProgressFn): Promise<BackupF
   if (getActiveAuthSession()?.profile.role !== 'admin') {
     throw new Error('Only an admin account can export the complete application database.');
   }
+  await assertNoPendingBusinessEntriesForBackup();
   const backup: BackupFile = {
     exportedAt: trustedNowISO(),
     version: '2.0',

@@ -11,6 +11,12 @@ import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { getTrustedClockReading } from '../../lib/trustedClock';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 import { findPurchaseReturnMedicine, resolvePurchaseReturnFinancials, resolvePurchaseUnitCost } from '../lib/purchaseReturnFinancials';
+import { isCloudOnline } from '../../lib/lanCoordinator';
+import {
+  createPendingPurchaseReturn,
+  queuePendingPurchaseReturn,
+  removePendingPurchaseReturn,
+} from '../lib/offlinePurchaseReturnsOutbox';
 
 // ── Print via hidden iframe ───────────────────────────────────────────────────
 function printSlip(slipHtml: string) {
@@ -229,12 +235,18 @@ export function PurchaseReturns() {
 
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'purchaseReturns'));
+      const recoveryRecord = createPendingPurchaseReturn(docRef.id, returnDoc);
+      // Save the complete operation before committing. If Firestore rejects an
+      // offline batch later, the exact return can be replayed without duplicate
+      // stock deductions or loss of the supplier return entry.
+      await queuePendingPurchaseReturn(recoveryRecord);
       batch.set(docRef, returnDoc);
       batch.update(doc(db, 'medicines', selectedPurchase.medicineId), {
         stock: increment(-totalUnitsToReturn),
         ...(bonusUnitsToReturn > 0 ? { bonusStockUnits: increment(-bonusUnitsToReturn) } : {}),
       });
       await batch.commit();
+      if (isCloudOnline()) await removePendingPurchaseReturn(docRef.id);
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setSelectedPurchase(null);
