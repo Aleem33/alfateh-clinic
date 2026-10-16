@@ -69,6 +69,7 @@ const persistenceQueues = new Map<string, Promise<void>>();
 const incrementalEpochs = new Map<string, number>();
 const incrementalRestarts = new Map<string, ReturnType<typeof setTimeout>>();
 const legacyRestarts = new Map<string, ReturnType<typeof setTimeout>>();
+const collectionListenerErrors = new Map<string, string>();
 let controlUnsubscribe: (() => void) | null = null;
 let lanUnsubscribe: (() => void) | null = null;
 let lastOnline: boolean | null = null;
@@ -163,6 +164,7 @@ function isDuplicateListenerTargetError(error: unknown) {
 }
 
 function stopCollectionListeners() {
+  collectionListenerErrors.clear();
   legacyRestarts.forEach(timer => clearTimeout(timer));
   legacyRestarts.clear();
   incrementalRestarts.forEach(timer => clearTimeout(timer));
@@ -443,6 +445,12 @@ function startRejectedWriteListener() {
         const recoveryRecords = await queryLocalRecords(collectionName, {
           includeDeleted: true, filter: record => recordIds.includes(record.id),
         });
+        const submittedRecords = collectionActivities.flatMap(activity => (
+          activity.recoveryComplete === true && activity.recoveryData
+            && typeof activity.recoveryData === 'object'
+            ? [{ id: String(activity.recordId), data: activity.recoveryData, pending: true }]
+            : []
+        ));
         await setLocalSyncMetadata(collectionName, {
         pending: {
           hasPendingWrites: true,
@@ -452,6 +460,7 @@ function startRejectedWriteListener() {
           recoveryRecords: [
             ...(Array.isArray(status.pending.recoveryRecords) ? status.pending.recoveryRecords : []),
             ...recoveryRecords,
+            ...submittedRecords,
           ],
           lastQueuedAt: new Date().toISOString(),
         },
@@ -511,8 +520,11 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
         reason: readReason,
         documents: readReason === 'initial' ? result.docs.length : result.docChanges().filter(change => change.type !== 'removed').length,
       });
-      serverDelivered.add(collectionName);
       const checkpoint = checkpointFromDocuments(result.docs);
+      // The first server snapshot establishes completeness. Later deliveries
+      // already contain an exact change set; rewriting every historical row on
+      // each stock change causes UI stalls and long persistence backlogs.
+      const changes = firstServerDelivery ? null : result.docChanges({ includeMetadataChanges: true });
       void queuePersistence(collectionName, run, async () => {
         const localStatus = await getLocalSyncStatus(collectionName);
         const rejectedIds = new Set(
@@ -530,7 +542,12 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
           // must keep following the authoritative server after a rejection.
           recoveryRecords = protectedRecords.filter(record => record.pending);
         }
-        await replaceLocalCollection(collectionName, inputs, {
+        const changedInputs = changes ? changes.map(change => {
+          const input = mirrorInputs([change.doc])[0];
+          return change.type === 'removed' ? { ...input, deleted: true, pending: false } : input;
+        }) : inputs;
+        const persist = firstServerDelivery ? replaceLocalCollection : upsertLocalRecords;
+        await persist(collectionName, changedInputs, {
           seedComplete: true,
           generation: control.datasetGeneration,
           checkpoint: checkpoint || undefined,
@@ -544,6 +561,12 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
         });
         await reconcileAuthoritativeRejectedWrites(collectionName);
         if (run !== lifecycle) return;
+        serverDelivered.add(collectionName);
+        const recoveredListenerError = collectionListenerErrors.get(collectionName);
+        collectionListenerErrors.delete(collectionName);
+        if (recoveredListenerError && lastError === recoveredListenerError && rejected.size === 0) {
+          lastError = [...collectionListenerErrors.values()][0] || '';
+        }
         if (hasPendingWrites) serverReconciled.delete(collectionName);
         else serverReconciled.add(collectionName);
         clearRecoveredTransientSyncError();
@@ -554,12 +577,17 @@ function startLegacyListener(collectionName: string, control: SyncControl, run: 
     error => {
       if (run !== lifecycle) return;
       serverReconciled.delete(collectionName);
+      collectionListenerErrors.set(collectionName, error.message);
       handleError(error);
       // Firestore Web can occasionally reject a re-established watch target
       // after a network disable/enable cycle. The business data and local
       // mirror are unaffected. Retire only this listener and require a fresh
       // authoritative snapshot before reporting the collection as confirmed.
-      if (isDuplicateListenerTargetError(error)) scheduleLegacyRestart(collectionName, control, run);
+      const code = String((error as { code?: string })?.code || '');
+      if (isDuplicateListenerTargetError(error)
+        || ['permission-denied', 'unauthenticated', 'unavailable', 'deadline-exceeded', 'internal', 'resource-exhausted'].includes(code)) {
+        scheduleLegacyRestart(collectionName, control, run, isDuplicateListenerTargetError(error) ? 5_000 : 30_000);
+      }
     },
   );
   activeUnsubscribers.set(collectionName, unsubscribe);
@@ -572,6 +600,8 @@ function scheduleLegacyRestart(collectionName: string, control: SyncControl, run
     if (run !== lifecycle || mode !== 'legacy') return;
     activeUnsubscribers.get(collectionName)?.();
     activeUnsubscribers.delete(collectionName);
+    serverDelivered.delete(collectionName);
+    serverReconciled.delete(collectionName);
     reconnectPending.add(collectionName);
     startLegacyListener(collectionName, control, run);
   }, delay));
@@ -984,6 +1014,7 @@ export function stopFullOfflineCache() {
   registeredReadyState = null;
   registrationError = '';
   readinessAuditRun = null;
+  lastError = '';
   mode = 'legacy';
   if (rejectionListener && typeof window !== 'undefined') {
     window.removeEventListener('alfateh:firestore-write-rejected', rejectionListener);

@@ -170,34 +170,64 @@ export async function exportAllAppData(onProgress?: ProgressFn): Promise<BackupF
     onProgress?.(`Exporting ${collectionName}...`);
     if (useLocalMirror) {
       const records = await queryLocalRecords(collectionName, { includeDeleted: true });
-      backup.collections[collectionName] = records.map(record => ({ _id: record.id, ...record.data }));
+      backup.collections[collectionName] = records.map(record => ({ ...record.data, _id: record.id }));
       continue;
     }
     const snap = await getDocsFromServer(collection(db, collectionName));
     recordFirestoreRead({ collection: collectionName, source: 'query', reason: 'manual', documents: snap.size });
-    backup.collections[collectionName] = snap.docs.map(document => ({ _id: document.id, ...document.data() }));
+    backup.collections[collectionName] = snap.docs.map(document => ({ ...document.data(), _id: document.id }));
   }
 
   return backup;
 }
 
 export async function restoreAllAppData(backup: BackupFile, onProgress?: ProgressFn) {
+  if (getActiveAuthSession()?.profile.role !== 'admin') {
+    throw new Error('Only an admin account can restore application data.');
+  }
+  if (!isCloudOnline()) throw new Error('Connect to the internet before restoring a backup.');
   if (!backup?.collections || typeof backup.collections !== 'object') {
     throw new Error('Invalid backup file.');
   }
+  // Validate the whole input before changing anything. Restore must never
+  // overwrite newer live balances/stock or modify synchronization controls.
+  for (const [name, records] of Object.entries(backup.collections)) {
+    if (!GLOBAL_DATA_COLLECTIONS.includes(name) || !Array.isArray(records)) {
+      throw new Error(`Unsupported backup collection: ${name}. No records were restored.`);
+    }
+    const ids = new Set<string>();
+    for (const record of records) {
+      if (!record || typeof record !== 'object' || typeof record._id !== 'string'
+        || !record._id.trim() || record._id.includes('/') || ids.has(record._id)) {
+        throw new Error(`Invalid or repeated document ID in ${name}. No records were restored.`);
+      }
+      ids.add(record._id);
+    }
+  }
+  await assertNoPendingBusinessEntriesForBackup();
 
   let totalDocs = 0;
   for (const collectionName of getRestoreCollections(backup.collections)) {
     const docs = backup.collections[collectionName] || [];
     if (!docs.length) continue;
 
-    onProgress?.(`Importing ${collectionName} (${docs.length} records)...`);
-    await commitInChunks(docs, (batch, docData: any) => {
-      const { _id, ...data } = docData;
-      if (!_id) return;
-      batch.set(doc(db, collectionName, _id), data);
-    });
-    totalDocs += docs.length;
+    onProgress?.(`Restoring missing ${collectionName} records (${docs.length} to check)...`);
+    for (let offset = 0; offset < docs.length; offset += 100) {
+      const page = docs.slice(offset, offset + 100);
+      const restored = await runTransaction(db, async transaction => {
+        const references = page.map(record => doc(db, collectionName, record._id));
+        const snapshots = await Promise.all(references.map(reference => transaction.get(reference)));
+        let count = 0;
+        snapshots.forEach((snapshot, index) => {
+          if (snapshot.exists()) return;
+          const { _id, ...data } = page[index];
+          transaction.set(references[index], data);
+          count += 1;
+        });
+        return count;
+      });
+      totalDocs += restored;
+    }
   }
 
   return totalDocs;

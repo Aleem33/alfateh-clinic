@@ -70,6 +70,7 @@ describe('Firestore sync metadata gateway', () => {
     firestoreMock.batches.length = 0;
     firestoreMock.serverTimestamp.mockReturnValue(firestoreMock.timestamp);
     firestoreMock.addDoc.mockResolvedValue(medicineRef);
+    firestoreMock.doc.mockReturnValue(medicineRef);
     firestoreMock.setDoc.mockResolvedValue(undefined);
     firestoreMock.updateDoc.mockResolvedValue(undefined);
     firestoreMock.deleteDoc.mockResolvedValue(undefined);
@@ -88,7 +89,7 @@ describe('Firestore sync metadata gateway', () => {
     const input = { name: 'Medicine A', stock: 4 };
 
     await expect(addDoc(collectionRef, input)).resolves.toBe(medicineRef);
-    expect(firestoreMock.addDoc).toHaveBeenCalledWith(collectionRef, {
+    expect(firestoreMock.setDoc).toHaveBeenCalledWith(medicineRef, {
       ...input,
       syncUpdatedAt: firestoreMock.timestamp,
       syncProtocolVersion: 2,
@@ -330,13 +331,16 @@ describe('Firestore sync metadata gateway', () => {
     vi.stubGlobal('window', appWindow);
     const rejected = vi.fn();
     appWindow.addEventListener('alfateh:firestore-write-rejected', rejected);
-    firestoreMock.addDoc.mockRejectedValueOnce(new Error('permission denied'));
+    firestoreMock.setDoc.mockRejectedValueOnce(new Error('permission denied'));
 
     await expect(addDoc(collectionRef, { name: 'Protected entry' })).rejects.toThrow('permission denied');
     expect(rejected).toHaveBeenCalledOnce();
     expect((rejected.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
       message: 'permission denied',
-      activities: [expect.objectContaining({ collection: 'medicines' })],
+      activities: [expect.objectContaining({
+        collection: 'medicines', recordId: 'medicine-1',
+        recoveryComplete: true, recoveryData: { name: 'Protected entry' },
+      })],
     });
   });
 
@@ -355,6 +359,26 @@ describe('Firestore sync metadata gateway', () => {
         recordId: 'medicine-1',
         changedFields: ['archived', 'restoredAt'],
       })],
+    });
+  });
+
+  it('confirms only the successful transaction attempt with its affected document IDs', async () => {
+    const appWindow = new EventTarget();
+    vi.stubGlobal('window', appWindow);
+    const confirmed = vi.fn();
+    appWindow.addEventListener('alfateh:firestore-write-confirmed', confirmed);
+    const transaction = { set: vi.fn(), update: vi.fn() };
+    firestoreMock.runTransaction.mockImplementation(async (_db: unknown, callback: any) => {
+      await callback(transaction);
+      return callback(transaction);
+    });
+    await runTransaction({} as any, async transaction => {
+      transaction.set(medicineRef, { stock: 10 });
+    });
+    expect(confirmed).toHaveBeenCalledOnce();
+    expect((confirmed.mock.calls[0][0] as CustomEvent).detail.activities).toHaveLength(1);
+    expect((confirmed.mock.calls[0][0] as CustomEvent).detail.activities[0]).toMatchObject({
+      recordId: 'medicine-1', changedFields: ['stock'],
     });
   });
 });

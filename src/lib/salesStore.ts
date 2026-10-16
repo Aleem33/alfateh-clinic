@@ -2,6 +2,7 @@ import type { Unsubscribe } from 'firebase/firestore';
 import { subscribeToLocalCollection } from './collectionRepository';
 import { listPendingPosSales } from '../pos/lib/offlineSalesOutbox';
 import { listPendingSaleReturns } from '../pos/lib/offlineSaleReturnsOutbox';
+import { listPendingPurchaseReturns } from '../pos/lib/offlinePurchaseReturnsOutbox';
 
 export type SalesRecord = Record<string, any> & {
   id: string;
@@ -15,7 +16,7 @@ type Subscriber = {
 };
 
 type Resource = {
-  collectionName: 'sales' | 'saleReturns';
+  collectionName: 'sales' | 'saleReturns' | 'purchaseReturns';
   subscribers: Set<Subscriber>;
   records: SalesRecord[];
   hasPublished: boolean;
@@ -28,6 +29,7 @@ function resource(collectionName: Resource['collectionName']): Resource {
 
 const salesResource = resource('sales');
 const returnsResource = resource('saleReturns');
+const purchaseReturnsResource = resource('purchaseReturns');
 
 function startListener(target: Resource) {
   if (target.listener) return;
@@ -55,7 +57,9 @@ function startListener(target: Resource) {
     try {
       const records = target.collectionName === 'sales'
         ? (await listPendingPosSales()).map(record => ({ ...record.saleData, id: record.saleId }))
-        : (await listPendingSaleReturns()).map(record => ({ ...record.returnData, id: record.returnId }));
+        : target.collectionName === 'saleReturns'
+          ? (await listPendingSaleReturns()).map(record => ({ ...record.returnData, id: record.returnId }))
+          : (await listPendingPurchaseReturns()).map(record => ({ ...record.returnData, id: record.returnId }));
       if (stopped || current !== revision) return;
       queuedRecords = records;
       queueReady = true;
@@ -64,7 +68,8 @@ function startListener(target: Resource) {
       if (!stopped) target.subscribers.forEach(subscriber => subscriber.onError?.(error));
     }
   };
-  const eventName = target.collectionName === 'sales' ? 'alfateh:pos-outbox-changed' : 'alfateh:return-outbox-changed';
+  const eventName = target.collectionName === 'sales' ? 'alfateh:pos-outbox-changed'
+    : target.collectionName === 'saleReturns' ? 'alfateh:return-outbox-changed' : 'alfateh:purchase-return-outbox-changed';
   const onQueueChanged = () => { void refreshQueue(); };
   if (typeof window !== 'undefined') window.addEventListener(eventName, onQueueChanged);
   void refreshQueue();
@@ -106,4 +111,8 @@ export function subscribeToSales(onData: Subscriber['onData'], onError?: Subscri
 
 export function subscribeToSaleReturns(onData: Subscriber['onData'], onError?: Subscriber['onError']): Unsubscribe {
   return subscribe(returnsResource, onData, onError);
+}
+
+export function subscribeToPurchaseReturns(onData: Subscriber['onData'], onError?: Subscriber['onError']): Unsubscribe {
+  return subscribe(purchaseReturnsResource, onData, onError);
 }

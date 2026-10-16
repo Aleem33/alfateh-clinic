@@ -454,7 +454,7 @@ export function Billing() {
         businessDate: clinicDateKey(saleTimestamp),
         timeSource: saleClock.source,
         customerType,
-        cashierId: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
+        cashierId: getActiveAuthSession()?.profile.uid || auth.currentUser?.uid || '',
       };
       if (selectedCustomer) {
         saleData.customerId    = selectedCustomer.id;
@@ -483,7 +483,7 @@ export function Billing() {
           bonusUnits: -Number(item.bonusUnitsSold || 0),
           deviceReceiptNo: receiptNo,
           createdAt: saleTimestamp,
-          cashierId: auth.currentUser?.uid || '',
+          cashierId: getActiveAuthSession()?.profile.uid || auth.currentUser?.uid || '',
         };
         movements.push({ id: movementRef.id, data: movementData });
         batch.set(movementRef, movementData);

@@ -74,6 +74,17 @@ function referenceDetails(reference: any, data?: AnyRecord) {
   };
 }
 
+function recoveryDetails(data: AnyRecord, complete = false) {
+  // Keep the submitted payload independent of Firestore's latency-compensated
+  // snapshot: a rejection can roll that snapshot back before the mirror sees it.
+  return { recoveryData: JSON.parse(JSON.stringify(data)), recoveryComplete: complete };
+}
+
+function publishActivity(activity: AnyRecord) {
+  const { recoveryData: _data, recoveryComplete: _complete, ...summary } = activity;
+  void publishLanActivity(summary);
+}
+
 function reportRejectedWrite(error: unknown, activities: AnyRecord[]) {
   if (error instanceof Error && error.name === 'InsufficientStockError') return;
   if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
@@ -90,10 +101,15 @@ function reportConfirmedWrite(activities: AnyRecord[]) {
   }));
 }
 
+/** Call only after reading a document from the server without pending writes. */
+export function confirmRecoveredDocument(reference: any, data: AnyRecord) {
+  reportConfirmedWrite([{ action: 'recovered', ...referenceDetails(reference, data) }]);
+}
+
 async function executeWrite<T>(run: () => Promise<T>, activity: AnyRecord): Promise<T | undefined> {
   await ensureLanWriteAccess();
   const pending = run();
-  void publishLanActivity(activity);
+  publishActivity(activity);
   if (typeof navigator !== 'undefined' && !isCloudOnline()) {
     pending.then(() => reportConfirmedWrite([activity])).catch(() => undefined);
     pending.catch(error => {
@@ -114,28 +130,9 @@ async function executeWrite<T>(run: () => Promise<T>, activity: AnyRecord): Prom
 export const addDoc: typeof firestore.addDoc = (async (reference: any, data: AnyRecord) => {
   await ensureLanWriteAccess();
   const syncedData = withSyncMetadata(data);
-  if (isCloudOnline()) {
-    try {
-      const documentRef = await firestore.addDoc(reference, syncedData);
-      const activity = { action: 'created', ...referenceDetails(documentRef, data) };
-      void publishLanActivity(activity);
-      reportConfirmedWrite([activity]);
-      return documentRef;
-    } catch (error) {
-      reportRejectedWrite(error, [{ action: 'created', ...referenceDetails(reference, data) }]);
-      throw error;
-    }
-  }
   const documentRef = firestore.doc(reference);
-  const pending = firestore.setDoc(documentRef, syncedData);
-  pending.then(() => reportConfirmedWrite([
-    { action: 'created', ...referenceDetails(documentRef, data) },
-  ])).catch(() => undefined);
-  pending.catch(error => {
-    reportRejectedWrite(error, [{ action: 'created', ...referenceDetails(documentRef, data) }]);
-    console.warn('Queued LAN-primary create failed after reconnect:', error);
-  });
-  void publishLanActivity({ action: 'created', ...referenceDetails(documentRef, data) });
+  const activity = { action: 'created', ...referenceDetails(documentRef, data), ...recoveryDetails(data, true) };
+  await executeWrite(() => firestore.setDoc(documentRef, syncedData), activity);
   return documentRef;
 }) as typeof firestore.addDoc;
 
@@ -144,7 +141,7 @@ export const setDoc: typeof firestore.setDoc = (async (reference: any, data: Any
   const syncedOptions = withSyncMergeFields(options);
   await executeWrite(
     () => syncedOptions ? firestore.setDoc(reference, syncedData, syncedOptions) : firestore.setDoc(reference, syncedData),
-    { action: 'saved', ...referenceDetails(reference, data) },
+    { action: 'saved', ...referenceDetails(reference, data), ...recoveryDetails(data, !options) },
   );
 }) as typeof firestore.setDoc;
 
@@ -153,7 +150,7 @@ export const updateDoc: typeof firestore.updateDoc = (async (reference: any, dat
   const updateArguments = withSyncUpdateArguments(dataOrField, moreFieldsAndValues);
   await executeWrite(
     () => (firestore.updateDoc as any)(reference, ...updateArguments),
-    { action: 'updated', ...referenceDetails(reference, data) },
+    { action: 'updated', ...referenceDetails(reference, data), ...recoveryDetails(data) },
   );
 }) as typeof firestore.updateDoc;
 
@@ -176,7 +173,7 @@ function createWriteBatch(database: any, permanentDeletes: boolean) {
   const activities: AnyRecord[] = [];
   const facade: AnyRecord = {
     set(reference: any, data: AnyRecord, options?: any) {
-      activities.push({ action: 'saved', ...referenceDetails(reference, data) });
+      activities.push({ action: 'saved', ...referenceDetails(reference, data), ...recoveryDetails(data, !options) });
       const syncedData = withSyncMetadata(data);
       const syncedOptions = withSyncMergeFields(options);
       if (syncedOptions) underlying.set(reference, syncedData, syncedOptions);
@@ -185,7 +182,7 @@ function createWriteBatch(database: any, permanentDeletes: boolean) {
     },
     update(reference: any, dataOrField: any, ...moreFieldsAndValues: any[]) {
       const data = moreFieldsAndValues.length === 0 && typeof dataOrField === 'object' && dataOrField !== null ? dataOrField : {};
-      activities.push({ action: 'updated', ...referenceDetails(reference, data) });
+      activities.push({ action: 'updated', ...referenceDetails(reference, data), ...recoveryDetails(data) });
       (underlying.update as any)(reference, ...withSyncUpdateArguments(dataOrField, moreFieldsAndValues));
       return facade;
     },
@@ -201,7 +198,7 @@ function createWriteBatch(database: any, permanentDeletes: boolean) {
         throw new Error('An administrative reset requires an online connection.');
       }
       const pending = underlying.commit();
-      activities.forEach(activity => void publishLanActivity(activity));
+      activities.forEach(publishActivity);
       if (!permanentDeletes && typeof navigator !== 'undefined' && !isCloudOnline()) {
         pending.then(() => reportConfirmedWrite(activities)).catch(() => undefined);
         pending.catch(error => {
@@ -231,12 +228,13 @@ export const writeHardDeleteBatch: typeof firestore.writeBatch = ((database: any
   createWriteBatch(database, true)
 )) as typeof firestore.writeBatch;
 
-function withSynchronizedTransaction(transaction: any) {
+function withSynchronizedTransaction(transaction: any, activities: AnyRecord[]) {
   let facade: any;
   facade = new Proxy(transaction, {
     get(target, property) {
       if (property === 'set') {
         return (reference: any, data: AnyRecord, options?: any) => {
+          activities.push({ action: 'saved', ...referenceDetails(reference, data), ...recoveryDetails(data, !options) });
           const syncedData = withSyncMetadata(data);
           const syncedOptions = withSyncMergeFields(options);
           if (syncedOptions) target.set(reference, syncedData, syncedOptions);
@@ -246,12 +244,15 @@ function withSynchronizedTransaction(transaction: any) {
       }
       if (property === 'update') {
         return (reference: any, dataOrField: any, ...moreFieldsAndValues: any[]) => {
+          const data = moreFieldsAndValues.length === 0 && typeof dataOrField === 'object' && dataOrField !== null ? dataOrField : {};
+          activities.push({ action: 'updated', ...referenceDetails(reference, data), ...recoveryDetails(data) });
           target.update(reference, ...withSyncUpdateArguments(dataOrField, moreFieldsAndValues));
           return facade;
         };
       }
       if (property === 'delete') {
         return (reference: any) => {
+          activities.push({ action: 'deleted', ...referenceDetails(reference) });
           target.update(reference, softDeleteMetadata());
           return facade;
         };
@@ -268,14 +269,23 @@ export const runTransaction: typeof firestore.runTransaction = (async (database:
   if (typeof navigator !== 'undefined' && !isCloudOnline()) {
     throw new Error('This operation requires an online database transaction. It is unavailable during offline mode.');
   }
+  let activities: AnyRecord[] = [];
   try {
-    return await firestore.runTransaction(
+    const result = await firestore.runTransaction(
       database,
-      (transaction: any) => updateFunction(withSynchronizedTransaction(transaction)),
+      (transaction: any) => {
+        // Firebase may retry this callback. Only the committed attempt can
+        // confirm recovery markers or publish successful activity.
+        activities = [];
+        return updateFunction(withSynchronizedTransaction(transaction, activities));
+      },
       options,
     );
+    reportConfirmedWrite(activities);
+    activities.forEach(publishActivity);
+    return result;
   } catch (error) {
-    reportRejectedWrite(error, [{ action: 'transaction rejected', collection: 'transaction', recordId: '' }]);
+    if (activities.length > 0) reportRejectedWrite(error, activities);
     throw error;
   }
 }) as typeof firestore.runTransaction;

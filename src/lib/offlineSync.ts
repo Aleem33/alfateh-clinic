@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, getDocFromServer, getDocsFromServer, query, runTransaction, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
+import { collection, confirmRecoveredDocument, doc, getDocFromServer, getDocsFromServer, query, runTransaction, setDoc, updateDoc, waitForPendingWrites, where } from '@/lib/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getOfflineDevice } from './offlineIdentity';
@@ -233,8 +233,10 @@ async function replayPendingPosSales() {
   await replayPendingPosSaleRecords(records, {
     saleExists: async saleId => {
       const snapshot = await getDocFromServer(doc(db, 'sales', saleId));
+      if (snapshot.metadata.hasPendingWrites) throw new Error(`Sale ${saleId} still has a queued cloud write; recovery will retry after acknowledgement.`);
       if (!snapshot.exists()) return false;
       await upsertLocalRecords('sales', [{ id: saleId, data: snapshot.data(), pending: false }]);
+      confirmRecoveredDocument(doc(db, 'sales', saleId), snapshot.data());
       return true;
     },
     replay: recoverPosSaleToCloud,
@@ -248,8 +250,10 @@ async function replayPendingSaleReturns() {
   await replayPendingSaleReturnRecords(records, {
     returnExists: async returnId => {
       const snapshot = await getDocFromServer(doc(db, 'saleReturns', returnId));
+      if (snapshot.metadata.hasPendingWrites) throw new Error(`Sales return ${returnId} still has a queued cloud write; recovery will retry after acknowledgement.`);
       if (!snapshot.exists()) return false;
       await upsertLocalRecords('saleReturns', [{ id: returnId, data: snapshot.data(), pending: false }]);
+      confirmRecoveredDocument(doc(db, 'saleReturns', returnId), snapshot.data());
       return true;
     },
     replay: async record => {
@@ -298,8 +302,10 @@ async function replayPendingPurchaseReturns() {
   await replayPendingPurchaseReturnRecords(records, {
     returnExists: async returnId => {
       const snapshot = await getDocFromServer(doc(db, 'purchaseReturns', returnId));
+      if (snapshot.metadata.hasPendingWrites) throw new Error(`Purchase return ${returnId} still has a queued cloud write; recovery will retry after acknowledgement.`);
       if (!snapshot.exists()) return false;
       await upsertLocalRecords('purchaseReturns', [{ id: returnId, data: snapshot.data(), pending: false }]);
+      confirmRecoveredDocument(doc(db, 'purchaseReturns', returnId), snapshot.data());
       return true;
     },
     replay: async record => {
@@ -407,6 +413,8 @@ export async function runOfflineSyncNow() {
     notify();
     return;
   }
+  const session = getActiveAuthSession();
+  if (!session || session.profile.uid !== auth.currentUser.uid) return;
   syncing = true;
   lastError = '';
   notify();

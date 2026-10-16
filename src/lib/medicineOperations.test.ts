@@ -14,7 +14,7 @@ const firestore = vi.hoisted(() => ({
 
 const store = vi.hoisted(() => ({ all: [] as any[] }));
 
-vi.mock('firebase/firestore', () => firestore);
+vi.mock('@/lib/firestore', () => firestore);
 vi.mock('../firebase', () => ({
   auth: { currentUser: { uid: 'admin-1', email: 'admin@example.com' } },
   db: {},
@@ -52,6 +52,7 @@ describe('createMedicineSafely', () => {
     store.all = [];
     firestore.getDocsFromServer.mockResolvedValue({ empty: true, docs: [] });
     firestore.addDoc.mockResolvedValue({ id: 'auto-generated-id' });
+    firestore.doc.mockReturnValue({ id: 'staged-batch-id' });
   });
 
   it('creates with a Firestore auto ID instead of addressing an existing document', async () => {
@@ -63,6 +64,19 @@ describe('createMedicineSafely', () => {
       archived: false,
       medicineKey: 'novidat 200 mg|injection|b 1|supplier a',
     });
+  });
+
+  it('stages new stock in the purchase batch without creating orphan medicine stock', async () => {
+    const batch = { set: vi.fn() };
+    await expect(createMedicineSafely(input, [], batch as any)).resolves.toBe('staged-batch-id');
+    expect(firestore.addDoc).not.toHaveBeenCalled();
+    expect(batch.set).toHaveBeenCalledWith({ id: 'staged-batch-id' }, expect.objectContaining({
+      stock: 1, name: input.name,
+    }));
+    // A second line for the same identity in this invoice must reuse the
+    // staged batch instead of creating a second medicine document.
+    await expect(createMedicineSafely(input, [], batch as any)).rejects.toBeInstanceOf(MedicineConflictError);
+    expect(batch.set).toHaveBeenCalledOnce();
   });
 
   it('blocks an exact duplicate found in the shared offline cache', async () => {

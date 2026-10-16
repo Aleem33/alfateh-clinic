@@ -1,4 +1,5 @@
 import { getLocalSyncStatus, queryLocalRecords, setLocalSyncMetadata } from '../../lib/localMirror';
+import { isDurableSubmissionActive, replayDurableRecords } from '../../lib/durableReplay';
 
 export type PendingSaleReturn = {
   returnId: string;
@@ -201,19 +202,12 @@ export async function replayPendingSaleReturnRecords(
     String(left.createdAt || '').localeCompare(String(right.createdAt || ''))
     || left.returnId.localeCompare(right.returnId)
   ));
-  const missing: PendingSaleReturn[] = [];
-  for (const record of ordered) {
-    if (await adapter.returnExists(record.returnId)) {
-      await adapter.remove(record.returnId);
-      continue;
-    }
-    missing.push(record);
-  }
-  for (const record of missing) {
-    await adapter.replay(record);
-    if (!(await adapter.returnExists(record.returnId))) {
-      throw new Error(`Sales return ${record.returnData.returnNo || record.returnId} could not be confirmed after replay.`);
-    }
-    await adapter.remove(record.returnId);
-  }
+  await replayDurableRecords(ordered, {
+    id: record => record.returnId,
+    label: record => String(record.returnData.returnNo || record.returnId),
+    isActive: id => isDurableSubmissionActive('saleReturns', id),
+    exists: adapter.returnExists,
+    replay: adapter.replay,
+    remove: adapter.remove,
+  });
 }

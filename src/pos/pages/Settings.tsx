@@ -271,7 +271,7 @@ export function Settings() {
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <p className="text-sm text-amber-800">
-              Importing will <strong>merge</strong> data with existing records using the same document IDs. Existing records with matching IDs will be overwritten. It will not delete records that aren't in the backup.
+              Restoring will add <strong>missing records</strong> using their original document IDs. Existing records are kept, including current stock, balances, and deleted or archived records.
             </p>
           </div>
 
@@ -358,7 +358,7 @@ export function Settings() {
                 <p className="text-gray-600 leading-relaxed">{summarizeBackup(pendingImportData)}</p>
               </div>
               <p className="text-sm text-amber-700 bg-amber-50 p-3 rounded-lg">
-                Existing records with the same IDs will be overwritten. New records will be added.
+                Missing records will be added. Existing records will be kept to protect current stock, balances, and history.
               </p>
             </div>
             <div className="flex justify-end gap-3 mt-6">

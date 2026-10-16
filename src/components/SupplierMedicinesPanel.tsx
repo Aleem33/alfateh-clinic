@@ -276,6 +276,7 @@ export function SupplierMedicinesPanel({
     setSaving(true);
     setError('');
     try {
+      const batch = writeBatch(db);
       const batchTarget = await ensureMedicinePurchaseBatch(purchasingMedicine, {
         batchNo,
         expiryDate: purchaseForm.expiryDate || purchasingMedicine.expiryDate || '',
@@ -287,8 +288,7 @@ export function SupplierMedicinesPanel({
         unitPrice,
         supplierId: supplier.id,
         supplierName: supplier.name,
-      }, medicines);
-      const batch = writeBatch(db);
+      }, medicines, batch);
       const purchaseRef = doc(collection(db, 'purchases'));
       const purchaseBillNo = getNextPurchaseBillNo();
       batch.set(purchaseRef, {

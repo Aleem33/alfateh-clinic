@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, doc, updateDoc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosSaleReturnNo } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { getReturnNo, getSaleReceiptLabel, getSaleReceiptNo } from '../lib/receiptNumbers';
-import { waitForOnlineWrite } from '../../lib/offlineWrite';
 import { Search, RotateCcw, X, CheckCircle, AlertTriangle, Printer, Trash2, Plus } from 'lucide-react';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { searchMedicines } from '../../lib/medicineIndex';
@@ -14,8 +13,9 @@ import { clinicDateKey, recordClinicDateTimeLabel } from '../../lib/clinicDate';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { getTrustedClockReading } from '../../lib/trustedClock';
 import { allocateReceiptReturn } from '../lib/bonusInventory';
-import { ensureLanWriteAccess, isCloudOnline } from '../../lib/lanCoordinator';
+import { ensureLanWriteAccess } from '../../lib/lanCoordinator';
 import { getActiveAuthSession } from '../../lib/offlineAuth';
+import { submitDurableReturn } from '../lib/submitDurableReturn';
 import {
   queuePendingSaleReturn,
   removePendingSaleReturn,
@@ -36,6 +36,7 @@ export function SalesReturns() {
   const [returnReason, setReturnReason] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [medicines, setMedicines] = useState<any[]>([]);
   const [showNoReceiptReturn, setShowNoReceiptReturn] = useState(false);
   const [medicineSearch, setMedicineSearch] = useState('');
@@ -209,7 +210,8 @@ export function SalesReturns() {
   };
 
   const handleSubmit = async () => {
-    if (!hasAnyReturn || !selectedSale || submitting) return;
+    if (!hasAnyReturn || !selectedSale || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const returnNo = await getNextPosSaleReturnNo();
@@ -249,7 +251,7 @@ export function SalesReturns() {
         trustedDate: returnTimestamp,
         businessDate: clinicDateKey(returnTimestamp),
         timeSource: returnClock.source,
-        processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
+        processedBy: getActiveAuthSession()?.profile.uid || auth.currentUser?.uid || '',
       };
 
       const batch = writeBatch(db);
@@ -272,7 +274,7 @@ export function SalesReturns() {
           paidUnits: item.paidUnitsRestored,
           bonusUnits: item.bonusUnitsRestored,
           createdAt: returnTimestamp,
-          processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
+          processedBy: getActiveAuthSession()?.profile.uid || auth.currentUser?.uid || '',
         };
         movements.push({ id: movementRef.id, data: movementData });
         batch.set(movementRef, movementData);
@@ -282,26 +284,19 @@ export function SalesReturns() {
         });
       }
       await ensureLanWriteAccess();
-      await queuePendingSaleReturn({
+      const serverConfirmed = await submitDurableReturn({
+        collection: 'saleReturns', id: docRef.id,
+        queue: () => queuePendingSaleReturn({
         returnId: docRef.id,
         returnData: returnDoc,
         movements,
         stockAdjustments: saleReturnStockAdjustments(itemsToReturn),
         createdAt: returnTimestamp,
+        }),
+        commit: () => batch.commit(),
+        remove: () => removePendingSaleReturn(docRef.id),
+        onError: error => handleFirestoreError(error, OperationType.CREATE, `saleReturns/${docRef.id}`),
       });
-      const startedOnline = isCloudOnline();
-      let serverConfirmed = false;
-      try {
-        await waitForOnlineWrite(batch.commit());
-        if (startedOnline) {
-          await removePendingSaleReturn(docRef.id);
-          serverConfirmed = true;
-        }
-      } catch (commitError) {
-        // The independent outbox owns recovery from this point. Do not ask the
-        // cashier to submit again and accidentally create a second return.
-        handleFirestoreError(commitError, OperationType.CREATE, `saleReturns/${docRef.id}`);
-      }
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setSelectedSale(null);
@@ -313,12 +308,14 @@ export function SalesReturns() {
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'saleReturns');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   const handleNoReceiptSubmit = async () => {
-    if (manualItems.length === 0 || submitting) return;
+    if (manualItems.length === 0 || submittingRef.current) return;
+    submittingRef.current = true;
     const totalRefund = manualReturnTotal;
     setSubmitting(true);
     try {
@@ -345,7 +342,7 @@ export function SalesReturns() {
         trustedDate: returnTimestamp,
         businessDate: clinicDateKey(returnTimestamp),
         timeSource: returnClock.source,
-        processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
+        processedBy: getActiveAuthSession()?.profile.uid || auth.currentUser?.uid || '',
       };
       const batch = writeBatch(db);
       const docRef = doc(collection(db, 'saleReturns'));
@@ -367,7 +364,7 @@ export function SalesReturns() {
           paidUnits: unitsToRestore,
           bonusUnits: 0,
           createdAt: returnTimestamp,
-          processedBy: auth.currentUser?.uid || getActiveAuthSession()?.profile.uid || '',
+          processedBy: getActiveAuthSession()?.profile.uid || auth.currentUser?.uid || '',
         };
         movements.push({ id: movementRef.id, data: movementData });
         batch.set(movementRef, movementData);
@@ -376,24 +373,19 @@ export function SalesReturns() {
         batch.update(doc(db, 'medicines', medicineId), { stock: increment(unitsToRestore) });
       }
       await ensureLanWriteAccess();
-      await queuePendingSaleReturn({
+      const serverConfirmed = await submitDurableReturn({
+        collection: 'saleReturns', id: docRef.id,
+        queue: () => queuePendingSaleReturn({
         returnId: docRef.id,
         returnData: returnDoc,
         movements,
         stockAdjustments: saleReturnStockAdjustments(returnDoc.items),
         createdAt: returnTimestamp,
+        }),
+        commit: () => batch.commit(),
+        remove: () => removePendingSaleReturn(docRef.id),
+        onError: error => handleFirestoreError(error, OperationType.CREATE, `saleReturns/${docRef.id}`),
       });
-      const startedOnline = isCloudOnline();
-      let serverConfirmed = false;
-      try {
-        await waitForOnlineWrite(batch.commit());
-        if (startedOnline) {
-          await removePendingSaleReturn(docRef.id);
-          serverConfirmed = true;
-        }
-      } catch (commitError) {
-        handleFirestoreError(commitError, OperationType.CREATE, `saleReturns/${docRef.id}`);
-      }
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setShowNoReceiptReturn(false);
@@ -409,6 +401,7 @@ export function SalesReturns() {
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'saleReturns');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };

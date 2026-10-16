@@ -295,7 +295,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
               unitPrice: line.unitPrice,
               supplierId: line.supplierId,
               supplierName: line.supplierName,
-            }, medicines);
+            }, medicines, batch);
         const purchaseRef = doc(db, 'purchases', line.id);
         batch.set(purchaseRef, {
           invoiceId,

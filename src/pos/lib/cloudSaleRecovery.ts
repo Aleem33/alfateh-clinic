@@ -13,7 +13,10 @@ export async function recoverPosSaleToCloud(record: PendingPosSale) {
     // A competing recovery can commit first. Staff cannot overwrite existing
     // movements, so rules may reject our stale transaction before retrying it.
     // Only an exact server-confirmed sale makes that rejection a success.
-    try { if ((await getDocFromServer(doc(db, 'sales', record.saleId))).exists()) return; }
+    try {
+      const confirmed = await getDocFromServer(doc(db, 'sales', record.saleId));
+      if (confirmed.exists() && !confirmed.metadata.hasPendingWrites) return;
+    }
     catch { /* Preserve the original error and the durable outbox record. */ }
     throw error;
   }

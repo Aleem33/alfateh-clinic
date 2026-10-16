@@ -213,7 +213,7 @@ async function writeCollectionTransaction<T>(
   const database = await openDatabase();
 
   return new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction([RECORD_STORE, META_STORE], 'readwrite');
+    const transaction = database.transaction([RECORD_STORE, META_STORE], 'readwrite', { durability: 'strict' });
     const recordStore = transaction.objectStore(RECORD_STORE);
     const metadataStore = transaction.objectStore(META_STORE);
     let failure: Error | null = null;

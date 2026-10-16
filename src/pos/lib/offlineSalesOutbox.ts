@@ -125,11 +125,15 @@ export async function replayPendingPosSaleRecords(
   // entries continue appearing as pending.
   for (const record of ordered) {
     if (activeCheckouts.has(record.saleId)) continue;
-    if (await adapter.saleExists(record.saleId)) {
-      await adapter.remove(record.saleId);
-      continue;
+    try {
+      if (await adapter.saleExists(record.saleId)) {
+        await adapter.remove(record.saleId);
+        continue;
+      }
+      missing.push(record);
+    } catch (error) {
+      errors.push(`${record.saleData.receiptNo || record.saleId}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    missing.push(record);
   }
   for (const record of missing) {
     if (activeCheckouts.has(record.saleId)) continue;

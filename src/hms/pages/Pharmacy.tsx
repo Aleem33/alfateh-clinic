@@ -345,6 +345,7 @@ export function Pharmacy({
           return;
         }
       }
+      const batch = writeBatch(db);
       const batchTarget = await ensureMedicinePurchaseBatch(med, {
         batchNo,
         expiryDate: purchaseForm.expiryDate || med.expiryDate || '',
@@ -356,8 +357,7 @@ export function Pharmacy({
         unitPrice,
         supplierId: purchaseForm.supplierId || med.supplierId || '',
         supplierName: purchaseForm.supplierName || med.supplierName || '',
-      }, medicines);
-      const batch = writeBatch(db);
+      }, medicines, batch);
       const purchaseRef = doc(collection(db, 'purchases'));
       const purchaseBillNo = getNextPurchaseBillNo();
       batch.set(purchaseRef, {

@@ -94,6 +94,42 @@ afterEach(async () => {
 });
 
 describe('incremental mirror bootstrap', () => {
+  it('preserves the submitted create payload even when rollback removed it before mirror delivery', async () => {
+    vi.stubGlobal('window', new EventTarget());
+    startFullOfflineCache('admin');
+    window.dispatchEvent(new CustomEvent('alfateh:firestore-write-rejected', {
+      detail: {
+        message: 'permission denied',
+        activities: [{ collection: 'sales', recordId: 'rejected-create', changedFields: ['total'],
+          recoveryComplete: true, recoveryData: { total: 350, receiptNo: 'SALE-1' } }],
+      },
+    }));
+    await __offlineCacheInternals.waitForPersistence('sales');
+    expect((await getLocalSyncStatus('sales')).pending.recoveryRecords).toEqual([
+      { id: 'rejected-create', data: { total: 350, receiptNo: 'SALE-1' }, pending: true },
+    ]);
+    stopFullOfflineCache();
+    vi.unstubAllGlobals();
+  });
+
+  it('persists only deltas after initial legacy reconciliation while retaining unchanged history', async () => {
+    __offlineCacheInternals.startLegacyListener('sales', control);
+    const onData = (firestore.onSnapshot.mock.calls as any).at(-1)[2];
+    const a = document('a', { total: 10 });
+    const b = document('b', { total: 20 });
+    onData({ ...result([a, b]), metadata: { fromCache: false },
+      docChanges: () => [{ type: 'added', doc: a }, { type: 'added', doc: b }] });
+    await __offlineCacheInternals.waitForPersistence('sales');
+    const unchanged = (await queryLocalRecords('sales')).find(record => record.id === 'b')!;
+    const updated = document('a', { total: 15 });
+    onData({ ...result([updated, b]), metadata: { fromCache: false },
+      docChanges: () => [{ type: 'modified', doc: updated }] });
+    await __offlineCacheInternals.waitForPersistence('sales');
+    const records = await queryLocalRecords('sales');
+    expect(records.find(record => record.id === 'a')?.data.total).toBe(15);
+    expect(records.find(record => record.id === 'b')).toEqual(unchanged);
+  });
+
   it('retries a failed device registration and clears its sync warning after recovery', async () => {
     vi.useFakeTimers();
     firebase.auth.currentUser = { uid: 'admin-1' };
@@ -144,7 +180,7 @@ describe('incremental mirror bootstrap', () => {
     expect(getOfflineCacheStatus().serverConfirmedCollections).toBe(1);
   });
 
-  it('does not clear a permission error merely because a later collection snapshot succeeds', async () => {
+  it('clears a recovered listener permission error after that same collection is confirmed', async () => {
     __offlineCacheInternals.startLegacyListener('sales', control);
     const [,, onData, onError] = (firestore.onSnapshot.mock.calls as any).at(-1);
     onError(new Error('Missing or insufficient permissions.'));
@@ -152,7 +188,7 @@ describe('incremental mirror bootstrap', () => {
     onData({ ...result([serverRecord]), metadata: { fromCache: false },
       docChanges: () => [{ type: 'added', doc: serverRecord }] });
     await __offlineCacheInternals.waitForPersistence('sales');
-    expect(getOfflineCacheStatus().lastError).toContain('Missing or insufficient permissions');
+    expect(getOfflineCacheStatus().lastError).toBe('');
   });
 
   it('marks a collection cloud-confirmed only after its authoritative snapshot is persisted', async () => {

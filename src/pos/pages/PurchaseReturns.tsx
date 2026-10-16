@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, doc, increment, writeBatch } from '@/lib/firestore';
 import { printOrShare } from '../lib/nativeUtils';
 import { db, auth, handleFirestoreError, OperationType, getNextPosPurchaseReturnNo } from '../../firebase';
@@ -10,8 +10,11 @@ import { subscribeToAllMedicines } from '../../lib/medicineStore';
 import { PHARMACY_RECEIPT_NAME, receiptPolicyHtml } from '../lib/receiptBrand';
 import { getTrustedClockReading } from '../../lib/trustedClock';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { subscribeToPurchaseReturns } from '../../lib/salesStore';
 import { findPurchaseReturnMedicine, resolvePurchaseReturnFinancials, resolvePurchaseUnitCost } from '../lib/purchaseReturnFinancials';
-import { isCloudOnline } from '../../lib/lanCoordinator';
+import { ensureLanWriteAccess } from '../../lib/lanCoordinator';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
+import { submitDurableReturn } from '../lib/submitDurableReturn';
 import {
   createPendingPurchaseReturn,
   queuePendingPurchaseReturn,
@@ -100,6 +103,7 @@ export function PurchaseReturns() {
   const [returnReason, setReturnReason] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     const unsubMedicines = subscribeToAllMedicines((medicineList) => {
@@ -128,7 +132,7 @@ export function PurchaseReturns() {
       setPurchases(list);
     }, (e) => handleFirestoreError(e, OperationType.GET, 'purchases'));
 
-    const unsubReturns = subscribeToLocalCollection('purchaseReturns', records => {
+    const unsubReturns = subscribeToPurchaseReturns(records => {
       const list = [...records];
       list.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setReturns(list);
@@ -203,7 +207,8 @@ export function PurchaseReturns() {
   };
 
   const handleSubmit = async () => {
-    if (!isValid || !selectedPurchase || submitting) return;
+    if (!isValid || !selectedPurchase || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const returnNo = await getNextPosPurchaseReturnNo();
@@ -229,7 +234,7 @@ export function PurchaseReturns() {
         refundAmount,
         reason: returnReason,
         date: returnTimestamp,
-        processedBy: auth.currentUser?.uid,
+        processedBy: getActiveAuthSession()?.profile.uid || auth.currentUser?.uid || '',
         unitsPerBox,
       };
 
@@ -239,23 +244,31 @@ export function PurchaseReturns() {
       // Save the complete operation before committing. If Firestore rejects an
       // offline batch later, the exact return can be replayed without duplicate
       // stock deductions or loss of the supplier return entry.
-      await queuePendingPurchaseReturn(recoveryRecord);
       batch.set(docRef, returnDoc);
       batch.update(doc(db, 'medicines', selectedPurchase.medicineId), {
         stock: increment(-totalUnitsToReturn),
         ...(bonusUnitsToReturn > 0 ? { bonusStockUnits: increment(-bonusUnitsToReturn) } : {}),
       });
-      await batch.commit();
-      if (isCloudOnline()) await removePendingPurchaseReturn(docRef.id);
+      await ensureLanWriteAccess();
+      const confirmed = await submitDurableReturn({
+        collection: 'purchaseReturns', id: docRef.id,
+        queue: () => queuePendingPurchaseReturn(recoveryRecord),
+        commit: () => batch.commit(),
+        remove: () => removePendingPurchaseReturn(docRef.id),
+        onError: error => handleFirestoreError(error, OperationType.CREATE, `purchaseReturns/${docRef.id}`),
+      });
 
       const dataWithId = { ...returnDoc, id: docRef.id };
       setSelectedPurchase(null);
-      setSuccessMsg(`Return to supplier processed — ${totalUnitsToReturn} units deducted`);
+      setSuccessMsg(confirmed
+        ? `Return to supplier processed — ${totalUnitsToReturn} units deducted`
+        : `Return saved on this PC — ${totalUnitsToReturn} units; upload will retry automatically`);
       setTimeout(() => setSuccessMsg(''), 5000);
       setTimeout(() => printSlip(buildPurchaseReturnSlip(dataWithId, unitsPerBox)), 400);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'purchaseReturns');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -346,6 +359,7 @@ export function PurchaseReturns() {
                       {' '}({r.totalUnitsReturned} units)
                     </p>
                     <p className="text-xs text-gray-500">Paid {r.paidUnitsReturned ?? r.totalUnitsReturned} · Bonus {r.bonusUnitsReturned || 0}</p>
+                    {r._pendingUpload && <p className="text-xs text-blue-700">Saved on this PC · upload pending</p>}
                     {r.stockReconciliation?.some((entry: any) => entry.status === 'pending') && (
                       <p className="text-xs text-amber-700 font-medium">Return saved · stock review required</p>
                     )}

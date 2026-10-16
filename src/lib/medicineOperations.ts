@@ -7,6 +7,7 @@ import {
   query,
   updateDoc,
   where,
+  type WriteBatch,
 } from '@/lib/firestore';
 import { auth, db } from '../firebase';
 import { trustedNowISO } from './trustedClock';
@@ -45,9 +46,13 @@ type CreateMedicineInput = Record<string, any> & {
   supplierName?: string;
 };
 
+type MedicineBatchWriter = Pick<WriteBatch, 'set'>;
+const stagedMedicines = new WeakMap<MedicineBatchWriter, MedicineRecord[]>();
+
 export async function createMedicineSafely(
   input: CreateMedicineInput,
   knownMedicines: MedicineRecord[] = [],
+  batch?: MedicineBatchWriter,
 ): Promise<string> {
   const timestamp = trustedNowISO();
   const medicineKey = getMedicineIdentity(input);
@@ -64,6 +69,7 @@ export async function createMedicineSafely(
   const cachedCandidates = [
     ...getMedicineStoreSnapshot().all,
     ...knownMedicines,
+    ...(batch ? stagedMedicines.get(batch) || [] : []),
   ];
   const cachedDuplicate = findDuplicateMedicine(cachedCandidates, data);
   if (cachedDuplicate) throw new MedicineConflictError(cachedDuplicate);
@@ -86,6 +92,12 @@ export async function createMedicineSafely(
     }
   }
 
+  if (batch) {
+    const created = doc(collection(db, 'medicines'));
+    batch.set(created, data);
+    stagedMedicines.set(batch, [...(stagedMedicines.get(batch) || []), indexMedicine({ ...data, id: created.id })]);
+    return created.id;
+  }
   const created = await addDoc(collection(db, 'medicines'), data);
   return created.id;
 }
@@ -122,6 +134,7 @@ export async function ensureMedicinePurchaseBatch(
   sourceMedicine: MedicineRecord,
   batchInput: MedicineBatchInput,
   knownMedicines: MedicineRecord[],
+  batch?: MedicineBatchWriter,
 ): Promise<{ medicineId: string; created: boolean }> {
   const candidate = {
     name: sourceMedicine.name,
@@ -131,7 +144,8 @@ export async function ensureMedicinePurchaseBatch(
     supplierId: batchInput.supplierId || sourceMedicine.supplierId || '',
     supplierName: batchInput.supplierName || sourceMedicine.supplierName || '',
   };
-  const existing = findMedicinePurchaseBatch(sourceMedicine, batchInput, knownMedicines);
+  const existing = findMedicinePurchaseBatch(sourceMedicine, batchInput,
+    [...knownMedicines, ...(batch ? stagedMedicines.get(batch) || [] : [])]);
   if (existing) return { medicineId: existing.id, created: false };
 
   const newBatch = {
@@ -157,7 +171,7 @@ export async function ensureMedicinePurchaseBatch(
   };
 
   try {
-    const medicineId = await createMedicineSafely(newBatch, knownMedicines);
+    const medicineId = await createMedicineSafely(newBatch, knownMedicines, batch);
     return { medicineId, created: true };
   } catch (error) {
     if (error instanceof MedicineConflictError && !error.archived && error.medicineId) {

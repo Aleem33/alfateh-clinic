@@ -665,7 +665,7 @@ export function Settings() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
             <h2 className="font-semibold text-gray-900 mb-2">Confirm Import</h2>
-            <p className="text-sm text-gray-500 mb-3">This will add/overwrite HMS and Pharmacy data from the backup file. Existing records with the same ID will be replaced.</p>
+            <p className="text-sm text-gray-500 mb-3">This restores missing HMS and Pharmacy records using their original IDs. Existing records are kept to protect current stock, balances, and history.</p>
             {pendingImport && <p className="text-xs text-gray-500 mb-4 bg-gray-50 rounded-lg p-3">{summarizeBackup(pendingImport)}</p>}
             <div className="flex gap-3">
               <button onClick={() => { setShowImportConfirm(false); setPendingImport(null); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
