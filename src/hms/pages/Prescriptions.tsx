@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, doc, getDoc, addDoc } from '@/lib/firestore';
+import { collection, doc, addDoc } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { Search, Printer, Eye, FlaskConical, Pill, Send } from 'lucide-react';
@@ -8,7 +8,7 @@ import { transliteratePrescriptionMedicineNames } from '../lib/translate';
 import { getPrescriptionEnglishLine, getPrescriptionUrduLine, withPrescriptionListUrdu } from '../lib/prescriptionOptions';
 import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
 import { useAppDialog } from '../../components/AppDialog';
-import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { getLocalRecordOnce, subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 export function Prescriptions() {
   const { alert } = useAppDialog();
@@ -20,9 +20,9 @@ export function Prescriptions() {
   const [pharmacySentIds, setPharmacySentIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    getDoc(doc(db, 'settings', 'hospital')).then(snap => {
-      if (snap.exists()) setHospitalSettings(s => ({ ...s, ...snap.data() }));
-    });
+    getLocalRecordOnce('settings', 'hospital').then(settings => {
+      if (settings) setHospitalSettings(s => ({ ...s, ...settings }));
+    }).catch(error => { void alert(error.message); });
     const unsubPharm = subscribeToLocalCollection('pharmacyOrders', records => {
       setPharmacySentIds(new Set(records.map(record => record.consultationId).filter(Boolean)));
     });

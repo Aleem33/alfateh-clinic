@@ -10,9 +10,13 @@ import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { netSalesByDate, sumFinancialValues, summarizeSalesFinancials } from '../../pos/lib/salesFinancials';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { canAccessPage } from '../../lib/roleAccess';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const role = getActiveAuthSession()?.profile.role || '';
+  const allow = (path: string) => canAccessPage('hms', role, path);
   const todayStr = useClinicTodayKey();
   const [stats, setStats] = useState({
     todayAppointments: 0, newPatientsToday: 0, ipdCount: 0, pendingLab: 0,
@@ -53,14 +57,14 @@ export function Dashboard() {
       setLoading(false);
     });
     const u7 = subscribeToSales(setPosSales);
-    const u8 = subscribeToLocalCollection('auditLogs', records => setRecentActivity(
+    const u8 = role === 'admin' ? subscribeToLocalCollection('auditLogs', records => setRecentActivity(
       records
         .sort((left, right) => String(right.createdAt || right.timestamp || '').localeCompare(String(left.createdAt || left.timestamp || '')))
         .slice(0, 8),
-    ));
+    )) : () => undefined;
     const u9 = subscribeToSaleReturns(setPosReturns);
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); };
-  }, [todayStr]);
+  }, [todayStr, role]);
 
   const activeBills = bills.filter(bill => bill.paymentStatus !== 'cancelled' && bill.paymentStatus !== 'no-show');
   const todayRevenue = sumFinancialValues(
@@ -134,14 +138,14 @@ export function Dashboard() {
       {/* Alerts */}
       {(stats.lowStock > 0 || stats.expiringMeds > 0) && (
         <div className="flex flex-wrap gap-3">
-          {stats.lowStock > 0 && (
+          {stats.lowStock > 0 && allow('/pharmacy') && (
             <button onClick={() => navigate('/pharmacy')}
               className="flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-100 transition-colors">
               <AlertTriangle className="w-4 h-4" />
               {stats.lowStock} medicine{stats.lowStock !== 1 ? 's' : ''} low on stock - click to view
             </button>
           )}
-          {stats.expiringMeds > 0 && (
+          {stats.expiringMeds > 0 && allow('/reports') && (
             <button onClick={() => navigate('/reports')}
               className="flex items-center gap-2 px-4 py-2.5 bg-orange-50 border border-orange-200 text-orange-700 rounded-xl text-sm font-medium hover:bg-orange-100 transition-colors">
               <Package className="w-4 h-4" />
@@ -154,7 +158,7 @@ export function Dashboard() {
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map(card => (
-          <button key={card.label} onClick={() => navigate(card.path)}
+          <button key={card.label} onClick={() => { if (allow(card.path)) navigate(card.path); }}
             className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-100 transition-all text-left group">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -200,7 +204,7 @@ export function Dashboard() {
         {/* Right column: Activity + Low Stock */}
         <div className="space-y-5">
           {/* Activity Feed */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+          {role === 'admin' && <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-semibold text-gray-900 text-sm">Recent Activity</h2>
               <button onClick={() => navigate('/audit')} className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
@@ -224,7 +228,7 @@ export function Dashboard() {
                 ))}
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Low Stock Alert */}
           {lowStockItems.length > 0 && (
@@ -233,7 +237,7 @@ export function Dashboard() {
                 <div className="flex items-center gap-2 text-red-700 font-semibold text-sm">
                   <AlertTriangle className="w-4 h-4" /> Low Stock
                 </div>
-                <button onClick={() => navigate('/pharmacy')} className="text-xs text-red-600 hover:text-red-700 font-medium flex items-center gap-1">
+                <button disabled={!allow('/pharmacy')} onClick={() => navigate('/pharmacy')} className="text-xs text-red-600 hover:text-red-700 font-medium flex items-center gap-1 disabled:hidden">
                   View <ArrowRight className="w-3 h-3" />
                 </button>
               </div>

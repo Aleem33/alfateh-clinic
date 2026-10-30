@@ -26,6 +26,12 @@ const createDevice = async (name, offline = false) => {
 app.whenReady().then(async () => {
   try {
     let primary = await createDevice('primary');
+    if (new URL(url).searchParams.has('role-audit')) {
+      const online = await primary.webContents.executeJavaScript('window.smoke.auditRolePages(false)');
+      const offline = await primary.webContents.executeJavaScript('window.smoke.auditRolePages(true)');
+      console.log('ROLE_UI_SMOKE_PASS', JSON.stringify({ online, offline }));
+      app.exit(0); return;
+    }
     const replica = await createDevice('replica');
     const first = await primary.webContents.executeJavaScript('window.smoke.primary()');
     primary.destroy();

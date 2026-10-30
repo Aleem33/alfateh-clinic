@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth, logout } from './firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db, logout } from './firebase';
 import { AppSelector } from './landing/AppSelector';
 import { HMSApp } from './hms/HMSApp';
 import { POSApp } from './pos/POSApp';
@@ -16,6 +17,9 @@ import {
   getActiveAuthSession,
   setActiveAuthSession,
   subscribeActiveAuthSession,
+  profileFromUserDocument,
+  updateCachedAuthProfile,
+  revokeOfflineCredential,
   type AuthSession,
 } from './lib/offlineAuth';
 import { startOfflineAuthSync } from './lib/offlineAuthSync';
@@ -32,6 +36,37 @@ export default function App() {
   // sessionAuthed: did the user explicitly log in during THIS app session?
   // Starts false every launch, so always shows AppSelector → Login → App.
   const [sessionAuthed, setSessionAuthed] = useState(false);
+
+  // Observe the signed-in user's own profile, not the admin-only users list.
+  // Server-only updates prevent a cached role from undoing an admin's change.
+  useEffect(() => {
+    const session = getActiveAuthSession();
+    if (!sessionAuthed || !session || auth.currentUser?.uid !== session.profile.uid) return;
+    const uid = session.profile.uid;
+    return onSnapshot(doc(db, 'users', uid), { includeMetadataChanges: true }, snapshot => {
+      if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) return;
+      const current = getActiveAuthSession();
+      if (!current || current.profile.uid !== uid) return;
+      const profile = snapshot.exists()
+        ? profileFromUserDocument(uid, current.profile.email, snapshot.data()) : null;
+      if (!profile?.active) {
+        void revokeOfflineCredential(current.profile.username).catch(console.warn);
+        setActiveAuthSession(null);
+        setUser(null);
+        setAppMode(null);
+        setAuthError('This account was disabled or removed. Contact an administrator. Pending entries remain on this computer.');
+        void logout().catch(console.warn);
+        return;
+      }
+      // profileUpdatedAt is generated for legacy records; compare actual access
+      // fields so a harmless metadata snapshot never restarts the whole cache.
+      const changed = ['role', 'name', 'email', 'username', 'app', 'active', 'permissions']
+        .some(key => JSON.stringify(profile[key as keyof typeof profile]) !== JSON.stringify(current.profile[key as keyof typeof profile]));
+      if (!changed) return;
+      void updateCachedAuthProfile(profile).catch(console.warn);
+      setActiveAuthSession({ ...current, profile });
+    }, error => setAuthError(`Account permissions could not be refreshed: ${error.message}`));
+  }, [sessionAuthed, user?.uid, userRole]);
 
   useEffect(() => subscribeActiveAuthSession(session => {
     if (session) {

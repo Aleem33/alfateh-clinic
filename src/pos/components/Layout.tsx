@@ -10,6 +10,7 @@ import {
 import { logout } from '../../firebase';
 import { cn } from '../lib/utils';
 import { SyncStatusBadge } from '../../components/SyncStatusBadge';
+import { canAccessPage } from '../../lib/roleAccess';
 
 const allNavItems = [
   { to: '/',                 icon: LayoutDashboard, label: 'Dashboard',        roles: ['admin', 'pharmacist'] },
@@ -36,7 +37,7 @@ interface Props {
 }
 
 export function Layout({ role, onSwitchApp, onLogout }: Props) {
-  const navItems = allNavItems.filter(item => item.roles.includes(role));
+  const navItems = allNavItems.filter(item => canAccessPage('pos', role, item.to));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const canSwitchToHospital = role === 'admin' || role === 'pharmacist';
   const handleLogout = onLogout || logout;

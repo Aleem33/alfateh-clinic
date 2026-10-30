@@ -5,7 +5,13 @@ service cloud.firestore {
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     function isAuth() {
-      return request.auth != null;
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('deleted', false) != true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('active', true) != false &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('disabled', false) != true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') in
+          ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'cashier', 'accountant', 'lab', 'lab_technician'];
     }
 
     function userRole() {
@@ -49,7 +55,7 @@ service cloud.firestore {
         request.resource.data.get('bonusStockUnits', 0) <= request.resource.data.stock;
     }
     function isBootstrapAdmin(uid) {
-      return isAuth()
+      return request.auth != null
         && request.auth.uid == uid
         && request.auth.token.email == 'admin@alfateh-clinic.internal'
         && request.resource.data.role == 'admin';
@@ -123,7 +129,9 @@ service cloud.firestore {
 
     // ── Users ──────────────────────────────────────────────────────────────────
     match /users/{uid} {
-      allow read: if isAuth() && (request.auth.uid == uid || isAdmin());
+      // A disabled user must still be able to read their own profile so the
+      // client can explain revocation instead of getting stuck synchronizing.
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow create: if syncMutationAllowed("users") && (isAdmin() || isBootstrapAdmin(uid));
       allow update, delete: if syncMutationAllowed("users") && (isAdmin());
     }
@@ -221,7 +229,12 @@ service cloud.firestore {
     match /pharmacyOrders/{doc} {
       allow read: if isAuth();
       allow create: if syncMutationAllowed("pharmacyOrders") && (isAdmin() || ((isClinical() || isReceptionist()) && hasNoTombstoneOnCreate()));
-      allow update: if syncMutationAllowed("pharmacyOrders") && (isAdmin() || (isPharmacist() && preservesTombstone()));
+      allow update: if syncMutationAllowed("pharmacyOrders") && (isAdmin() || (isPharmacist() && preservesTombstone()) || (
+        isCashier() && preservesTombstone() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'dispensedAt', 'dispensedBy', 'syncUpdatedAt', 'syncProtocolVersion'
+        ]) && request.resource.data.status == 'dispensed' && request.resource.data.dispensedBy == request.auth.uid
+      ));
       allow delete: if syncMutationAllowed("pharmacyOrders") && (isAdmin());
     }
 
@@ -343,7 +356,7 @@ service cloud.firestore {
     }
     match /heldBills/{doc} {
       allow read: if isAuth();
-      allow create, update, delete: if syncMutationAllowed("heldBills") && (isAdmin() || isCashier());
+      allow create, update, delete: if syncMutationAllowed("heldBills") && (isAdmin() || isCashier() || isPharmacist());
     }
 
 
@@ -370,8 +383,8 @@ service cloud.firestore {
 
     match /saleReturns/{doc} {
       allow read: if isAuth();
-      allow create: if syncMutationAllowed("saleReturns") && (isAdmin() || (isCashier() && hasNoTombstoneOnCreate()));
-      allow update: if syncMutationAllowed("saleReturns") && (isAdmin() || (isCashier() && preservesTombstone()));
+      allow create: if syncMutationAllowed("saleReturns") && (isAdmin() || ((isCashier() || isPharmacist()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("saleReturns") && (isAdmin() || ((isCashier() || isPharmacist()) && preservesTombstone()));
       allow delete: if syncMutationAllowed("saleReturns") && (isAdmin());
     }
 
@@ -410,13 +423,13 @@ service cloud.firestore {
 
     match /customers/{doc} {
       allow read: if isAuth();
-      allow create: if syncMutationAllowed("customers") && (isAdmin() || (isCashier() && hasNoTombstoneOnCreate()));
-      allow update: if syncMutationAllowed("customers") && (isAdmin() || (isCashier() && preservesTombstone()));
+      allow create: if syncMutationAllowed("customers") && (isAdmin() || ((isCashier() || isPharmacist()) && hasNoTombstoneOnCreate()));
+      allow update: if syncMutationAllowed("customers") && (isAdmin() || ((isCashier() || isPharmacist()) && preservesTombstone()));
       allow delete: if syncMutationAllowed("customers") && (isAdmin());
     }
 
     match /customerPayments/{doc} {
-      allow read: if isAdmin() || isCashier();
+      allow read: if isAdmin() || isCashier() || isPharmacist();
       allow create: if syncMutationAllowed("customerPayments") && (isAdmin() || (isCashier() && hasNoTombstoneOnCreate()));
       allow update: if syncMutationAllowed("customerPayments") && (isAdmin() || (isCashier() && preservesTombstone()));
       allow delete: if syncMutationAllowed("customerPayments") && (isAdmin());

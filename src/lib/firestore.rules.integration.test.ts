@@ -14,6 +14,8 @@ import {
   enableNetwork,
   getDoc,
   getDocFromServer,
+  getDocsFromServer,
+  collection,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -24,6 +26,8 @@ import {
 import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
 import { recoverSaleTransaction } from '../pos/lib/saleRecovery';
 import type { PendingPosSale } from '../pos/lib/offlineSalesOutbox';
+import { SUPPORTED_ROLES } from './roleAccess';
+import { getOfflineCollectionsForRole } from './offlineDataPolicy';
 
 const emulatorAddress = process.env.FIRESTORE_EMULATOR_HOST || '';
 const integrationDescribe = emulatorAddress ? describe : describe.skip;
@@ -446,6 +450,109 @@ integrationDescribe('Firestore offline operational rules', () => {
   });
 
   const revision = () => ({ syncUpdatedAt: serverTimestamp(), syncProtocolVersion: 2 });
+
+  it.each(SUPPORTED_ROLES)('bootstraps exactly the permitted collections and registers a shared PC for %s', async role => {
+    await enforce();
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), 'users', `${role}-matrix`), { role, active: true }));
+    const database = environment.authenticatedContext(`${role}-matrix`).firestore();
+    const permitted = new Set(getOfflineCollectionsForRole(role));
+    for (const name of GLOBAL_DATA_COLLECTIONS) {
+      const read = getDocsFromServer(collection(database, name));
+      if (permitted.has(name)) await assertSucceeds(read);
+      else await assertFails(read);
+    }
+    await assertSucceeds(getDocFromServer(doc(database, 'users', `${role}-matrix`)));
+    // The PC was previously used by an administrator; a different staff account
+    // must be able to update its heartbeat without requiring the previous UID.
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), 'syncClients', 'shared-pc'), {
+      deviceId: 'shared-pc', uid: 'admin-1', role: 'admin',
+    }));
+    await assertSucceeds(setDoc(doc(database, 'syncClients', 'shared-pc'), {
+      deviceId: 'shared-pc', uid: `${role}-matrix`, role, mirrorReady: true, ...revision(),
+    }, { merge: true }));
+  }, 30000);
+
+  it.each(['cashier', 'pharmacist'])('commits dispensing, customer credit, hold/resume and customer return for %s', async role => {
+    await enforce();
+    const database = environment.authenticatedContext(`${role}-1`).firestore();
+    const batch = writeBatch(database);
+    batch.set(doc(database, 'customers', 'new-customer'), { name: 'New Customer', creditBalance: 10, ...revision() });
+    batch.set(doc(database, 'sales', 'role-sale'), { total: 100, amountPaid: 90, customerId: 'new-customer', ...revision() });
+    batch.set(doc(database, 'stockMovements', 'role-sale-stock'), { quantity: -2, ...revision() });
+    batch.update(doc(database, 'medicines', 'batch-a'), { stock: 98, bonusStockUnits: 10, ...revision() });
+    await assertSucceeds(batch.commit());
+    const held = doc(database, 'heldBills', 'role-hold');
+    await assertSucceeds(setDoc(held, { items: [{ medicineId: 'batch-a', quantity: 1 }], ...revision() }));
+    await assertSucceeds(updateDoc(held, { deleted: true, deletedBy: `${role}-1`, deletedAt: serverTimestamp(), ...revision() }));
+    const returned = writeBatch(database);
+    returned.set(doc(database, 'saleReturns', 'role-return'), { saleId: 'role-sale', refundAmount: 100, ...revision() });
+    returned.set(doc(database, 'stockMovements', 'role-return-stock'), { quantity: 2, ...revision() });
+    returned.update(doc(database, 'medicines', 'batch-a'), { stock: 100, bonusStockUnits: 10, ...revision() });
+    returned.update(doc(database, 'customers', 'new-customer'), { creditBalance: 0, ...revision() });
+    await assertSucceeds(returned.commit());
+    expect((await getDocFromServer(doc(database, 'medicines', 'batch-a'))).data()?.stock).toBe(100);
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { archived: true, ...revision() }));
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { retailPrice: 1, ...revision() }));
+  });
+
+  it('allows cashier dispensing of a hospital order without changing its prescription', async () => {
+    await enforce();
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), 'pharmacyOrders', 'rx'), { status: 'pending', prescriptions: [] }));
+    const database = environment.authenticatedContext('cashier-1').firestore();
+    await assertSucceeds(updateDoc(doc(database, 'pharmacyOrders', 'rx'), { status: 'dispensed', dispensedBy: 'cashier-1', dispensedAt: 'now', ...revision() }));
+    await assertFails(updateDoc(doc(database, 'pharmacyOrders', 'rx'), { prescriptions: [{ medicineId: 'forged' }], ...revision() }));
+  });
+
+  it.each(['doctor', 'nurse', 'receptionist'])('supports a complete clinical entry and discharge billing for %s', async role => {
+    await enforce();
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), 'users', `${role}-1`), { role, active: true }));
+    const database = environment.authenticatedContext(`${role}-1`).firestore();
+    const batch = writeBatch(database);
+    for (const name of ['patients', 'appointments', 'consultations', 'admissions', 'bedTreatments', 'pharmacyOrders', 'labOrders', 'bills']) {
+      batch.set(doc(database, name, 'clinical-entry'), { patientId: 'patient-1', status: 'pending', ...revision() });
+    }
+    await assertSucceeds(batch.commit());
+    await assertSucceeds(updateDoc(doc(database, 'bills', 'clinical-entry'), { total: 100, ...revision() }));
+    await assertFails(updateDoc(doc(database, 'patients', 'clinical-entry'), { deleted: true, ...revision() }));
+    const template = setDoc(doc(database, 'prescriptionTemplates', 'role-template'), { name: 'Template', ...revision() });
+    if (role === 'doctor') await assertSucceeds(template); else await assertFails(template);
+  });
+
+  it.each(['lab', 'lab_technician'])('allows %s results/catalog but not clinical prescribing or billing', async role => {
+    await enforce();
+    await environment.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), 'users', `${role}-1`), { role, active: true });
+      await setDoc(doc(context.firestore(), 'labOrders', 'pending-lab'), { status: 'pending' });
+    });
+    const database = environment.authenticatedContext(`${role}-1`).firestore();
+    await assertSucceeds(updateDoc(doc(database, 'labOrders', 'pending-lab'), { status: 'completed', results: [], ...revision() }));
+    await assertSucceeds(setDoc(doc(database, 'labTests', 'catalog-test'), { name: 'Test', price: 500, ...revision() }));
+    for (const name of ['consultations', 'bills', 'labOrders', 'sales']) {
+      await assertFails(setDoc(doc(database, name, 'unauthorized'), { total: 100, ...revision() }));
+    }
+  });
+
+  it('lets accountants bill and edit expenses, but not hide history or alter medicine stock', async () => {
+    await enforce();
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), 'users', 'accountant-1'), { role: 'accountant', active: true }));
+    const database = environment.authenticatedContext('accountant-1').firestore();
+    for (const name of ['bills', 'payments', 'expenses']) {
+      await assertSucceeds(setDoc(doc(database, name, 'finance'), { total: 100, ...revision() }));
+      await assertSucceeds(updateDoc(doc(database, name, 'finance'), { total: 200, ...revision() }));
+      await assertFails(updateDoc(doc(database, name, 'finance'), { deleted: true, ...revision() }));
+    }
+    await assertFails(updateDoc(doc(database, 'medicines', 'batch-a'), { stock: 50, ...revision() }));
+  });
+
+  it.each([{ active: false }, { disabled: true }, { deleted: true }])('revokes cached administrator authority for %j without removing records', async flags => {
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(), 'users', 'revoked-admin'), { role: 'admin', ...flags }));
+    const database = environment.authenticatedContext('revoked-admin').firestore();
+    await assertSucceeds(getDocFromServer(doc(database, 'users', 'revoked-admin')));
+    await assertFails(getDocsFromServer(collection(database, 'medicines')));
+    await assertFails(setDoc(doc(database, 'sales', 'revoked'), { total: 100 }));
+    const admin = environment.authenticatedContext('admin-1').firestore();
+    expect((await getDocFromServer(doc(admin, 'medicines', 'batch-a'))).data()?.stock).toBe(100);
+  });
   const activatedControl = () => ({
     protocolVersion: 2, minimumProtocolVersion: 2, rulesEnforcementVersion: 2,
     datasetGeneration: 2, trackedWritesRequired: true, incrementalEnabled: true,

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc } from '@/lib/firestore';
-import { db, registerUser } from '../../firebase';
+import { collection, doc, writeBatch } from '@/lib/firestore';
+import { auth, db, registerUser, usernameToEmail } from '../../firebase';
 import { formatDate, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Search, Edit2, Trash2, X, UserCheck, UserX } from 'lucide-react';
@@ -8,7 +8,7 @@ import { useAppDialog } from '../../components/AppDialog';
 import { subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const DEPARTMENTS = ['Administration', 'General Medicine', 'Surgery', 'Gynecology', 'Pediatrics', 'ENT', 'Orthopedics', 'Cardiology', 'Neurology', 'Emergency', 'Laboratory', 'Pharmacy', 'Radiology', 'Nursing', 'Anesthesia'];
-const ROLES: Record<string, string> = { admin: 'Admin', receptionist: 'Receptionist', doctor: 'Doctor', pharmacist: 'Pharmacist', lab_technician: 'Lab Technician', cashier: 'Cashier', nurse: 'Nurse' };
+const ROLES: Record<string, string> = { admin: 'Admin', receptionist: 'Receptionist', doctor: 'Doctor', pharmacist: 'Pharmacist', lab_technician: 'Lab Technician', cashier: 'Cashier', nurse: 'Nurse', accountant: 'Accountant' };
 const QUALIFICATIONS = ['MBBS', 'MD', 'MS', 'FCPS', 'MCPS', 'BDS', 'B.Pharm', 'Pharm-D', 'PMDC', 'BSc Nursing', 'Other'];
 
 const emptyForm = { name: '', role: 'doctor', department: 'General Medicine', phone: '', email: '', qualification: '', salary: '', joiningDate: '', cnic: '', password: '' };
@@ -47,27 +47,32 @@ export function Staff() {
 
   const handleSave = async () => {
     if (!form.name || !form.role) { setError('Name and role are required.'); return; }
+    if (!editId && (!!form.email !== !!form.password)) { setError('Provide both username and password to create a login, or leave both blank for a staff-only record.'); return; }
     setSaving(true); setError('');
     try {
       if (editId) {
         const { password, ...data } = form;
-        await updateDoc(doc(db, 'staff', editId), { ...data, salary: Number(form.salary) || 0, updatedAt: nowISO() });
+        const member = staff.find(item => item.id === editId);
+        if (member?.userId === auth.currentUser?.uid && form.role !== 'admin') throw new Error('Use another administrator to change your own role.');
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'staff', editId), { ...data, salary: Number(form.salary) || 0, updatedAt: nowISO() });
+        if (member?.userId) batch.update(doc(db, 'users', member.userId), { name: form.name, role: form.role, updatedAt: nowISO() });
+        await batch.commit();
         await logAudit('update', 'staff', editId, form.name);
       } else {
         let userId = '';
+        const batch = writeBatch(db);
         if (form.email && form.password) {
-            try {
-              const cred = await registerUser(form.email, form.password); // form.email holds the username
-              userId = cred.user.uid;
-              await setDoc(doc(db, 'users', userId), {
-                name: form.name, username: form.email, email: form.email, role: form.role, app: 'hms', createdAt: nowISO(),
-              });
-            } catch (e: any) {
-              console.warn('Could not create auth user:', e.message);
-            }
-          }
+          const cred = await registerUser(form.email, form.password); // form.email holds the username
+          userId = cred.user.uid;
+          batch.set(doc(db, 'users', userId), {
+            name: form.name, username: form.email.trim().toLowerCase(), email: usernameToEmail(form.email), role: form.role, app: 'hms', createdAt: nowISO(),
+          });
+        }
         const { password, ...data } = form;
-        const ref = await addDoc(collection(db, 'staff'), { ...data, salary: Number(form.salary) || 0, userId, status: 'active', createdAt: nowISO() });
+        const ref = doc(collection(db, 'staff'));
+        batch.set(ref, { ...data, salary: Number(form.salary) || 0, userId, status: 'active', createdAt: nowISO() });
+        await batch.commit();
         await logAudit('create', 'staff', ref.id, `${form.name} — ${form.role}`);
       }
       setShowModal(false);
@@ -77,13 +82,22 @@ export function Staff() {
 
   const toggleStatus = async (s: any) => {
     const newStatus = s.status === 'active' ? 'inactive' : 'active';
-    await updateDoc(doc(db, 'staff', s.id), { status: newStatus, updatedAt: nowISO() });
+    if (s.userId === auth.currentUser?.uid && newStatus === 'inactive') { setError('You cannot disable your own administrator account.'); return; }
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'staff', s.id), { status: newStatus, updatedAt: nowISO() });
+    if (s.userId) batch.update(doc(db, 'users', s.userId), { active: newStatus === 'active', updatedAt: nowISO() });
+    await batch.commit();
     await logAudit('update', 'staff', s.id, `${s.name} marked ${newStatus}`);
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!(await confirm(`Delete staff member "${name}"?`, { title: 'Delete Staff Member', confirmLabel: 'Delete' }))) return;
-    await deleteDoc(doc(db, 'staff', id));
+    const member = staff.find(item => item.id === id);
+    if (member?.userId === auth.currentUser?.uid) { setError('You cannot remove your own administrator account.'); return; }
+    if (!(await confirm(`Remove staff member "${name}"? This also disables the linked login account. Existing business records are kept.`, { title: 'Delete Staff Member', confirmLabel: 'Delete' }))) return;
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'staff', id));
+    if (member?.userId) batch.update(doc(db, 'users', member.userId), { active: false, updatedAt: nowISO() });
+    await batch.commit();
     await logAudit('delete', 'staff', id, name);
   };
 
@@ -100,7 +114,7 @@ export function Staff() {
           <Plus className="w-4 h-4" /> Add Staff
         </button>
       </div>
-
+      {error && !showModal && <p role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg">{error}</p>}
       <div className="flex items-center gap-3">
         <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="all">All Roles</option>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { doc, getDoc, setDoc } from '@/lib/firestore';
+import { getLocalRecordOnce } from '../../lib/collectionRepository';
+import { doc, setDoc } from '@/lib/firestore';
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { renewActiveOfflineCredential } from '../../lib/offlineAuth';
 import { db, auth, registerUser } from '../../firebase';
@@ -19,7 +20,7 @@ import { buildPrescriptionHTML, type PrescriptionPrintData } from '../lib/pdf';
 import { deleteAppDataScope, exportAllAppData, GLOBAL_DATA_COLLECTIONS, RESET_COLLECTIONS, restoreAllAppData, summarizeBackup } from '../../lib/dataSync';
 import { MedicineCategoryManager } from '../../components/MedicineCategoryManager';
 
-const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier'];
+const ROLES = ['admin','receptionist','doctor','pharmacist','lab_technician','cashier','nurse','accountant'];
 
 function F({ label, value, onChange, type = 'text', placeholder = '' }: {
   label: string; value: string; onChange: (v: string) => void;
@@ -263,9 +264,9 @@ export function Settings() {
   const [userMsg, setUserMsg] = useState('');
 
   useEffect(() => {
-    getDoc(doc(db, 'settings', 'hospital')).then(snap => {
-      if (snap.exists()) setHospital({ ...emptyHospital, ...snap.data() });
-    });
+    getLocalRecordOnce('settings', 'hospital').then(settings => {
+      if (settings) setHospital({ ...emptyHospital, ...settings });
+    }).catch(error => setHospitalMsg(error.message));
     setGeminiKeyState(getGeminiKey());
     setPrintSettings(getPrescriptionPrintSettings());
   }, []);

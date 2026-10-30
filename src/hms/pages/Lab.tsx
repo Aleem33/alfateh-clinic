@@ -17,7 +17,10 @@ function safeFileName(name: string) {
   return name.replace(/[^a-z0-9._-]+/gi, '_').replace(/^_+|_+$/g, '') || 'lab-report.pdf';
 }
 
-export function Lab() {
+export function Lab({ role = '' }: { role?: string }) {
+  const canManageTests = ['admin', 'lab', 'lab_technician'].includes(role);
+  const canOrder = ['admin', 'doctor', 'nurse', 'receptionist'].includes(role);
+  const canEnterResults = ['admin', 'doctor', 'nurse', 'lab', 'lab_technician'].includes(role);
   const [labOrders, setLabOrders] = useState<any[]>([]);
   const [labTests, setLabTests] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
@@ -50,6 +53,7 @@ export function Lab() {
   }, []);
 
   const handleSaveOrder = async () => {
+    if (!canOrder) return;
     if (!orderForm.patientId) { setOrderError('Select a patient.'); return; }
     if (orderForm.selectedTests.length === 0) { setOrderError('Select at least one test.'); return; }
     setSaving(true); setOrderError('');
@@ -101,6 +105,7 @@ export function Lab() {
   };
 
   const handleSaveResults = async () => {
+    if (!canEnterResults) return;
     if (!showResultModal) return;
     if (!results.some(r => r.result?.trim()) && !reportPdf && !showResultModal.reportPdf?.url) {
       setResultError('Enter at least one result or upload a PDF report.');
@@ -168,10 +173,12 @@ export function Lab() {
   };
 
   const updateOrderStatus = async (id: string, status: string) => {
+    if (!canEnterResults) return;
     await updateDoc(doc(db, 'labOrders', id), { status, updatedAt: nowISO() });
   };
 
   const handleSaveTest = async () => {
+    if (!canManageTests) return;
     if (!testForm.name || !testForm.price) return;
     setSaving(true);
     try {
@@ -201,13 +208,13 @@ export function Lab() {
           <p className="text-sm text-gray-500">{pendingCount} pending · {inProgressCount} in progress</p>
         </div>
         <div className="flex items-center gap-2">
-          {tab === 'orders' && (
+          {tab === 'orders' && canOrder && (
             <button onClick={() => { setOrderForm({ patientId: '', patientName: '', patientMRN: '', doctorName: '', selectedTests: [] }); setOrderPatientSearch(''); setOrderError(''); setShowOrderModal(true); }}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
               <Plus className="w-4 h-4" /> New Order
             </button>
           )}
-          {tab === 'catalog' && (
+          {tab === 'catalog' && canManageTests && (
             <button onClick={() => { setEditTestId(null); setTestForm({ name: '', category: 'Hematology', price: '', unit: '', normalRange: '', turnaround: '24 hours' }); setShowTestModal(true); }}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
               <Plus className="w-4 h-4" /> Add Test
@@ -284,10 +291,10 @@ export function Lab() {
                   <td className="px-4 py-3">{statusBadge(o.status)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      {o.status === 'pending' && (
+                      {canEnterResults && o.status === 'pending' && (
                         <button onClick={() => updateOrderStatus(o.id, 'in-progress')} className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 px-2 py-1 rounded-lg font-medium">Start</button>
                       )}
-                      {(o.status === 'in-progress' || o.status === 'pending') && (
+                      {canEnterResults && (o.status === 'in-progress' || o.status === 'pending') && (
                         <button onClick={() => openResultEntry(o)} className="flex items-center gap-1 text-xs bg-green-50 text-green-700 hover:bg-green-100 px-2 py-1 rounded-lg font-medium">
                           <CheckCircle className="w-3 h-3" /> Enter Results
                         </button>
@@ -325,7 +332,7 @@ export function Lab() {
                   <td className="px-4 py-3 text-sm text-gray-500">{t.unit || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{t.turnaround || '—'}</td>
                   <td className="px-4 py-3">
-                    <button onClick={() => { setEditTestId(t.id); setTestForm({ name: t.name, category: t.category, price: String(t.price), unit: t.unit || '', normalRange: t.normalRange || '', turnaround: t.turnaround || '24 hours' }); setShowTestModal(true); }} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                    {canManageTests && <button onClick={() => { setEditTestId(t.id); setTestForm({ name: t.name, category: t.category, price: String(t.price), unit: t.unit || '', normalRange: t.normalRange || '', turnaround: t.turnaround || '24 hours' }); setShowTestModal(true); }} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>}
                   </td>
                 </tr>
               ))}
@@ -369,7 +376,7 @@ export function Lab() {
                       </div>
                     )}
                   </div>
-                  <label className="inline-flex items-center gap-1.5 text-xs bg-red-600 text-white rounded-lg px-3 py-2 font-medium hover:bg-red-700 cursor-pointer">
+                  {canEnterResults && <label className="inline-flex items-center gap-1.5 text-xs bg-red-600 text-white rounded-lg px-3 py-2 font-medium hover:bg-red-700 cursor-pointer">
                     <Upload className="w-3.5 h-3.5" /> {showResultModal.reportPdf?.url ? 'Replace PDF' : 'Upload PDF'}
                     <input
                       type="file"
@@ -377,7 +384,7 @@ export function Lab() {
                       className="hidden"
                       onChange={e => handlePdfSelect(e.target.files?.[0])}
                     />
-                  </label>
+                  </label>}
                 </div>
               </div>
               {results.map((r, i) => (
@@ -393,7 +400,7 @@ export function Lab() {
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="text-xs text-gray-400 block mb-1">Result</label>
-                      <input value={r.result} onChange={e => updateResult(i, 'result', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <input readOnly={!canEnterResults} value={r.result} onChange={e => updateResult(i, 'result', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                     <div>
                       <label className="text-xs text-gray-400 block mb-1">Unit</label>
@@ -409,9 +416,9 @@ export function Lab() {
             </div>
             <div className="flex gap-3 px-5 pb-5">
               <button onClick={() => setShowResultModal(null)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm">Cancel</button>
-              <button onClick={handleSaveResults} disabled={saving || (showResultModal.status === 'completed' && !reportPdf)} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">
+              {canEnterResults && <button onClick={handleSaveResults} disabled={saving || (showResultModal.status === 'completed' && !reportPdf)} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm disabled:opacity-60">
                 {saving ? 'Saving...' : showResultModal.status === 'completed' && !reportPdf ? 'Already Saved' : 'Save Report'}
-              </button>
+              </button>}
             </div>
           </div>
         </div>

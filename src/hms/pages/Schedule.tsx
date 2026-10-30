@@ -6,7 +6,7 @@ import { logAudit } from '../lib/audit';
 import { Clock, Check, X, Save, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAppDialog } from '../../components/AppDialog';
-import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { getLocalRecordOnce, subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const TIME_SLOTS = [
@@ -40,12 +40,12 @@ export function Schedule() {
   useEffect(() => {
     if (!selectedDoctor) return;
     setLoading(true);
-    getDoc(doc(db, 'schedules', selectedDoctor.id)).then(snap => {
-      const data: Schedule = snap.exists() ? (snap.data().slots || {}) : {};
+    getLocalRecordOnce('schedules', selectedDoctor.id).then(record => {
+      const data: Schedule = record?.slots || {};
       setSchedule(data);
       setOriginalSchedule(data);
       setLoading(false);
-    });
+    }).catch(error => { setLoading(false); console.error(error); });
   }, [selectedDoctor]);
 
   const toggleSlot = (day: string, slot: string) => {

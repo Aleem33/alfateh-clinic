@@ -7,6 +7,8 @@ import { useGlobalSearch } from '../lib/search';
 import { cn } from '../lib/utils';
 import { formatDate } from '../lib/utils';
 import { SyncStatusBadge } from '../../components/SyncStatusBadge';
+import { canAccessPage } from '../../lib/roleAccess';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
 
 const TYPE_ICONS: Record<string, any> = {
   patient: Users, staff: Briefcase, medicine: Pill,
@@ -36,12 +38,13 @@ export function TopNavbar({ userEmail, userRole }: { userEmail: string; userRole
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
-  const results = useGlobalSearch(searchQuery);
+  const results = useGlobalSearch(searchQuery).filter(result => canAccessPage('hms', userRole, result.path));
 
   // Notifications
   const [notifs, setNotifs] = useState<any[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
+  const canMark = (notification: any) => userRole === 'admin' || notification.userId === getActiveAuthSession()?.profile.uid;
   const unread = notifs.filter(n => !n.read).length;
 
   useEffect(() => {
@@ -66,7 +69,7 @@ export function TopNavbar({ userEmail, userRole }: { userEmail: string; userRole
   }, []);
 
   const markAllRead = async () => {
-    const unreadOnes = notifs.filter(n => !n.read);
+    const unreadOnes = notifs.filter(n => !n.read && canMark(n));
     if (!unreadOnes.length) return;
     const batch = writeBatch(db);
     unreadOnes.forEach(n => batch.update(doc(db, 'notifications', n.id), { read: true }));
@@ -74,6 +77,7 @@ export function TopNavbar({ userEmail, userRole }: { userEmail: string; userRole
   };
 
   const markRead = async (id: string) => {
+    if (!notifs.some(notification => notification.id === id && canMark(notification))) return;
     await updateDoc(doc(db, 'notifications', id), { read: true });
   };
 

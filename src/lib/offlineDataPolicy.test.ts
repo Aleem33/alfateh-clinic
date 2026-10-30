@@ -18,8 +18,13 @@ describe('offline data access policy', () => {
     expect(canRoleReadOfflineCollection('pharmacist', 'users')).toBe(false);
   });
 
-  it('keeps customer payments limited to cashiers and administrators', () => {
+  it('allows dispensing roles to read customer payments without exposing other finance records', () => {
     expect(canRoleReadOfflineCollection('cashier', 'customerPayments')).toBe(true);
-    expect(canRoleReadOfflineCollection('pharmacist', 'customerPayments')).toBe(false);
+    expect(canRoleReadOfflineCollection('pharmacist', 'customerPayments')).toBe(true);
+    expect(canRoleReadOfflineCollection('doctor', 'customerPayments')).toBe(false);
+  });
+
+  it('rejects unconfigured roles rather than starting a misleading empty or unauthorized cache', () => {
+    expect(getOfflineCollectionsForRole('unknown')).toEqual([]);
   });
 });

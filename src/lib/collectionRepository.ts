@@ -73,3 +73,10 @@ export async function getLocalCollectionOnce<T extends Record<string, any> = Rec
   }
   return records.map(materialize);
 }
+
+/** A complete mirror can authoritatively confirm absence even while offline.
+ * The SDK cache cannot: getDoc on a never-created settings document rejects. */
+export async function getLocalRecordOnce(collectionName: string, id: string): Promise<CollectionRecord | null> {
+  const records = await getLocalCollectionOnce(collectionName, { filter: document => document.id === id, limit: 1 });
+  return records[0] || null;
+}
