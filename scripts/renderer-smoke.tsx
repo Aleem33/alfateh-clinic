@@ -43,14 +43,15 @@ Object.defineProperty(navigator, 'onLine', { get: () => online });
 if (!online) await disableNetwork(db);
 window.print = () => undefined;
 window.alert = message => { throw new Error(String(message)); };
+const role = new URLSearchParams(location.search).get('role') || 'admin';
 setActiveAuthSession({ mode: 'online', profile: {
-  uid: 'smoke-admin', username: 'smoke', email: 'smoke@example.invalid', name: 'Smoke Admin',
-  role: 'admin', app: 'pos', permissions: [], active: true, profileUpdatedAt: new Date().toISOString(),
+  uid: `smoke-${role}`, username: 'smoke', email: 'smoke@example.invalid', name: `Smoke ${role}`,
+  role, app: 'pos', permissions: [], active: true, profileUpdatedAt: new Date().toISOString(),
 } });
-startFullOfflineCache('admin');
+startFullOfflineCache(role);
 location.hash = '/billing';
 const smokeRoot = createRoot(document.getElementById('root')!);
-smokeRoot.render(<POSApp userRole="admin" onSwitchApp={() => {}} onLoginSuccess={() => {}} />);
+smokeRoot.render(<POSApp userRole={role} onSwitchApp={() => {}} onLoginSuccess={() => {}} />);
 
 const ready = async () => {
   await waitFor(() => { const status = getOfflineCacheStatus(); return status.totalCollections > 0 && status.readyCollections === status.totalCollections; }, 'complete mirror');
@@ -68,6 +69,7 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
 (window as any).smoke = {
   ready,
   async verifyMonthReporting() {
+    if (role !== 'admin') return { skipped: 'admin-only report controls' };
     const fixtures = [
       { id: 'report-jan', date: '2001-01-31T18:59:59Z', medicineName: 'January Report Medicine', supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-jan', totalCost: 100, paidUnits: 10, bonusUnits: 2, totalUnitsAdded: 12, invoiceId: 'report-invoice-jan', purchaseBillNo: 'PUR-RSMK-000001', invoiceNo: 'CASE-2001' },
       { id: 'report-feb', date: '2001-01-31T19:00:00Z', medicineName: 'February Report Medicine', supplierName: 'Report Supplier', supplierId: 'report-supplier', medicineId: 'report-batch-feb', totalCost: 200, paidUnits: 20, bonusUnits: 0, totalUnitsAdded: 20, invoiceId: 'report-invoice-feb' },
@@ -161,8 +163,10 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
     click('Confirm Return & Print Slip');
     await waitFor(async () => (await getLocalCollectionOnce('saleReturns')).length === 1, 'return mirrored offline');
     if ((await listPendingSaleReturns()).length !== 1) throw new Error('Offline sales return not durably queued');
-    location.hash = '/suppliers';
-    await waitFor(() => document.body.innerText.includes('Smoke Supplier'), 'supplier mirror offline');
+    if (role !== 'cashier') {
+      location.hash = '/suppliers';
+      await waitFor(() => document.body.innerText.includes('Smoke Supplier'), 'supplier mirror offline');
+    }
     location.hash = '/billing';
     await waitFor(() => document.body.innerText.includes('Smoke Medicine'), 'billing reopen offline');
     window.dispatchEvent(new Event('focus'));
@@ -218,6 +222,7 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
     return { mirroredSales: 2, mirroredReturns: 1, stock: medicines[0].stock };
   },
   async verifyTransitions() {
+    if (role !== 'admin') return { skipped: 'admin-only sync controls' };
     if (getOfflineCacheStatus().mode !== 'incremental') return { mode: 'legacy' };
     const temporary = doc(db, 'suppliers', 'smoke-transient');
     await trackedSetDoc(temporary, { name: 'Temporary supplier' });
@@ -248,6 +253,7 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
     return { tombstoneRestored: true, generation: previous.datasetGeneration + 1, sales: 2, returns: 1, stock: 19 };
   },
   async verifyShortageRecovery() {
+    if (role !== 'admin') return { skipped: 'admin-only stock reconciliation controls' };
     online = true; window.dispatchEvent(new Event('online'));
     await enableNetwork(db);
     await waitForPendingWrites(db);

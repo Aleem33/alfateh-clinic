@@ -1,5 +1,6 @@
 import type { OfflineAuthProfile } from '../types/electron';
 import { trustedNowISO } from './trustedClock';
+import { isSupportedRole } from './roleAccess';
 
 export type AuthSession = {
   mode: 'online' | 'offline';
@@ -21,12 +22,12 @@ export function profileFromUserDocument(uid: string, email: string, data: Record
     username,
     email,
     name: String(data.name || username),
-    role: String(data.role || 'cashier'),
+    role: String(data.role || ''),
     app: String(data.app || ''),
     permissions: Array.isArray(data.permissions)
       ? data.permissions.map(String)
       : (data.permissions && typeof data.permissions === 'object' ? data.permissions : []),
-    active: data.active !== false && data.disabled !== true && data.deleted !== true,
+    active: isSupportedRole(String(data.role || '')) && data.active !== false && data.disabled !== true && data.deleted !== true,
     profileUpdatedAt: String(data.updatedAt || trustedNowISO()),
   };
 }

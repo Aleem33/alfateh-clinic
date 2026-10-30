@@ -25,6 +25,7 @@ import {
 } from '../lib/prescriptionOptions';
 import { formatMedicineNameWithForm } from '../lib/prescriptionMedicine';
 import { filterDoctorRecords, findCurrentDoctorStaff, normalizeRole } from '../lib/doctorAccess';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppDialog } from '../../components/AppDialog';
@@ -136,15 +137,10 @@ export function OPD() {
       ))
     );
     // Determine current user role and doctor ID
-    getDoc(doc(db, 'users', auth.currentUser?.uid || 'x')).then(snap => {
-      if (snap.exists()) {
-        const profile = { id: snap.id, ...snap.data() };
-        const role = normalizeRole((profile as any).role);
-        setCurrentUserProfile(profile);
-        setCurrentRole(role);
-      }
-      setRoleLoaded(true);
-    }).catch(() => setRoleLoaded(true));
+    const session = getActiveAuthSession();
+    setCurrentUserProfile(session ? { id: session.profile.uid, ...session.profile } : null);
+    setCurrentRole(normalizeRole(session?.profile.role));
+    setRoleLoaded(!!session);
 
     // Pre-fill from appointment if navigated from Appointments page
     const prefill = sessionStorage.getItem('opd_prefill');
@@ -201,7 +197,7 @@ export function OPD() {
       setCurrentDoctorId(null);
       return;
     }
-    const me = findCurrentDoctorStaff(staff, currentUserProfile, auth.currentUser);
+    const me = findCurrentDoctorStaff(staff, currentUserProfile, getActiveAuthSession()?.profile || auth.currentUser);
     setCurrentDoctorId(me?.id || null);
   }, [currentRole, currentUserProfile, staff]);
 
@@ -214,6 +210,7 @@ export function OPD() {
   };
 
   const openSaveTemplateModal = () => {
+    if (!['admin', 'doctor'].includes(currentRole)) return;
     if (!prescriptions.length) {
       setTemplateMsg('Add medicines before saving a template.');
       setTimeout(() => setTemplateMsg(''), 3000);
@@ -243,6 +240,7 @@ export function OPD() {
   }));
 
   const saveAsTemplate = async () => {
+    if (!['admin', 'doctor'].includes(currentRole)) return;
     const name = templateName.trim();
     if (!name) {
       setTemplateMsg('Template name is required.');
@@ -1058,7 +1056,7 @@ export function OPD() {
                     </span>
                   )}
                   <div className="ml-auto flex items-center gap-2">
-                    {prescriptions.length > 0 && (
+                    {['admin', 'doctor'].includes(currentRole) && prescriptions.length > 0 && (
                       <button onClick={openSaveTemplateModal}
                         className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 rounded-lg px-2 py-1 transition-colors">
                         <BookOpen className="w-3 h-3" /> Save as Template

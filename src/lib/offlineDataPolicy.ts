@@ -1,13 +1,14 @@
 import { GLOBAL_DATA_COLLECTIONS } from './dataCollections';
+import { isSupportedRole } from './roleAccess';
 
 const ADMIN_ONLY_COLLECTIONS = new Set(['auditLogs', 'syncIssues']);
 const FINANCE_COLLECTIONS = new Set(['expenses']);
 const LEGACY_POS_EXPENSE_ROLES = new Set(['admin', 'accountant', 'pharmacist']);
-const CUSTOMER_PAYMENT_ROLES = new Set(['admin', 'cashier']);
+const CUSTOMER_PAYMENT_ROLES = new Set(['admin', 'cashier', 'pharmacist']);
 const FINANCE_ROLES = new Set(['admin', 'accountant', 'receptionist']);
 
 export function canRoleReadOfflineCollection(role: string | null | undefined, collectionName: string) {
-  if (!role) return false;
+  if (!role || !isSupportedRole(role)) return false;
   if (role === 'admin') return true;
   if (collectionName === 'users') return false;
   if (ADMIN_ONLY_COLLECTIONS.has(collectionName)) return false;

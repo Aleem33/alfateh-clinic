@@ -12,7 +12,7 @@ import {
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import {
-  initializeFirestore, doc, getDoc, setDoc, updateDoc,
+  initializeFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc, enableNetwork,
   increment, persistentLocalCache, persistentMultipleTabManager, runTransaction,
 } from '@/lib/firestore';
 import { getStorage } from 'firebase/storage';
@@ -25,8 +25,10 @@ import {
   setActiveAuthSession,
   verifyOfflineCredential,
   type AuthSession,
+  getActiveAuthSession,
 } from './lib/offlineAuth';
 import { trustedNowISO } from './lib/trustedClock';
+import { isSupportedRole } from './lib/roleAccess';
 
 // ── App instances ─────────────────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
@@ -66,13 +68,18 @@ export async function loginWithUsername(username: string, password: string): Pro
           : 'Invalid username or password.';
       throw new Error(message);
     }
+    if (!result.profile.active || !isSupportedRole(result.profile.role)) {
+      throw new Error('This cached account does not have a valid active role. Sign in online or contact an administrator.');
+    }
     const session: AuthSession = { mode: 'offline', profile: result.profile };
     setActiveAuthSession(session);
     return session;
   }
 
   const credential = await signInWithEmailAndPassword(auth, usernameToEmail(normalizedUsername), password);
-  const profileSnapshot = await getDoc(doc(db, 'users', credential.user.uid));
+  await enableNetwork(db);
+  // Never enroll a stale admin role from a previous cached login.
+  const profileSnapshot = await getDocFromServer(doc(db, 'users', credential.user.uid));
   if (!profileSnapshot.exists()) {
     await signOut(auth);
     throw new Error('Your account has not been configured. Please contact an administrator.');
@@ -100,8 +107,21 @@ export const loginWithEmail = loginWithUsername;
 export const logout = () => signOut(auth);
 
 /** Create a new user account (admin stays logged in) */
-export const createUser = (username: string, password: string) =>
-  createUserWithEmailAndPassword(secondaryAuth, usernameToEmail(username), password);
+export const createUser = async (username: string, password: string) => {
+  const session = getActiveAuthSession();
+  if (session?.profile.role !== 'admin' || session.profile.uid !== auth.currentUser?.uid || !isCloudOnline()) {
+    throw new Error('User accounts must be created online by a signed-in administrator.');
+  }
+  const current = await getDocFromServer(doc(db, 'users', session.profile.uid));
+  if (!current.exists() || !profileFromUserDocument(session.profile.uid, session.profile.email, current.data()).active || current.data().role !== 'admin') {
+    throw new Error('Administrator access could not be verified. Sign in again before creating users.');
+  }
+  try {
+    return await createUserWithEmailAndPassword(secondaryAuth, usernameToEmail(username), password);
+  } finally {
+    await signOut(secondaryAuth).catch(console.warn);
+  }
+};
 
 export const registerUser          = createUser;
 export const registerWithEmail     = createUser;

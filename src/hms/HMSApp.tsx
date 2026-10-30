@@ -24,6 +24,8 @@ import { BedManagement } from './pages/BedManagement';
 import { useAutoNotifications } from './lib/notifications';
 import { SyncIssuesPage } from '../components/SyncIssuesPage';
 import type { AuthSession } from '../lib/offlineAuth';
+import { canAccessPage, roleHome } from '../lib/roleAccess';
+import { RoleAccessDenied } from '../components/RoleAccessDenied';
 
 interface Props {
   userRole: string | null;
@@ -41,38 +43,36 @@ export function HMSApp({ userRole, userEmail, onSwitchApp, onLoginSuccess, onBac
 
   const r = userRole;
   const isAdmin = r === 'admin';
-  const clinical = ['admin', 'receptionist', 'doctor'];
-  const defaultPath =
-    r === 'pharmacist'     ? '/pharmacy' :
-    r === 'lab_technician' ? '/lab'      :
-    r === 'cashier'        ? '/billing'  : '/';
+  const allow = (path: string) => canAccessPage('hms', r, path);
+  const defaultPath = roleHome('hms', r);
+  if (!defaultPath) return <RoleAccessDenied onLogout={onLogout} />;
 
   return (
     <ErrorBoundary>
       <HashRouter>
         <Routes>
           <Route path="/" element={<Layout role={r} userEmail={userEmail} onSwitchApp={onSwitchApp} onLogout={onLogout} />}>
-            {clinical.includes(r) && <Route index element={<Dashboard />} />}
-            {clinical.includes(r) && <Route path="patients"     element={<Patients />} />}
-            {clinical.includes(r) && <Route path="appointments" element={<Appointments />} />}
-            {clinical.includes(r) && <Route path="opd"          element={<OPD />} />}
-            {clinical.includes(r) && <Route path="ipd"          element={<IPD />} />}
-            {clinical.includes(r) && <Route path="token"        element={<TokenDisplay />} />}
+            {allow('/') && <Route index element={<Dashboard />} />}
+            {allow('/patients') && <Route path="patients" element={<Patients canDelete={isAdmin} />} />}
+            {allow('/appointments') && <Route path="appointments" element={<Appointments />} />}
+            {allow('/opd') && <Route path="opd" element={<OPD />} />}
+            {allow('/ipd') && <Route path="ipd" element={<IPD />} />}
+            {allow('/token') && <Route path="token" element={<TokenDisplay />} />}
             {['admin','doctor'].includes(r)                         && <Route path="prescriptions"         element={<Prescriptions />} />}
             {['admin','doctor'].includes(r)                         && <Route path="prescription-templates" element={<PrescriptionTemplates />} />}
-            {['admin','doctor','lab_technician'].includes(r)        && <Route path="lab"                   element={<Lab />} />}
+            {allow('/lab') && <Route path="lab" element={<Lab role={r} />} />}
             {['admin','pharmacist'].includes(r)                     && <Route path="pharmacy"              element={<Pharmacy canEditMedicines={isAdmin} canEditPurchases={isAdmin} />} />}
             {['admin','pharmacist'].includes(r)                     && <Route path="suppliers"             element={<Suppliers />} />}
-            {['admin','cashier'].includes(r)                        && <Route path="billing"               element={<Billing />} />}
+            {allow('/billing') && <Route path="billing" element={<Billing />} />}
             {isAdmin && <Route path="staff"    element={<Staff />} />}
-            {isAdmin && <Route path="schedule" element={<Schedule />} />}
-            {isAdmin && <Route path="beds"     element={<BedManagement />} />}
-            {isAdmin && <Route path="expenses" element={<Expenses />} />}
-            {isAdmin && <Route path="reports"  element={<Reports />} />}
+            {allow('/schedule') && <Route path="schedule" element={<Schedule />} />}
+            {allow('/beds') && <Route path="beds" element={<BedManagement />} />}
+            {allow('/expenses') && <Route path="expenses" element={<Expenses canDelete={isAdmin} />} />}
+            {allow('/reports') && <Route path="reports" element={<Reports />} />}
             {isAdmin && <Route path="audit"    element={<AuditLogs />} />}
             {isAdmin && <Route path="sync-issues" element={<SyncIssuesPage />} />}
             {isAdmin && <Route path="settings" element={<Settings />} />}
-            {!clinical.includes(r) && <Route index element={<Navigate to={defaultPath} replace />} />}
+            {!allow('/') && <Route index element={<Navigate to={defaultPath} replace />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

@@ -11,7 +11,7 @@ vi.mock('./syncProtocol', () => ({
 vi.mock('./offlineAuth', () => ({
   getActiveAuthSession: () => ({ profile: { role: auth.role } }),
 }));
-import { getLocalCollectionOnce, subscribeToLocalCollection } from './collectionRepository';
+import { getLocalCollectionOnce, getLocalRecordOnce, subscribeToLocalCollection } from './collectionRepository';
 import { resetLocalMirrorForTests, setLocalSyncMetadata, upsertLocalRecords } from './localMirror';
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -24,6 +24,13 @@ beforeEach(async () => {
 afterEach(resetLocalMirrorForTests);
 
 describe('local collection repository completeness guard', () => {
+  it('confirms missing optional settings locally only after a complete bootstrap', async () => {
+    await expect(getLocalRecordOnce('settings', 'hospital')).rejects.toThrow('Initial synchronization');
+    await setLocalSyncMetadata('settings', { seedComplete: true, generation: 2 });
+    await expect(getLocalRecordOnce('settings', 'hospital')).resolves.toBeNull();
+    await upsertLocalRecords('settings', [{ id: 'hospital', data: { consultationFee: 500 } }]);
+    await expect(getLocalRecordOnce('settings', 'hospital')).resolves.toMatchObject({ id: 'hospital', consultationFee: 500 });
+  });
   it('does not publish a partial or empty mirror until its bootstrap is complete', async () => {
     const listener = vi.fn();
     const unsubscribe = subscribeToLocalCollection('sales', listener);

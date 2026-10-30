@@ -12,6 +12,7 @@ import {
 import { logout } from '../../firebase';
 import { cn } from '../lib/utils';
 import { TopNavbar } from './TopNavbar';
+import { canAccessPage } from '../../lib/roleAccess';
 
 const NAV = [
   {
@@ -127,7 +128,7 @@ export function Layout({ role, userEmail, onSwitchApp, onLogout }: Props) {
           {/* Nav */}
           <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4">
             {NAV.map(({ group, items }) => {
-              const visible = items.filter(i => i.roles.includes(role));
+              const visible = items.filter(i => canAccessPage('hms', role, i.to));
               if (!visible.length) return null;
               return (
                 <div key={group}>

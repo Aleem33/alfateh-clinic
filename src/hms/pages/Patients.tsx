@@ -16,7 +16,7 @@ const emptyForm = {
   bloodGroup: 'Unknown', allergies: '', emergencyContact: '', emergencyPhone: '',
 };
 
-export function Patients() {
+export function Patients({ canDelete = false }: { canDelete?: boolean }) {
   const { confirm } = useAppDialog();
   const [patients, setPatients] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -100,6 +100,7 @@ export function Patients() {
   };
 
   const handleDelete = async (id: string, name: string) => {
+    if (!canDelete) return;
     if (!(await confirm(`Delete patient "${name}"? This cannot be undone.`, { title: 'Delete Patient', confirmLabel: 'Delete' }))) return;
     await deleteDoc(doc(db, 'patients', id));
     await logAudit('delete', 'patient', id, name);
@@ -169,7 +170,7 @@ export function Patients() {
                   <div className="flex items-center gap-1">
                     <button onClick={() => setViewPatient(p)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="View"><ChevronDown className="w-4 h-4" /></button>
                     <button onClick={() => openEdit(p)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors" title="Edit"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => handleDelete(p.id, p.name)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                    {canDelete && <button onClick={() => handleDelete(p.id, p.name)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>}
                   </div>
                 </td>
               </tr>

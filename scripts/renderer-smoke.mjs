@@ -9,6 +9,10 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Run this script insid
 const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
 const projectId = 'demo-alfateh-renderer-smoke';
 const incremental = process.argv.includes('--incremental');
+const role = process.argv.find(argument => argument.startsWith('--role='))?.split('=')[1] || 'admin';
+const roleAudit = process.argv.includes('--role-audit');
+if (!(roleAudit ? ['admin', 'cashier', 'pharmacist', 'doctor', 'nurse', 'receptionist', 'accountant', 'lab', 'lab_technician'] : ['admin', 'cashier', 'pharmacist']).includes(role)) throw new Error('Unsupported smoke role');
+const uid = `smoke-${role}`;
 const environment = await initializeTestEnvironment({ projectId, firestore: {
   host, port: Number(port), rules: await readFile('firestore.rules', 'utf8'),
 } });
@@ -19,7 +23,7 @@ await environment.withSecurityRulesDisabled(async context => {
     protocolVersion: 2, minimumProtocolVersion: 2, rulesEnforcementVersion: 2, datasetGeneration: 2,
     incrementalEnabled: true, trackedWritesRequired: true, rollbackToLegacy: false,
   });
-  await setDoc(doc(database, 'users', 'smoke-admin'), { role: 'admin', active: true });
+  await setDoc(doc(database, 'users', uid), { role, active: true });
   await setDoc(doc(database, 'medicines', 'smoke-med'), {
     name: 'Smoke Medicine', category: 'Injection', unitsPerBox: 1, stock: 20,
     costPrice: 60, retailPrice: 100, unitPrice: 100, batchNo: 'SMOKE',
@@ -37,13 +41,13 @@ const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, plug
     return source.replace("import firebaseConfig from '../firebase-applet-config.json';",
       `import { connectFirestoreEmulator } from 'firebase/firestore';\nconst firebaseConfig = ${JSON.stringify({ apiKey: 'demo-key', projectId, appId: 'demo-app', authDomain: 'localhost' })};`)
       .replace('export const storage = getStorage(app);',
-        `connectFirestoreEmulator(db, ${JSON.stringify(host)}, ${Number(port)}, { mockUserToken: { sub: 'smoke-admin' } });\nexport const storage = getStorage(app);`);
+        `connectFirestoreEmulator(db, ${JSON.stringify(host)}, ${Number(port)}, { mockUserToken: { sub: ${JSON.stringify(uid)} } });\nexport const storage = getStorage(app);`);
   },
 }] });
 try {
   await server.listen();
   const address = server.httpServer.address();
-  const url = `http://127.0.0.1:${address.port}/scripts/renderer-smoke.html?mode=${incremental ? 'incremental' : 'legacy'}`;
+  const url = `http://127.0.0.1:${address.port}/scripts/${roleAudit ? 'role' : 'renderer'}-smoke.html?mode=${incremental ? 'incremental' : 'legacy'}&role=${role}${roleAudit ? '&role-audit=1' : ''}`;
   const require = createRequire(import.meta.url);
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   const exitCode = await new Promise((resolve, reject) => {

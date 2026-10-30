@@ -57,6 +57,15 @@ jobs:
       - name: Incremental sync smoke test (emulator only)
         run: npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic "node scripts/renderer-smoke.mjs --incremental"
 
+      - name: Cashier online and offline billing (emulator only)
+        run: npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic "node scripts/renderer-smoke.mjs --incremental --role=cashier"
+
+      - name: Pharmacist online and offline billing (emulator only)
+        run: npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic "node scripts/renderer-smoke.mjs --incremental --role=pharmacist"
+
+      - name: All-role online and offline page access (emulator only)
+        run: npx --yes firebase-tools@13.35.1 emulators:exec --only firestore --project demo-alfateh-clinic "node scripts/role-matrix-smoke.mjs"
+
       - name: Build Vite app (verify it compiles)
         run: npm run build
 

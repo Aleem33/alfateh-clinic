@@ -18,6 +18,8 @@ import { PurchaseReturns } from './pages/PurchaseReturns';
 import { PatientHistory } from './pages/PatientHistory';
 import { SyncIssuesPage } from '../components/SyncIssuesPage';
 import type { AuthSession } from '../lib/offlineAuth';
+import { canAccessPage, roleHome } from '../lib/roleAccess';
+import { RoleAccessDenied } from '../components/RoleAccessDenied';
 
 interface Props {
   userRole: string | null;
@@ -32,6 +34,8 @@ export function POSApp({ userRole, onSwitchApp, onLoginSuccess, onBack, onLogout
 
   const r = userRole;
   const isAdmin = r === 'admin';
+  const allow = (path: string) => canAccessPage('pos', r, path);
+  if (!roleHome('pos', r)) return <RoleAccessDenied onLogout={onLogout} />;
 
   return (
     <ErrorBoundary>
@@ -39,12 +43,12 @@ export function POSApp({ userRole, onSwitchApp, onLoginSuccess, onBack, onLogout
         <Routes>
           <Route path="/" element={<Layout role={r} onSwitchApp={onSwitchApp} onLogout={onLogout} />}>
             {(isAdmin || r === 'pharmacist') && <Route index element={<Dashboard />} />}
-            {(isAdmin || r === 'cashier')    && <Route path="billing"          element={<Billing />} />}
+            {allow('/billing') && <Route path="billing" element={<Billing />} />}
             {(isAdmin || r === 'pharmacist') && <Route path="medicines"        element={<Medicines canEdit={isAdmin} canArchive={isAdmin} />} />}
             {(isAdmin || r === 'pharmacist') && <Route path="purchases"        element={<Purchases canEdit={isAdmin} />} />}
             {(isAdmin || r === 'pharmacist') && <Route path="purchase-returns" element={<PurchaseReturns />} />}
-                                                 <Route path="sales"           element={<SalesHistory />} />
-            {(isAdmin || r === 'cashier')    && <Route path="sale-returns"     element={<SalesReturns />} />}
+            {allow('/sales') && <Route path="sales" element={<SalesHistory />} />}
+            {allow('/sale-returns') && <Route path="sale-returns" element={<SalesReturns />} />}
             {isAdmin                         && <Route path="customers"        element={<Customers />} />}
             {(isAdmin || r === 'pharmacist') && <Route path="suppliers"        element={<Suppliers />} />}
             {isAdmin                         && <Route path="expenses"         element={<Expenses />} />}
@@ -55,7 +59,6 @@ export function POSApp({ userRole, onSwitchApp, onLoginSuccess, onBack, onLogout
             {(isAdmin || r === 'pharmacist' || r === 'cashier') && <Route path="patient-history" element={<PatientHistory />} />}
 
             {r === 'cashier'    && <Route index element={<Navigate to="/billing" replace />} />}
-            {r === 'pharmacist' && <Route index element={<Navigate to="/medicines" replace />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

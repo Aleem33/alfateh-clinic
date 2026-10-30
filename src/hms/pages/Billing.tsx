@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, doc, getDoc } from '@/lib/firestore';
+import { collection, addDoc, updateDoc, doc } from '@/lib/firestore';
 import { db, auth, getNextBillNo } from '../../firebase';
 import { formatCurrency, formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { Plus, Search, X, Printer, CheckCircle } from 'lucide-react';
 import { printBill } from '../lib/pdf';
 import { useAppDialog } from '../../components/AppDialog';
-import { subscribeToLocalCollection } from '../../lib/collectionRepository';
+import { getLocalRecordOnce, subscribeToLocalCollection } from '../../lib/collectionRepository';
 
 const PAYMENT_METHODS = ['Cash', 'Card', 'Online Transfer', 'Cheque'];
 const ITEM_CATEGORIES = ['Consultation', 'Lab Test', 'Medicine', 'IPD Charges', 'Procedure', 'Other'];
@@ -36,9 +36,9 @@ export function Billing() {
       setBills(records.sort((a: any, b: any) => b.createdAt > a.createdAt ? 1 : -1))
     );
     const u2 = subscribeToLocalCollection('patients', setPatients);
-    getDoc(doc(db, 'settings', 'hospital')).then(snap => {
-      if (snap.exists()) setHospitalSettings(s => ({ ...s, ...snap.data() }));
-    });
+    getLocalRecordOnce('settings', 'hospital').then(settings => {
+      if (settings) setHospitalSettings(s => ({ ...s, ...settings }));
+    }).catch(error => setError(error.message));
     return () => { u1(); u2(); };
   }, []);
 

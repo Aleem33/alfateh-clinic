@@ -5,6 +5,8 @@ import { formatDate, today, nowISO } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { useNavigate } from 'react-router-dom';
 import { filterDoctorRecords, findCurrentDoctorStaff, normalizeRole } from '../lib/doctorAccess';
+import { getActiveAuthSession } from '../../lib/offlineAuth';
+import { getLocalRecordOnce } from '../../lib/collectionRepository';
 import {
   Plus, Search, X, CheckCircle, XCircle, Clock, CalendarDays,
   ChevronLeft, ChevronRight, LayoutList, UserPlus, User, Stethoscope,
@@ -102,22 +104,17 @@ export function Appointments() {
       const doctors = records.filter(record => record.role === 'doctor');
       setStaff(doctors as any[]);
     });
-    getDoc(doc(db, 'settings', 'hospital')).then(snap => {
-      if (snap.exists() && snap.data().consultationFee) {
-        setConsultationFee(String(snap.data().consultationFee));
-        setApptForm(f => ({ ...f, fee: String(snap.data().consultationFee) }));
+    getLocalRecordOnce('settings', 'hospital').then(settings => {
+      if (settings?.consultationFee) {
+        setConsultationFee(String(settings.consultationFee));
+        setApptForm(f => ({ ...f, fee: String(settings.consultationFee) }));
       }
-    });
+    }).catch(error => setError(error.message));
     // Determine current user's staff record and role
-    getDoc(doc(db, 'users', auth.currentUser?.uid || 'x')).then(snap => {
-      if (snap.exists()) {
-        const profile = { id: snap.id, ...snap.data() };
-        const role = normalizeRole((profile as any).role);
-        setCurrentUserProfile(profile);
-        setCurrentRole(role);
-      }
-      setRoleLoaded(true);
-    }).catch(() => setRoleLoaded(true));
+    const session = getActiveAuthSession();
+    setCurrentUserProfile(session ? { id: session.profile.uid, ...session.profile } : null);
+    setCurrentRole(normalizeRole(session?.profile.role));
+    setRoleLoaded(!!session);
     return () => { u1(); u2(); u3(); };
   }, []);
 
@@ -126,7 +123,7 @@ export function Appointments() {
       setCurrentStaffId(null);
       return;
     }
-    const me = findCurrentDoctorStaff(staff, currentUserProfile, auth.currentUser);
+    const me = findCurrentDoctorStaff(staff, currentUserProfile, getActiveAuthSession()?.profile || auth.currentUser);
     setCurrentStaffId(me?.id || null);
   }, [currentRole, currentUserProfile, staff]);
 

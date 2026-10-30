@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, deleteDoc, updateDoc } from '@/lib/firestore';
-import { db, registerSecondaryUser, usernameToEmail, handleFirestoreError, OperationType } from '../../firebase';
+import { auth, db, registerSecondaryUser, usernameToEmail, handleFirestoreError, OperationType } from '../../firebase';
 import { Plus, Trash2, Shield, User as UserIcon, Edit2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { trustedNowISO } from '../../lib/trustedClock';
@@ -10,6 +10,12 @@ const ROLES = [
   { value: 'cashier', label: 'Cashier (Billing Only)' },
   { value: 'pharmacist', label: 'Pharmacist (Inventory & Billing)' },
   { value: 'admin', label: 'Admin (Full Access)' },
+  { value: 'doctor', label: 'Doctor (Hospital)' },
+  { value: 'nurse', label: 'Nurse (Hospital)' },
+  { value: 'receptionist', label: 'Receptionist (Hospital)' },
+  { value: 'lab_technician', label: 'Lab Technician (Hospital)' },
+  { value: 'lab', label: 'Lab (Legacy Hospital Role)' },
+  { value: 'accountant', label: 'Accountant (Hospital Finance)' },
 ];
 
 const emptyForm = { name: '', username: '', password: '', role: 'cashier' };
@@ -41,6 +47,9 @@ export function Users() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (editingId === auth.currentUser?.uid && form.role !== 'admin') {
+      setError('Use another administrator account to change your own administrator role.'); return;
+    }
     if (!form.name.trim()) { setError('Name is required.'); return; }
     if (!editingId && !form.username.trim()) { setError('Username is required.'); return; }
     if (!editingId && form.password.length < 6) { setError('Password must be at least 6 characters.'); return; }
@@ -83,6 +92,10 @@ export function Users() {
 
   const confirmDelete = async () => {
     if (!confirmDeleteUser) return;
+    if (confirmDeleteUser.id === auth.currentUser?.uid) {
+      setError('You cannot remove your own administrator access.');
+      setConfirmDeleteUser(null); return;
+    }
     try {
       await deleteDoc(doc(db, 'users', confirmDeleteUser.id));
     } catch (error) {
@@ -171,7 +184,7 @@ export function Users() {
                       <button onClick={() => openEdit(u)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => setConfirmDeleteUser(u)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete">
+                      <button disabled={u.id === auth.currentUser?.uid} onClick={() => setConfirmDeleteUser(u)} className="p-1.5 text-red-600 hover:bg-red-50 rounded disabled:opacity-30" title="Delete">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>

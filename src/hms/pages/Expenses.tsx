@@ -21,7 +21,7 @@ const emptyForm = {
   date: today(), paymentMethod: 'Cash', vendor: '', invoiceNo: '', notes: '',
 };
 
-export function Expenses() {
+export function Expenses({ canDelete = false }: { canDelete?: boolean }) {
   const { alert } = useAppDialog();
   const [expenses, setExpenses] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -106,6 +106,7 @@ export function Expenses() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDelete) return;
     try { await deleteDoc(doc(db, 'expenses', id)); setDeleteConfirm(null); }
     catch (e: any) { await alert(e.message || 'Expense could not be deleted.', 'Delete Failed'); }
   };
@@ -221,9 +222,9 @@ export function Expenses() {
                     <button onClick={() => openEdit(e)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => setDeleteConfirm(e.id)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg">
+                    {canDelete && <button onClick={() => setDeleteConfirm(e.id)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg">
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </button>}
                   </div>
                 </td>
               </tr>
