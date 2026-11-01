@@ -68,6 +68,79 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
 };
 (window as any).smoke = {
   ready,
+  async verifyPurchaseReturnSafety() {
+    if (role !== 'admin') return { skipped: 'admin purchase edit controls' };
+    const medicineId = 'return-safety-batch';
+    const purchaseId = 'return-safety-purchase';
+    await trackedSetDoc(doc(db, 'medicines', medicineId), {
+      name: 'Return Safety Rose Water', stock: 333, bonusStockUnits: 1, unitsPerBox: 30,
+      batchNo: 'AGU-TEST', costPrice: 34, retailPrice: 40, unitPrice: 40 / 30,
+    });
+    await trackedSetDoc(doc(db, 'purchases', purchaseId), {
+      medicineId, medicineName: 'Return Safety Rose Water', unitsPerBox: 30, batchNo: 'AGU-TEST',
+      paidUnits: 360, bonusUnits: 0, totalUnitsAdded: 360, boxesPurchased: 12,
+      looseUnitsPurchased: 0, costPrice: 34, totalCost: 408, date: '2026-08-18',
+    });
+    for (const quantity of [10, 2]) await trackedSetDoc(doc(db, 'purchaseReturns', `return-safety-${quantity}`), {
+      originalPurchaseId: purchaseId, medicineId, medicineName: 'Return Safety Rose Water',
+      paidUnitsReturned: quantity, bonusUnitsReturned: 0, totalUnitsReturned: quantity,
+      refundAmount: quantity * 34 / 30, date: '2026-10-12',
+    });
+    smokeRoot.render(<POSApp userRole={role} onSwitchApp={() => {}} onLoginSuccess={() => {}} />);
+    location.hash = '/purchases';
+    const row = () => [...document.querySelectorAll('tr')].find(node => node.textContent?.includes('Return Safety Rose Water'));
+    await waitFor(() => row()?.querySelector('button[title="Edit purchase"]'), 'purchase safety fixture');
+    const edit = row()!.querySelector('button[title="Edit purchase"]') as HTMLButtonElement;
+    edit.click();
+    await waitFor(() => document.body.innerText.includes('Save Changes'), 'purchase edit dialog');
+    const paidBoxes = [...document.querySelectorAll('label')].find(node => node.textContent === 'Paid Boxes')?.parentElement?.querySelector('input');
+    if (!paidBoxes) throw new Error('Paid boxes edit control missing');
+    setInputValue(paidBoxes, '0');
+    await waitFor(() => paidBoxes.value === '0', 'purchase edit quantity');
+    // Keep the proposed quantity positive so this exercises the existing-return
+    // guard, not the empty-purchase guard.
+    const loose = [...document.querySelectorAll('label')].find(node => node.textContent === 'Paid Loose Units')?.parentElement?.querySelector('input');
+    if (!loose) throw new Error('Paid loose edit control missing');
+    setInputValue(loose, '1');
+    await waitFor(() => loose.value === '1', 'purchase edit loose quantity');
+    click('Save Changes');
+    await waitFor(() => document.body.innerText.includes('cannot be reduced below those returns'), 'purchase edit blocked below existing returns');
+    click('Cancel');
+    if ((await getDocFromServer(doc(db, 'purchases', purchaseId))).data()?.paidUnits !== 360
+      || (await getDocFromServer(doc(db, 'medicines', medicineId))).data()?.stock !== 333) throw new Error('Blocked edit changed records');
+    await trackedUpdateDoc(doc(db, 'purchases', purchaseId), { paidUnits: 0, bonusUnits: 1, totalUnitsAdded: 1, boxesPurchased: 0, bonusLooseUnits: 1 });
+    location.hash = '/purchase-returns';
+    const card = () => [...document.querySelectorAll('p')].find(node => node.textContent === 'Return Safety Rose Water')?.parentElement?.parentElement;
+    await waitFor(() => card()?.querySelector('button')?.textContent?.includes('Review'), 'inconsistent purchase review');
+    (card()!.querySelector('button') as HTMLButtonElement).click();
+    await waitFor(() => document.body.innerText.includes('12 paid and 0 bonus units were already returned'), 'explicit return conflict reason');
+    if (!document.body.innerText.includes('333 individual units')) throw new Error('Stock unit conversion is unclear');
+    const confirm = [...document.querySelectorAll('button')].find(node => node.textContent?.includes('Confirm Return & Print Slip'));
+    if (!confirm?.disabled) throw new Error('Conflicting purchase return was allowed');
+    if ((await getDocFromServer(doc(db, 'medicines', medicineId))).data()?.stock !== 333) throw new Error('Return review changed stock');
+    click('Cancel');
+    await trackedSetDoc(doc(db, 'medicines', 'legacy-return-batch'), {
+      name: 'Legacy Return Safety', batchNo: 'LEGACY-TEST', stock: 20, unitsPerBox: 1, costPrice: 5, retailPrice: 8,
+    });
+    await trackedSetDoc(doc(db, 'purchases', 'legacy-return-purchase'), {
+      medicineName: 'Legacy Return Safety', medicineId: 'old-missing-id', batchNo: 'LEGACY-TEST',
+      totalUnitsAdded: 20, unitsPerBox: 1, costPrice: 5, date: '2026-08-18',
+    });
+    const legacyCard = () => [...document.querySelectorAll('p')].find(node => node.textContent === 'Legacy Return Safety')?.parentElement?.parentElement;
+    await waitFor(() => legacyCard()?.querySelector('button'), 'legacy purchase return fixture');
+    (legacyCard()!.querySelector('button') as HTMLButtonElement).click();
+    await waitFor(() => document.body.innerText.includes('Paid Units to Return'), 'legacy return dialog');
+    const quantity = [...document.querySelectorAll('label')].find(node => node.textContent === 'Paid Units to Return')?.parentElement?.querySelector('input');
+    if (!quantity) throw new Error('Purchase return quantity missing');
+    setInputValue(quantity, '1');
+    await waitFor(() => [...document.querySelectorAll('button')].some(node => node.textContent?.includes('Confirm Return & Print Slip') && !node.disabled), 'legacy return ready');
+    click('Confirm Return & Print Slip');
+    await waitFor(async () => (await getDocFromServer(doc(db, 'medicines', 'legacy-return-batch'))).data()?.stock === 19, 'correct linked batch deducted');
+    const persisted = (await getDocsFromServer(collection(db, 'purchaseReturns'))).docs.map(row => row.data());
+    if (!persisted.some(row => row.originalPurchaseId === 'legacy-return-purchase' && row.medicineId === 'legacy-return-batch' && row.refundAmount === 5)) throw new Error('Legacy return did not preserve the resolved batch and refund');
+    if ((await getDocFromServer(doc(db, 'medicines', medicineId))).data()?.stock !== 333) throw new Error('Unrelated stock was changed');
+    return { reducingPurchaseBlocked: true, explicitConflict: true, stockUnchanged: 333, historicalReturnsPreserved: true, legacyReturnStock: 19 };
+  },
   async verifyMonthReporting() {
     if (role !== 'admin') return { skipped: 'admin-only report controls' };
     const fixtures = [
@@ -149,6 +222,7 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
     if ((await listPendingPosSales()).length !== 1) throw new Error('Offline sale not durably queued');
     location.hash = '/sale-returns';
     await waitFor(() => document.body.innerText.includes('Return History'), 'sales return page offline');
+    await waitFor(() => [...document.querySelectorAll('button')].some(node => node.textContent?.trim() === 'Return'), 'offline sale return row ready');
     const returnButton = [...document.querySelectorAll('button')]
       .find(node => node.textContent?.trim() === 'Return') as HTMLButtonElement | undefined;
     if (!returnButton) throw new Error('Offline sale return action unavailable');
