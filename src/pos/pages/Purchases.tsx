@@ -17,6 +17,8 @@ import { PurchaseReports } from '../components/PurchaseReports';
 import { PurchaseInvoiceHistory } from '../components/PurchaseInvoiceHistory';
 import { groupPurchaseInvoices, purchaseReportLine } from '../lib/purchaseReporting';
 import { getNextPurchaseBillNo } from '../lib/purchaseBillNumbers';
+import { subscribeToPurchaseReturns } from '../../lib/salesStore';
+import { validatePurchaseEditAgainstReturns } from '../lib/purchaseReturnQuantities';
 
 const today = () => clinicDateKey(trustedNow());
 const emptyPurchaseForm = () => ({
@@ -31,6 +33,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   const [medicines, setMedicines] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
+  const [purchaseReturns, setPurchaseReturns] = useState<any[]>([]);
+  const [returnsReady, setReturnsReady] = useState(false);
   const [search, setSearch] = useState('');
   const [month, setMonth] = useState('');
   const [supplierFilter, setSupplierFilter] = useState('');
@@ -58,8 +62,12 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       list.sort((a: any, b: any) => historyDateKey(b).localeCompare(historyDateKey(a)));
       setPurchases(list);
     }, e => handleFirestoreError(e, OperationType.GET, 'purchases'));
-    return () => { u1(); u2(); u3(); };
-  }, []);
+    const u4 = canEdit ? subscribeToPurchaseReturns(records => {
+      setPurchaseReturns(records);
+      setReturnsReady(true);
+    }, e => { setReturnsReady(false); handleFirestoreError(e, OperationType.GET, 'purchaseReturns'); }) : () => {};
+    return () => { u1(); u2(); u3(); u4(); };
+  }, [canEdit]);
 
   const purchaseOptions = purchases.map(purchaseReportLine);
   const scopedPurchases = purchases.filter(p => matchesMonth(p, month)
@@ -195,7 +203,10 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
 
     if (!canEdit) return;
     try {
+      if (!returnsReady) throw new Error('Purchase return history is still loading. Wait before editing this purchase; existing entries are preserved.');
       const line = buildPurchaseLine(true);
+      const returnError = validatePurchaseEditAgainstReturns(editingPurchase, line, purchaseReturns);
+      if (returnError) { setFormError(returnError); return; }
       if (line.unitsPerBox !== Math.max(1, Number(selectedMedicine.unitsPerBox || 1))) {
         setFormError('Units per box cannot be changed while editing an existing batch purchase.');
         return;

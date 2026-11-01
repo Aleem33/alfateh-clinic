@@ -49,7 +49,8 @@ app.whenReady().then(async () => {
     const restarted = await primary.webContents.executeJavaScript('window.smoke.verifyReplica()');
     const shortageRecovery = await primary.webContents.executeJavaScript('window.smoke.verifyShortageRecovery()');
     const monthReporting = await primary.webContents.executeJavaScript('window.smoke.verifyMonthReporting()');
-    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted, shortageRecovery, monthReporting }));
+    const purchaseReturnSafety = await primary.webContents.executeJavaScript('window.smoke.verifyPurchaseReturnSafety()');
+    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted, shortageRecovery, monthReporting, purchaseReturnSafety }));
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });

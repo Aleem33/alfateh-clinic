@@ -15,6 +15,7 @@ import { findPurchaseReturnMedicine, resolvePurchaseReturnFinancials, resolvePur
 import { ensureLanWriteAccess } from '../../lib/lanCoordinator';
 import { getActiveAuthSession } from '../../lib/offlineAuth';
 import { submitDurableReturn } from '../lib/submitDurableReturn';
+import { purchaseUnitBuckets, returnedPurchaseBuckets, purchaseReturnBlockReason } from '../lib/purchaseReturnQuantities';
 import {
   createPendingPurchaseReturn,
   queuePendingPurchaseReturn,
@@ -148,11 +149,7 @@ export function PurchaseReturns() {
   );
 
   const getAlreadyReturnedUnits = (purchaseId: string, bucket?: 'paid' | 'bonus') => {
-    return returns
-      .filter(r => r.originalPurchaseId === purchaseId)
-      .reduce((sum, r) => sum + (bucket === 'paid'
-        ? (r.paidUnitsReturned ?? r.totalUnitsReturned ?? 0)
-        : bucket === 'bonus' ? (r.bonusUnitsReturned || 0) : (r.totalUnitsReturned || 0)), 0);
+    return returnedPurchaseBuckets(purchaseId, returns)[bucket || 'total'];
   };
 
   const openReturn = (purchase: any) => {
@@ -169,6 +166,7 @@ export function PurchaseReturns() {
   const selectedMedicine = selectedPurchase
     ? findPurchaseReturnMedicine(selectedPurchase, selectedPurchase, medicineList)
     : undefined;
+  const blockReason = selectedPurchase ? purchaseReturnBlockReason(selectedPurchase, selectedMedicine, returns) : '';
   const costPricePerUnit = resolvePurchaseUnitCost(selectedPurchase)
     || resolvePurchaseUnitCost(selectedMedicine);
   const boxes = parseInt(returnBoxes || '0');
@@ -187,13 +185,16 @@ export function PurchaseReturns() {
   const currentStock = currentBuckets?.stock || 0;
   const currentBonusStock = currentBuckets?.bonusStockUnits || 0;
   const currentPaidStock = Math.max(0, currentStock - currentBonusStock);
-  const purchasedPaidUnits = Number(selectedPurchase?.paidUnits ?? selectedPurchase?.totalUnitsAdded ?? 0);
-  const purchasedBonusUnits = Number(selectedPurchase?.bonusUnits || 0);
+  const purchasedBuckets = selectedPurchase ? purchaseUnitBuckets(selectedPurchase) : { paid: 0, bonus: 0, total: 0 };
+  const purchasedPaidUnits = purchasedBuckets.paid;
+  const purchasedBonusUnits = purchasedBuckets.bonus;
   const maxPaidReturnable = Math.min(Math.max(0, purchasedPaidUnits - alreadyPaidReturned), currentPaidStock);
   const maxBonusReturnable = Math.min(Math.max(0, purchasedBonusUnits - alreadyBonusReturned), currentBonusStock);
   const maxReturnable = maxPaidReturnable + maxBonusReturnable;
   const hasPaidRefundRate = paidUnitsToReturn === 0 || costPricePerUnit > 0;
-  const isValid = totalUnitsToReturn > 0 && paidUnitsToReturn <= maxPaidReturnable
+  const validQuantityInputs = [returnBoxes, returnLoose, bonusReturnBoxes, bonusReturnLoose]
+    .every(value => value.trim() === '' || (Number.isSafeInteger(Number(value)) && Number(value) >= 0));
+  const isValid = !blockReason && validQuantityInputs && totalUnitsToReturn > 0 && paidUnitsToReturn <= maxPaidReturnable
     && bonusUnitsToReturn <= maxBonusReturnable && hasPaidRefundRate;
   const refundAmount = paidUnitsToReturn * costPricePerUnit;
 
@@ -207,7 +208,7 @@ export function PurchaseReturns() {
   };
 
   const handleSubmit = async () => {
-    if (!isValid || !selectedPurchase || submittingRef.current) return;
+    if (!isValid || !selectedPurchase || !selectedMedicine || submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
     try {
@@ -216,7 +217,8 @@ export function PurchaseReturns() {
       const returnDoc = {
         returnNo,
         originalPurchaseId: selectedPurchase.id,
-        medicineId: selectedPurchase.medicineId,
+        medicineId: selectedMedicine.id,
+        batchNo: selectedMedicine.batchNo || selectedPurchase.batchNo || '',
         medicineName: selectedPurchase.medicineName,
         supplierId: selectedPurchase.supplierId || null,
         supplierName: selectedPurchase.supplierName || 'N/A',
@@ -245,7 +247,7 @@ export function PurchaseReturns() {
       // offline batch later, the exact return can be replayed without duplicate
       // stock deductions or loss of the supplier return entry.
       batch.set(docRef, returnDoc);
-      batch.update(doc(db, 'medicines', selectedPurchase.medicineId), {
+      batch.update(doc(db, 'medicines', selectedMedicine.id), {
         stock: increment(-totalUnitsToReturn),
         ...(bonusUnitsToReturn > 0 ? { bonusStockUnits: increment(-bonusUnitsToReturn) } : {}),
       });
@@ -282,6 +284,7 @@ export function PurchaseReturns() {
       )}
 
       <h1 className="text-2xl font-bold text-gray-900">Purchase Returns</h1>
+      <p className="text-sm text-gray-600">Use this page only for goods actually returned to a supplier. For a physical stock mismatch, ask an admin to verify the count and edit that batch in Medicines instead. Purchase quantities are not the current stock balance.</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -302,15 +305,18 @@ export function PurchaseReturns() {
           </div>
           <div className="flex-1 overflow-auto divide-y divide-gray-100">
             {filteredPurchases.map(p => {
-              const alreadyRet = getAlreadyReturnedUnits(p.id);
-              const remaining = p.totalUnitsAdded - alreadyRet;
+              const returned = returnedPurchaseBuckets(p.id, returns);
+              const alreadyRet = returned.total;
+              const purchased = purchaseUnitBuckets(p);
+              const remaining = purchased.total - alreadyRet;
+              const warning = returned.paid > purchased.paid || returned.bonus > purchased.bonus;
               return (
                 <div key={p.id} className="p-4 hover:bg-gray-50 flex justify-between items-center gap-3">
                   <div className="min-w-0">
                     <p className="font-semibold text-gray-900 text-sm truncate">{p.medicineName}</p>
                     <p className="text-xs text-gray-500">{p.supplierName} • {p.batchNo}</p>
                     <p className="text-xs text-gray-500">
-                      {p.date ? format(new Date(p.date), 'MMM dd, yyyy') : ''} • +{formatUnits(p.totalUnitsAdded, p.unitsPerBox || 1)}
+                      {p.date ? format(new Date(p.date), 'MMM dd, yyyy') : ''} • +{formatUnits(purchased.total, p.unitsPerBox || 1)}
                     </p>
                     {alreadyRet > 0 && (
                       <span className="inline-block mt-1 text-[10px] bg-orange-100 text-orange-700 font-semibold px-1.5 py-0.5 rounded">
@@ -320,10 +326,10 @@ export function PurchaseReturns() {
                   </div>
                   <button
                     onClick={() => openReturn(p)}
-                    disabled={remaining <= 0}
+                    disabled={remaining <= 0 && !warning}
                     className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-lg text-xs font-semibold hover:bg-orange-100 border border-orange-200 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" /> Return
+                    <RotateCcw className="w-3.5 h-3.5" /> {warning ? 'Review' : 'Return'}
                   </button>
                 </div>
               );
@@ -400,10 +406,11 @@ export function PurchaseReturns() {
             </div>
 
             <div className="p-6 space-y-4">
+              {blockReason && <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{blockReason}</p>}
               <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
                 <div className="flex justify-between text-gray-600">
-                  <span>Originally purchased:</span>
-                  <span className="font-medium">{formatUnits(selectedPurchase.totalUnitsAdded, unitsPerBox)}</span>
+                  <span>Purchase quantity (current record):</span>
+                  <span className="font-medium">{formatUnits(purchasedBuckets.total, unitsPerBox)}</span>
                 </div>
                 <div className="flex justify-between text-gray-600">
                   <span>Already returned:</span>
@@ -411,7 +418,7 @@ export function PurchaseReturns() {
                 </div>
                 <div className="flex justify-between text-gray-600">
                   <span>Current stock:</span>
-                  <span className="font-medium text-blue-600">{formatUnits(currentStock, unitsPerBox)}</span>
+                  <span className="font-medium text-blue-600">{formatUnits(currentStock, unitsPerBox)} ({currentStock} individual units)</span>
                 </div>
                 <div className="flex justify-between font-semibold text-gray-900 pt-1 border-t border-gray-200">
                   <span>Available to return:</span>
@@ -485,9 +492,9 @@ export function PurchaseReturns() {
               {!isValid && totalUnitsToReturn > 0 && (
                 <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 p-2 rounded-lg">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  {!hasPaidRefundRate
+                  {blockReason || (!validQuantityInputs ? 'Enter non-negative whole numbers for paid and bonus quantities.' : !hasPaidRefundRate
                     ? 'This purchase has no cost price. Ask an admin to edit the original purchase cost before returning paid stock.'
-                    : 'Paid and bonus returns cannot exceed their separate available quantities.'}
+                    : 'Paid and bonus returns cannot exceed their separate available quantities.')}
                 </div>
               )}
 
