@@ -4,7 +4,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Search, Truck, PackagePlus, X, ChevronDown, CheckCircle, Edit2, AlertCircle, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
-import { searchMedicines } from '../../lib/medicineIndex';
+import { purchaseMedicineOptions } from '../lib/medicineAvailability';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { ensureMedicinePurchaseBatch, findMedicinePurchaseBatch } from '../../lib/medicineOperations';
 import { calculatePurchaseQuantities, getEditedBatchSellingPriceUpdate, hasDuplicatePurchaseInvoiceLine, validateExistingBatchPurchase } from '../lib/purchaseInvoice';
@@ -50,6 +50,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
   const [selectedMedicine, setSelectedMedicine] = useState<any>(null);
   const [medSearch, setMedSearch] = useState('');
   const [medDropdownOpen, setMedDropdownOpen] = useState(false);
+  const [showOutOfStockBatches, setShowOutOfStockBatches] = useState(false);
   const [formData, setFormData] = useState(emptyPurchaseForm);
 
   useEffect(() => {
@@ -85,7 +86,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     payable: summary.payable + Number(purchase.totalCost || 0),
   }), { lines: 0, units: 0, payable: 0 });
 
-  const filteredMeds = searchMedicines(medicines, medSearch);
+  const medicineOptions = purchaseMedicineOptions(medicines, medSearch, showOutOfStockBatches);
+  const filteredMeds = medicineOptions.visible;
 
   const handleSelectMedicine = (med: any) => {
     setSelectedMedicine(med);
@@ -412,6 +414,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     setMedSearch('');
     setFormError('');
     setMedDropdownOpen(false);
+    setShowOutOfStockBatches(false);
     setInvoiceLines([]);
     setSavingInvoice(false);
     setFormData(emptyPurchaseForm());
@@ -613,6 +616,10 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Medicine <span className="text-red-500">*</span></label>
+                {!editingPurchase && <label className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                  <input type="checkbox" checked={showOutOfStockBatches} onChange={event => { setShowOutOfStockBatches(event.target.checked); setMedDropdownOpen(true); }} />
+                  Show out-of-stock batches (for restocking or adding a new batch)
+                </label>}
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input type="text" placeholder="Search medicine by name..."
@@ -621,9 +628,13 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
                     onChange={e => { setMedSearch(e.target.value); setMedDropdownOpen(true); setSelectedMedicine(null); }}
                     onFocus={() => setMedDropdownOpen(true)}
                     className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500" />
-                  {!editingPurchase && medDropdownOpen && medSearch && filteredMeds.length > 0 && (
+                  {!editingPurchase && medDropdownOpen && medSearch && (
                     <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-auto">
-                      <div className="px-4 py-1.5 text-xs text-gray-500 bg-gray-50 border-b">{filteredMeds.length} matching medicine records</div>
+                      <div className="px-4 py-1.5 text-xs text-gray-500 bg-gray-50 border-b">Showing {filteredMeds.length} of {medicineOptions.total} matching batch records</div>
+                      {medicineOptions.hidden > 0 && <button type="button" onClick={() => setShowOutOfStockBatches(true)} className="w-full px-4 py-2 text-left text-xs text-blue-700 bg-blue-50 hover:bg-blue-100">
+                        Show {medicineOptions.hidden} out-of-stock batch{medicineOptions.hidden === 1 ? '' : 'es'} to restock or use for a new batch
+                      </button>}
+                      {filteredMeds.length === 0 && <p className="px-4 py-3 text-sm text-gray-500">{medicineOptions.hidden > 0 ? 'No matching batches currently have stock. Show out-of-stock batches above to continue.' : 'No matching medicines found.'}</p>}
                       {filteredMeds.map(med => (
                         <button key={med.id} type="button" onClick={() => handleSelectMedicine(med)}
                           className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-gray-100 last:border-0">
