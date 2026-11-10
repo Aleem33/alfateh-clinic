@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { POSApp } from '../src/pos/POSApp';
 import { Reports as HMSReports } from '../src/hms/pages/Reports';
 import { db } from '../src/firebase';
+import { addMonths, addDays, format, parseISO } from 'date-fns';
+import { clinicDateKey } from '../src/lib/clinicDate';
+import { trustedNow } from '../src/lib/trustedClock';
 import { collection, doc, getDocFromServer, getDocsFromServer, disableNetwork, enableNetwork, waitForPendingWrites } from 'firebase/firestore';
 import { getOfflineCacheStatus, startFullOfflineCache } from '../src/lib/offlineCache';
 import { setActiveAuthSession } from '../src/lib/offlineAuth';
@@ -68,6 +71,41 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
 };
 (window as any).smoke = {
   ready,
+  async verifyExpiryAndPurchaseAvailability() {
+    if (role !== 'admin') return { skipped: 'admin fixture setup' };
+    const cutoff = addMonths(parseISO(clinicDateKey(trustedNow())), 6);
+    const fixtures = [
+      { id: 'availability-in', name: 'Availability Fixture Stocked', stock: 2, expiryDate: format(cutoff, 'yyyy-MM-dd') },
+      { id: 'availability-empty', name: 'Availability Fixture Empty', stock: 0, expiryDate: format(cutoff, 'yyyy-MM-dd') },
+      { id: 'availability-later', name: 'Availability Fixture Later', stock: 2, expiryDate: format(addDays(cutoff, 1), 'yyyy-MM-dd') },
+    ];
+    for (const fixture of fixtures) await trackedSetDoc(doc(db, 'medicines', fixture.id), {
+      ...fixture, category: 'Syrup', unitsPerBox: 1, costPrice: 5, retailPrice: 8, batchNo: fixture.id,
+    });
+    const before = await Promise.all(fixtures.map(async fixture => (await getDocFromServer(doc(db, 'medicines', fixture.id))).data()));
+    smokeRoot.render(<POSApp userRole={role} onSwitchApp={() => {}} onLoginSuccess={() => {}} />);
+    location.hash = '/';
+    await waitFor(() => document.body.innerText.includes('Expiring Soon'), 'expiry dashboard');
+    click('Expiring Soon');
+    await waitFor(() => document.body.innerText.includes('Availability Fixture Stocked'), 'six month boundary expiry');
+    if (document.body.innerText.includes('Availability Fixture Empty') || document.body.innerText.includes('Availability Fixture Later')) throw new Error('Expiry shows an empty or outside-window batch');
+    location.hash = '/purchases';
+    await waitFor(() => document.body.innerText.includes('Record Purchase'), 'purchase availability page');
+    click('Record Purchase');
+    const search = () => document.querySelector('input[placeholder="Search medicine by name..."]') as HTMLInputElement;
+    await waitFor(search, 'medicine purchase search');
+    setInputValue(search(), 'Availability Fixture');
+    const options = () => [...document.querySelectorAll('button')].filter(button => button.querySelector('p')?.textContent?.startsWith('Availability Fixture'));
+    await waitFor(() => options().length === 2 && document.body.innerText.includes('Showing 2 of 3'), 'empty purchase batches hidden');
+    if (options().some(button => button.textContent?.includes('Fixture Empty'))) throw new Error('Empty batch visible by default');
+    click('Show 1 out-of-stock batch');
+    await waitFor(() => options().length === 3, 'reveal all purchase batches');
+    options().find(button => button.textContent?.includes('Fixture Empty'))!.click();
+    await waitFor(() => document.body.innerText.includes('Stock: 0 units'), 'empty batch independently selectable');
+    const after = await Promise.all(fixtures.map(async fixture => (await getDocFromServer(doc(db, 'medicines', fixture.id))).data()));
+    if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('Availability filters changed medicine records');
+    return { sixMonthBoundary: true, emptyExpiryExcluded: true, defaultPurchaseOptions: 2, allPurchaseOptions: 3, emptyBatchSelectable: true, recordsUnchanged: true };
+  },
   async verifyPurchaseReturnSafety() {
     if (role !== 'admin') return { skipped: 'admin purchase edit controls' };
     const medicineId = 'return-safety-batch';

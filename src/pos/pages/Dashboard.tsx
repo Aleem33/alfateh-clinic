@@ -3,13 +3,14 @@ import { handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { DollarSign, AlertTriangle, Package, Clock, ShoppingCart, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { format, subDays, isBefore, addDays, parseISO } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
 import { subscribeToMedicines } from '../../lib/medicineStore';
 import { clinicDateKey, recordClinicDateKey } from '../../lib/clinicDate';
 import { useClinicTodayKey } from '../../lib/useClinicTodayKey';
 import { subscribeToSaleReturns, subscribeToSales } from '../../lib/salesStore';
 import { netSalesByDate } from '../lib/salesFinancials';
 import { getBonusAwareStockValue } from '../lib/bonusInventory';
+import { expiringStockWithinSixMonths } from '../lib/medicineAvailability';
 
 export function Dashboard() {
   const todayStr = useClinicTodayKey();
@@ -29,26 +30,18 @@ export function Dashboard() {
   useEffect(() => {
     const unsubMedicines = subscribeToMedicines((medicines) => {
       let lowStockCount = 0;
-      let expiringCount = 0;
       let inStockCount = 0;
       let stockValue = 0;
-      const today = parseISO(todayStr);
-      const nextMonth = addDays(today, 30);
-
-      const expiring: any[] = [];
+      const expiring = expiringStockWithinSixMonths(medicines, todayStr);
       medicines.forEach(data => {
         const stock = Number(data.stock || 0);
         if (stock > 0) inStockCount++;
         if (stock <= (data.unitsPerBox || 1) * 2) lowStockCount++;
-        if (data.expiryDate && isBefore(new Date(data.expiryDate), nextMonth)) {
-          expiringCount++;
-          expiring.push(data);
-        }
         stockValue += getBonusAwareStockValue(data);
       });
 
-      setStats(prev => ({ ...prev, lowStock: lowStockCount, expiringSoon: expiringCount, totalMedicines: inStockCount, totalStockValue: stockValue }));
-      setExpiringMedicines(expiring.sort((a, b) => String(a.expiryDate).localeCompare(String(b.expiryDate))));
+      setStats(prev => ({ ...prev, lowStock: lowStockCount, expiringSoon: expiring.length, totalMedicines: inStockCount, totalStockValue: stockValue }));
+      setExpiringMedicines(expiring);
     }, (error) => handleFirestoreError(error, OperationType.GET, 'medicines'));
 
     const unsubSales = subscribeToSales(setSales, error => handleFirestoreError(error, OperationType.GET, 'sales'));
@@ -142,7 +135,7 @@ export function Dashboard() {
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">Expiring Medicines</h2>
-                <p className="text-sm text-gray-500">{expiringMedicines.length} batch record{expiringMedicines.length === 1 ? '' : 's'} expiring within 30 days or already expired</p>
+                <p className="text-sm text-gray-500">{expiringMedicines.length} in-stock batch record{expiringMedicines.length === 1 ? '' : 's'} expiring within 6 months or already expired. Out-of-stock batches are excluded.</p>
               </div>
               <button type="button" onClick={() => setShowExpiryList(false)} className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
