@@ -99,16 +99,13 @@ export function searchMedicines(
     return queryTokens.every(token => searchText.includes(token));
   });
 
-  results.sort((a, b) => {
-    if (normalizedQuery) {
-      const aName = normalizeMedicineText(a.name);
-      const bName = normalizeMedicineText(b.name);
-      const aScore = aName === normalizedQuery ? 0 : aName.startsWith(normalizedQuery) ? 1 : 2;
-      const bScore = bName === normalizedQuery ? 0 : bName.startsWith(normalizedQuery) ? 1 : 2;
-      if (aScore !== bScore) return aScore - bScore;
-    }
-    return String(a.name || '').localeCompare(String(b.name || ''));
-  });
+  // Calculate ranking once per result, not twice for every sort comparison.
+  // Preserve every independent batch and the existing stable ranking.
+  results = results.map(medicine => {
+    const name = String(medicine.name || '');
+    const normalizedName = normalizedQuery ? normalizeMedicineText(name) : '';
+    return { medicine, name, score: !normalizedQuery ? 0 : normalizedName === normalizedQuery ? 0 : normalizedName.startsWith(normalizedQuery) ? 1 : 2 };
+  }).sort((a, b) => a.score - b.score || a.name.localeCompare(b.name)).map(result => result.medicine);
 
   return options.limit ? results.slice(0, options.limit) : results;
 }

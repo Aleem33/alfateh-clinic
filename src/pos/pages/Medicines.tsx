@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { collection, addDoc, updateDoc, doc } from '@/lib/firestore';
 import { downloadOrShare } from '../lib/nativeUtils';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
@@ -50,6 +50,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
   const [archivedMedicines, setArchivedMedicines] = useState<any[]>([]);
   const [suppliers, setSuppliers]       = useState<any[]>([]);
   const [search, setSearch]             = useState('');
+  const [visibleCount, setVisibleCount] = useState(100);
   const [isModalOpen, setIsModalOpen]   = useState(false);
   const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
   const [csvError, setCsvError]         = useState<string | null>(null);
@@ -84,7 +85,11 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
   }, []);
 
   const visibleMedicines = showArchived && canArchive ? archivedMedicines : medicines;
-  const filteredMedicines = search ? searchMedicines(visibleMedicines, search) : visibleMedicines;
+  const deferredSearch = useDeferredValue(search);
+  const filteredMedicines = useMemo(() => deferredSearch ? searchMedicines(visibleMedicines, deferredSearch) : visibleMedicines,
+    [visibleMedicines, deferredSearch]);
+  useEffect(() => { setVisibleCount(100); }, [deferredSearch, showArchived]);
+  const renderedMedicines = filteredMedicines.slice(0, visibleCount);
 
   const handleRetailPriceChange = (retail: string, units: string) => {
     const rPrice = parseFloat(retail);
@@ -383,13 +388,13 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            Showing {filteredMedicines.length} of {visibleMedicines.length} {showArchived ? 'archived' : 'active'} medicine records
+            Showing {renderedMedicines.length} of {filteredMedicines.length} matching {showArchived ? 'archived' : 'active'} medicine records ({visibleMedicines.length} total). Search includes every batch.
           </p>
         </div>
 
         {/* ── Mobile: cards ── */}
         <div className="md:hidden divide-y divide-gray-100">
-          {filteredMedicines.map(med => (
+          {renderedMedicines.map(med => (
             <div key={med.id} className="p-4">
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex-1 min-w-0">
@@ -454,7 +459,7 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredMedicines.map(med => (
+              {renderedMedicines.map(med => (
                 <tr key={med.id} className="hover:bg-gray-50">
                   <td className="p-4">
                     <p className="font-medium text-gray-900">{med.name}</p>
@@ -497,6 +502,11 @@ export function Medicines({ canEdit = false, canArchive = false }: { canEdit?: b
       </div>
 
       {/* ── Add / Edit Modal (slides up on mobile) ── */}
+      {renderedMedicines.length < filteredMedicines.length && <div className="text-center">
+        <button type="button" onClick={() => setVisibleCount(count => count + 100)} className="px-4 py-2 text-sm font-semibold text-blue-700 border border-blue-200 rounded-lg bg-white hover:bg-blue-50">
+          Show {Math.min(100, filteredMedicines.length - renderedMedicines.length)} more medicine records
+        </button>
+      </div>}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-2xl overflow-hidden flex flex-col max-h-[95vh]">

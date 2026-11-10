@@ -19,7 +19,7 @@ import {
   replayPendingSaleReturnRecords,
 } from '../src/pos/lib/offlineSaleReturnsOutbox';
 import { getFirestoreReadDiagnostics } from '../src/lib/readDiagnostics';
-import { setDoc as trackedSetDoc, updateDoc as trackedUpdateDoc, serverTimestamp } from '../src/lib/firestore';
+import { setDoc as trackedSetDoc, updateDoc as trackedUpdateDoc, writeBatch as trackedBatch, serverTimestamp } from '../src/lib/firestore';
 import '../src/index.css';
 
 const waitFor = async (check: () => any, label: string) => {
@@ -71,6 +71,56 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
 };
 (window as any).smoke = {
   ready,
+  async verifyBillingViewport(desktop: boolean) {
+    if (role !== 'admin') return { skipped: 'admin performance fixture setup' };
+    location.hash = '/billing';
+    const selector = 'input[placeholder="Search medicines by name or batch..."]';
+    await waitFor(() => window.matchMedia('(min-width: 768px)').matches === desktop
+      && document.querySelector(`[data-billing-layout="${desktop ? 'desktop' : 'mobile'}"]`)
+      && document.querySelectorAll(selector).length === 1, 'one billing tree at viewport breakpoint');
+    const input = document.querySelector(selector) as HTMLInputElement;
+    if (!input.value) setInputValue(input, 'Performance Medicine 2499');
+    await waitFor(() => (document.querySelector(selector) as HTMLInputElement)?.value === 'Performance Medicine 2499', 'search state survives viewport layout');
+    return { desktop, billingInputs: 1, queryRetained: true };
+  },
+  async verifyLargeInventoryResponsiveness() {
+    if (role !== 'admin') return { skipped: 'admin performance fixture setup' };
+    for (let offset = 0; offset < 2500; offset += 250) {
+      const batch = trackedBatch(db);
+      for (let index = offset; index < offset + 250; index++) {
+        batch.set(doc(db, 'medicines', `perf-${index}`), {
+          name: `Performance Medicine ${String(index).padStart(4, '0')}`, category: 'Tablet',
+          stock: 10, unitsPerBox: 1, costPrice: 5, retailPrice: 8, batchNo: `PERF-${index}`,
+        });
+      }
+      await batch.commit();
+    }
+    await waitFor(async () => (await getLocalCollectionOnce('medicines')).filter(row => row.id.startsWith('perf-')).length === 2500, 'large inventory mirrored');
+    const timings: number[] = [];
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const started = performance.now();
+      location.hash = '/billing';
+      const selector = 'input[placeholder="Search medicines by name or batch..."]';
+      await waitFor(() => document.querySelector(selector), 'billing search mounted');
+      if (document.querySelectorAll(selector).length !== 1) throw new Error('Hidden duplicate billing input is still mounted');
+      const input = document.querySelector(selector) as HTMLInputElement;
+      input.focus();
+      setInputValue(input, 'Performance Medicine 2499');
+      await waitFor(() => [...document.querySelectorAll('h3')].some(node => node.textContent === 'Performance Medicine 2499'), 'large inventory search result');
+      if (document.activeElement !== input || document.querySelector(selector) !== input) throw new Error('Typing replaced or unfocused the billing search');
+      if (document.querySelectorAll('h3').length > 120) throw new Error('Billing rendered unbounded medicine rows');
+      timings.push(Math.round(performance.now() - started));
+      location.hash = '/medicines';
+      await waitFor(() => document.body.innerText.includes('Add Medicine'), 'inventory page switch');
+      await waitFor(() => document.querySelectorAll('tbody tr').length === 100, 'inventory renders first 100 records');
+      click('Show 100 more medicine records');
+      await waitFor(() => document.querySelectorAll('tbody tr').length === 200, 'inventory next records remain accessible');
+      const inventorySearch = document.querySelector('input[placeholder="Search by name or batch no..."]') as HTMLInputElement;
+      setInputValue(inventorySearch, 'Performance Medicine 2499');
+      await waitFor(() => document.querySelector('tbody')?.textContent?.includes('Performance Medicine 2499') && document.querySelectorAll('tbody tr').length === 1, 'inventory searches beyond initial page');
+    }
+    return { medicines: 2500, billingInputs: 1, searchAndPageSwitchMs: timings, focusPreserved: true, allRecordsRetained: true };
+  },
   async verifyExpiryAndPurchaseAvailability() {
     if (role !== 'admin') return { skipped: 'admin fixture setup' };
     const cutoff = addMonths(parseISO(clinicDateKey(trustedNow())), 6);

@@ -23,6 +23,18 @@ function medicine(id: string, overrides: Record<string, unknown> = {}): Medicine
 }
 
 describe('medicine indexing and visibility', () => {
+  it('reads each matching name once for ranking instead of on every sort comparison', () => {
+    let reads = 0;
+    const records = Array.from({ length: 2500 }, (_, index) => ({
+      id: `batch-${index}`,
+      get name() { reads++; return `Medicine ${String((index * 7919) % 2500).padStart(4, '0')}`; },
+      __searchText: 'medicine', stock: 2,
+    }));
+    const result = searchMedicines(records, 'medicine');
+    expect(result).toHaveLength(2500);
+    expect(reads).toBe(2500);
+    expect(new Set(result.map(record => record.id)).size).toBe(2500);
+  });
   it('normalizes case, punctuation, and spacing for reliable searches', () => {
     expect(normalizeMedicineText('  NOVIDAT—200   MG ')).toBe('novidat 200 mg');
     expect(searchMedicines([medicine('one')], 'novidat-200 MG')).toHaveLength(1);

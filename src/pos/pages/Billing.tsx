@@ -54,6 +54,14 @@ export function Billing() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const checkoutInFlightRef = useRef(false);
   const [visibleMedicineGroups, setVisibleMedicineGroups] = useState(INITIAL_MEDICINE_GROUPS);
+  const [desktopLayout, setDesktopLayout] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  useEffect(() => {
+    const viewport = window.matchMedia('(min-width: 768px)');
+    const update = () => setDesktopLayout(viewport.matches);
+    viewport.addEventListener('change', update);
+    update();
+    return () => viewport.removeEventListener('change', update);
+  }, []);
 
   // Mobile: which tab is active
   const [mobileTab, setMobileTab] = useState<'medicines' | 'cart'>('medicines');
@@ -1282,15 +1290,15 @@ export function Billing() {
       </div>
 
       {/* ── DESKTOP LAYOUT: side-by-side ── */}
-      <div className="hidden md:flex h-full min-h-0 gap-6 print:hidden">
+      {desktopLayout && <div data-billing-layout="desktop" className="hidden md:flex h-full min-h-0 gap-6 print:hidden">
         {MedicinesPanel()}
         <div className="w-96 min-h-0 flex flex-col">
           {CartPanel()}
         </div>
-      </div>
+      </div>}
 
       {/* ── MOBILE LAYOUT: tab switcher ── */}
-      <div className="flex md:hidden flex-col h-full min-h-0 print:hidden">
+      {!desktopLayout && <div data-billing-layout="mobile" className="flex md:hidden flex-col h-full min-h-0 print:hidden">
         {/* Tab bar */}
         <div className="flex bg-white rounded-xl shadow-sm border border-gray-100 mb-3 p-1 gap-1 shrink-0">
           <button
@@ -1322,7 +1330,7 @@ export function Billing() {
             {CartPanel()}
           </div>
         </div>
-      </div>
+      </div>}
     </>
   );
 }

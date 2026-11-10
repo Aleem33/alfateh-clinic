@@ -1,6 +1,6 @@
 import {
   readLocalCollectionSnapshot,
-  subscribeLocalSyncStatus,
+  subscribeLocalCollectionSnapshot,
   type LocalMirrorDocument,
   type LocalMirrorQueryOptions,
 } from './localMirror';
@@ -36,21 +36,29 @@ export function subscribeToLocalCollection<T extends Record<string, any> = Recor
   }
   let stopped = false;
   let revision = 0;
+  const publish = ({ status, records }: Awaited<ReturnType<typeof readLocalCollectionSnapshot<T>>>) => {
+    if (stopped) return;
+    assertLocalCollectionAccess(collectionName);
+    if (!status.seedComplete || String(status.generation) !== String(getSyncControl().datasetGeneration)) return;
+    onData(records.map(materialize));
+  };
   const deliver = async () => {
     const currentRevision = ++revision;
     try {
-      const { status, records } = await readLocalCollectionSnapshot<T>(collectionName, options);
+      const snapshot = await readLocalCollectionSnapshot<T>(collectionName, options);
       if (stopped || currentRevision !== revision) return;
-      assertLocalCollectionAccess(collectionName);
-      if (!status.seedComplete || String(status.generation) !== String(getSyncControl().datasetGeneration)) return;
-      onData(records.map(materialize));
+      publish(snapshot);
     } catch (error) {
       if (!stopped && currentRevision === revision) onError?.(error as Error);
     }
   };
-  const unsubscribeStatus = subscribeLocalSyncStatus(
+  const unsubscribeStatus = subscribeLocalCollectionSnapshot<T>(
     collectionName,
-    () => { void deliver(); },
+    snapshot => {
+      ++revision;
+      try { publish(snapshot); } catch (error) { onError?.(error as Error); }
+    },
+    options,
     onError,
   );
   const unsubscribeControl = subscribeSyncControl(() => { void deliver(); });
