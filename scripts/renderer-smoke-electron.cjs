@@ -51,7 +51,13 @@ app.whenReady().then(async () => {
     const monthReporting = await primary.webContents.executeJavaScript('window.smoke.verifyMonthReporting()');
     const purchaseReturnSafety = await primary.webContents.executeJavaScript('window.smoke.verifyPurchaseReturnSafety()');
     const availability = await primary.webContents.executeJavaScript('window.smoke.verifyExpiryAndPurchaseAvailability()');
-    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted, shortageRecovery, monthReporting, purchaseReturnSafety, availability }));
+    const responsiveness = await primary.webContents.executeJavaScript('window.smoke.verifyLargeInventoryResponsiveness()');
+    const desktop = await primary.webContents.executeJavaScript('window.smoke.verifyBillingViewport(true)');
+    primary.setContentSize(500, 900);
+    const mobile = await primary.webContents.executeJavaScript('window.smoke.verifyBillingViewport(false)');
+    primary.setContentSize(1500, 1000);
+    const restoredDesktop = await primary.webContents.executeJavaScript('window.smoke.verifyBillingViewport(true)');
+    console.log('RENDERER_SMOKE_PASS', JSON.stringify({ first, reconnected, second, transitions, restarted, shortageRecovery, monthReporting, purchaseReturnSafety, availability, responsiveness, viewports: { desktop, mobile, restoredDesktop } }));
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
 });

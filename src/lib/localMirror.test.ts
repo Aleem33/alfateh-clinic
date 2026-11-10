@@ -10,6 +10,8 @@ import {
   softDeleteLocalRecord,
   subscribeLocalCollection,
   subscribeLocalSyncStatus,
+  readLocalCollectionSnapshot,
+  subscribeLocalCollectionSnapshot,
   upsertLocalRecords,
 } from './localMirror';
 
@@ -29,6 +31,51 @@ beforeEach(resetLocalMirrorForTests);
 afterEach(resetLocalMirrorForTests);
 
 describe('local IndexedDB mirror', () => {
+  it('shares concurrent snapshots while keeping caller arrays and filters independent', async () => {
+    await upsertLocalRecords('sales', Array.from({ length: 2000 }, (_, index) => ({ id: `sale-${index}`, data: { total: index } })), { seedComplete: true, generation: 1 });
+    const reads = vi.spyOn(IDBIndex.prototype, 'getAll');
+    try {
+      const snapshots = await Promise.all(Array.from({ length: 12 }, () => readLocalCollectionSnapshot('sales', { includeDeleted: true })));
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(snapshots.every(snapshot => snapshot.records.length === 2000 && snapshot.status.totalRecords === 2000)).toBe(true);
+      snapshots[0].records.pop();
+      expect(snapshots[1].records).toHaveLength(2000);
+    } finally { reads.mockRestore(); }
+  });
+
+  it('reads only metadata for repeated status checks, but refreshes counts after stock/data changes', async () => {
+    await upsertLocalRecords('medicines', [{ id: 'a', data: { stock: 5 } }, { id: 'b', data: { stock: 2 } }]);
+    await getLocalSyncStatus('medicines');
+    const reads = vi.spyOn(IDBIndex.prototype, 'getAll');
+    try {
+      await setLocalSyncMetadata('medicines', { pending: { count: 1, hasPendingWrites: true } });
+      for (let i = 0; i < 10; i++) expect((await getLocalSyncStatus('medicines')).pending.count).toBe(1);
+      expect(reads).not.toHaveBeenCalled();
+      await softDeleteLocalRecord('medicines', 'a', { deletedBy: 'admin' });
+      expect(await getLocalSyncStatus('medicines')).toMatchObject({ totalRecords: 2, activeRecords: 1, deletedRecords: 1 });
+      expect(reads).toHaveBeenCalledTimes(1);
+      await upsertLocalRecords('medicines', [{ id: 'a', data: { stock: 5 }, deleted: false }]);
+      expect(await getLocalSyncStatus('medicines')).toMatchObject({ totalRecords: 2, activeRecords: 2, deletedRecords: 0 });
+      await replaceLocalCollection('medicines', [], { generation: 2, seedComplete: false });
+      expect(await getLocalSyncStatus('medicines')).toMatchObject({ totalRecords: 0, generation: 2, seedComplete: false });
+    } finally { reads.mockRestore(); }
+  });
+
+  it('delivers atomic data/status subscriptions without a second collection scan', async () => {
+    await upsertLocalRecords('sales', [{ id: 'a', data: { total: 10 } }], { seedComplete: true, generation: 1 });
+    const reads = vi.spyOn(IDBIndex.prototype, 'getAll');
+    const first = vi.fn(); const second = vi.fn();
+    const stop1 = subscribeLocalCollectionSnapshot('sales', first);
+    const stop2 = subscribeLocalCollectionSnapshot('sales', second);
+    try {
+      await vi.waitFor(() => { expect(first).toHaveBeenCalledTimes(1); expect(second).toHaveBeenCalledTimes(1); });
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(first.mock.calls[0][0]).toMatchObject({ status: { seedComplete: true, generation: 1 }, records: [{ id: 'a', data: { total: 10 } }] });
+      await upsertLocalRecords('sales', [{ id: 'b', data: { total: 20 } }]);
+      await vi.waitFor(() => expect(second.mock.calls.at(-1)?.[0].records).toHaveLength(2));
+      expect(reads).toHaveBeenCalledTimes(2);
+    } finally { stop1(); stop2(); reads.mockRestore(); }
+  });
   it('stores records under collection and document identity without cross-collection collisions', async () => {
     await upsertLocalRecords('sales', [{ id: 'same-id', data: { total: 500 } }]);
     await upsertLocalRecords('purchases', [{ id: 'same-id', data: { total: 300 } }]);
