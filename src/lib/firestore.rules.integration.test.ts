@@ -73,6 +73,49 @@ integrationDescribe('Firestore offline operational rules', () => {
     await environment?.cleanup();
   });
 
+  it.each(['admin-1','pharmacist-1'])('rejects duplicate purchase stock atomically for %s',async uid=>{
+    const database=environment.authenticatedContext(uid).firestore();
+    const apply=()=>{
+      const batch=writeBatch(database);
+      batch.set(doc(database,'purchases','grasil-test'),{medicineId:'batch-a',boxesPurchased:25,unitsPerBox:5,totalUnitsAdded:125,totalCost:5630.5});
+      batch.update(doc(database,'medicines','batch-a'),{stock:increment(125)});
+      batch.set(doc(database,'stockMovements','purchase-guard-test'),{type:'purchase-write-guard',payload:'same-purchase'});
+      return batch.commit();
+    };
+    await assertSucceeds(apply());
+    await assertFails(apply());
+    expect((await getDocFromServer(doc(database,'medicines','batch-a'))).data()?.stock).toBe(225);
+    expect((await getDocFromServer(doc(database,'purchases','grasil-test'))).data()?.totalCost).toBe(5630.5);
+  });
+
+  it('keeps duplicate admin edits from applying a stock delta twice',async()=>{
+    const database=environment.authenticatedContext('admin-1').firestore();
+    const apply=()=>{
+      const batch=writeBatch(database);
+      batch.set(doc(database,'stockMovements','purchase-edit-v1'),{type:'purchase-write-guard',payload:'edit-v1'});
+      batch.update(doc(database,'medicines','batch-a'),{stock:increment(-5)});
+      return batch.commit();
+    };
+    await assertSucceeds(apply());await assertFails(apply());
+    expect((await getDocFromServer(doc(database,'medicines','batch-a'))).data()?.stock).toBe(95);
+  });
+
+  it('rejects a duplicate queued offline purchase after reconnect without a second stock increment',async()=>{
+    const database=environment.authenticatedContext('admin-1').firestore();
+    const apply=()=>{
+      const batch=writeBatch(database);
+      batch.set(doc(database,'stockMovements','offline-purchase-guard'),{type:'purchase-write-guard',payload:'receipt-1'});
+      batch.set(doc(database,'purchases','offline-purchase'),{totalUnitsAdded:125,totalCost:5630.5});
+      batch.update(doc(database,'medicines','batch-a'),{stock:increment(125)});
+      return batch.commit();
+    };
+    await disableNetwork(database);
+    const first=assertSucceeds(apply()), duplicate=assertFails(apply());
+    await enableNetwork(database);
+    await Promise.all([first,duplicate]);
+    expect((await getDocFromServer(doc(database,'medicines','batch-a'))).data()?.stock).toBe(225);
+  });
+
   it('allows a complete cashier sale batch containing sale, movement, stock, and customer credit', async () => {
     const database = environment.authenticatedContext('cashier-1').firestore();
     const batch = writeBatch(database);

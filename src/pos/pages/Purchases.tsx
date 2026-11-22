@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, increment, writeBatch } from '@/lib/firestore';
+import { collection, doc, increment, writeBatch, writePurchaseEditBatch } from '@/lib/firestore';
+import { purchaseEditKey } from '../../lib/purchaseWriteGuard';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { formatCurrency } from '../lib/utils';
 import { Search, Truck, PackagePlus, X, ChevronDown, CheckCircle, Edit2, AlertCircle, Trash2 } from 'lucide-react';
@@ -30,6 +31,7 @@ const emptyPurchaseForm = () => ({
 
 
 export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
+  const purchaseWriteLock=React.useRef(false);
   const [medicines, setMedicines] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
@@ -195,7 +197,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     if (!editingPurchase) {
       try {
         const line = buildPurchaseLine();
-        setInvoiceLines(previous => [...previous, line]);
+        setInvoiceLines(previous => hasDuplicatePurchaseInvoiceLine(previous,line) ? previous : [...previous, line]);
         resetCurrentLine();
       } catch (error) {
         setFormError(error instanceof Error ? error.message : 'Unable to add this purchase line.');
@@ -203,7 +205,8 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       return;
     }
 
-    if (!canEdit) return;
+    if (!canEdit || purchaseWriteLock.current) return;
+    purchaseWriteLock.current=true;
     try {
       if (!returnsReady) throw new Error('Purchase return history is still loading. Wait before editing this purchase; existing entries are preserved.');
       const line = buildPurchaseLine(true);
@@ -228,7 +231,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
         return;
       }
       const timestamp = (await getTrustedClockReading()).nowIso;
-      const batch = writeBatch(db);
+      const batch = writePurchaseEditBatch(db,purchaseEditKey(editingPurchase));
       const sharedInvoiceUpdate = {
         invoiceNo: formData.invoiceNo.trim(),
         supplierInvoiceNo: formData.invoiceNo.trim(),
@@ -280,11 +283,14 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
       setFormError(handleFirestoreError(error, OperationType.UPDATE, 'purchases'));
+    } finally {
+      purchaseWriteLock.current=false;
     }
   };
 
   const handleSaveInvoice = async () => {
-    if (invoiceLines.length === 0 || savingInvoice) return;
+    if (invoiceLines.length === 0 || savingInvoice || purchaseWriteLock.current) return;
+    purchaseWriteLock.current=true;
     setSavingInvoice(true);
     setFormError('');
     try {
@@ -361,6 +367,7 @@ export function Purchases({ canEdit = false }: { canEdit?: boolean }) {
     } catch (error) {
       setFormError(handleFirestoreError(error, OperationType.CREATE, 'purchases'));
     } finally {
+      purchaseWriteLock.current=false;
       setSavingInvoice(false);
     }
   };

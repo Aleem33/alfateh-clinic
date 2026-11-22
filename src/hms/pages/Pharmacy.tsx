@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { purchaseEditKey } from '../../lib/purchaseWriteGuard';
+import { writePurchaseEditBatch } from '@/lib/firestore';
 import { collection, updateDoc, doc, increment, writeBatch } from '@/lib/firestore';
 import { db } from '../../firebase';
 import { formatDate, today, nowISO } from '../lib/utils';
@@ -76,6 +78,7 @@ export function Pharmacy({
   canEditPurchases?: boolean;
 }) {
   const { alert } = useAppDialog();
+  const purchaseWriteLock=useRef(false);
   const { categories } = useMedicineCategories();
   const [medicines, setMedicines]           = useState<any[]>([]);
   const [suppliers, setSuppliers]           = useState<any[]>([]);
@@ -264,9 +267,11 @@ export function Pharmacy({
   };
 
   const handleSavePurchase = async () => {
+    if (purchaseWriteLock.current) return;
     const previewUnitsPerBox = Math.max(1, parseInt(purchaseForm.unitsPerBox || '1') || 1);
     const previewUnits = ((parseInt(purchaseForm.boxes || '0') + parseInt(purchaseForm.bonusBoxes || '0')) * previewUnitsPerBox) + parseInt(purchaseForm.looseUnits || '0') + parseInt(purchaseForm.bonusLooseUnits || '0');
     if (!purchaseForm.medicineId || previewUnits <= 0) { setError('Medicine and purchase quantity are required.'); return; }
+    purchaseWriteLock.current=true;
     setSaving(true); setError('');
     try {
       const med = medicines.find(m => m.id === purchaseForm.medicineId)!;
@@ -289,7 +294,7 @@ export function Pharmacy({
           setError('This correction would make the linked batch stock negative.');
           return;
         }
-        const editBatch = writeBatch(db);
+        const editBatch = writePurchaseEditBatch(db,purchaseEditKey(editingPurchase));
         editBatch.update(doc(db, 'purchases', editingPurchase.id), {
           ...purchaseForm,
           medicineId: med.id,
@@ -404,7 +409,7 @@ export function Pharmacy({
       setPurchaseBatchMode('existing');
       setPurchaseForm({ medicineId: '', medicineName: '', supplierId: '', supplierName: '', boxes: '', looseUnits: '0', bonusBoxes: '0', bonusLooseUnits: '0', unitsPerBox: '1', costPerBox: '', retailPrice: '', unitPrice: '', batchNo: '', expiryDate: today(), invoiceNo: '', date: today() });
     } catch (e: any) { setError(e instanceof MedicineConflictError ? e.message : e.message); }
-    finally { setSaving(false); }
+    finally { purchaseWriteLock.current=false; setSaving(false); }
   };
 
   const openEditPurchase = (purchase: any) => {

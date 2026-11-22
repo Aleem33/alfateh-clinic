@@ -391,7 +391,9 @@ service cloud.firestore {
     match /stockMovements/{doc} {
       allow read: if isAuth();
       allow create: if syncMutationAllowed("stockMovements") && (isAdmin() || ((isPharmacist() || isCashier()) && hasNoTombstoneOnCreate()));
-      allow update, delete: if syncMutationAllowed("stockMovements") && (isAdmin());
+      allow update: if syncMutationAllowed("stockMovements") && isAdmin()
+        && resource.data.get('type', '') != 'purchase-write-guard';
+      allow delete: if syncMutationAllowed("stockMovements") && isAdmin();
     }
 
     match /syncIssues/{doc} {
@@ -447,7 +449,8 @@ service cloud.firestore {
       allow read: if isAdmin();
       // Medicines have stricter batch/stock invariants above. Do not let the
       // generic admin fallback bypass those validations.
-      allow write: if collection != "medicines" && syncMutationAllowed(collection) && (isAdmin());
+      allow write: if collection != "medicines" && collection != "stockMovements"
+        && syncMutationAllowed(collection) && (isAdmin());
     }
 
   }
