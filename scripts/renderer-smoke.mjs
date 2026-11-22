@@ -9,6 +9,7 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Run this script insid
 const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
 const projectId = 'demo-alfateh-renderer-smoke';
 const incremental = process.argv.includes('--incremental');
+const purchaseGuards = process.argv.includes('--purchase-guards');
 const role = process.argv.find(argument => argument.startsWith('--role='))?.split('=')[1] || 'admin';
 const roleAudit = process.argv.includes('--role-audit');
 if (!(roleAudit ? ['admin', 'cashier', 'pharmacist', 'doctor', 'nurse', 'receptionist', 'accountant', 'lab', 'lab_technician'] : ['admin', 'cashier', 'pharmacist']).includes(role)) throw new Error('Unsupported smoke role');
@@ -47,7 +48,7 @@ const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, plug
 try {
   await server.listen();
   const address = server.httpServer.address();
-  const url = `http://127.0.0.1:${address.port}/scripts/${roleAudit ? 'role' : 'renderer'}-smoke.html?mode=${incremental ? 'incremental' : 'legacy'}&role=${role}${roleAudit ? '&role-audit=1' : ''}`;
+  const url = `http://127.0.0.1:${address.port}/scripts/${roleAudit ? 'role' : 'renderer'}-smoke.html?mode=${incremental ? 'incremental' : 'legacy'}&role=${role}${roleAudit ? '&role-audit=1' : ''}${purchaseGuards ? '&purchase-guards=1' : ''}`;
   const require = createRequire(import.meta.url);
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   const exitCode = await new Promise((resolve, reject) => {

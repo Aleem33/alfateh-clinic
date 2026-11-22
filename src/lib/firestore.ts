@@ -1,6 +1,7 @@
 import * as firestore from 'firebase/firestore';
 import { ensureLanWriteAccess, isCloudOnline, publishLanActivity } from './lanCoordinator';
 import { getActiveAuthSession } from './offlineAuth';
+import { purchaseGuardId, purchasePayload } from './purchaseWriteGuard';
 
 export * from 'firebase/firestore';
 
@@ -168,9 +169,10 @@ export const hardDeleteDoc: typeof firestore.deleteDoc = (async (reference: any)
   );
 }) as typeof firestore.deleteDoc;
 
-function createWriteBatch(database: any, permanentDeletes: boolean) {
+function createWriteBatch(database: any, permanentDeletes: boolean, purchaseEditOperation?:string) {
   const underlying = firestore.writeBatch(database);
   const activities: AnyRecord[] = [];
+  let commitPromise:Promise<void> | null=null;
   const facade: AnyRecord = {
     set(reference: any, data: AnyRecord, options?: any) {
       activities.push({ action: 'saved', ...referenceDetails(reference, data), ...recoveryDetails(data, !options) });
@@ -192,12 +194,41 @@ function createWriteBatch(database: any, permanentDeletes: boolean) {
       else underlying.update(reference, softDeleteMetadata());
       return facade;
     },
-    async commit() {
+    commit() {
+      return commitPromise ||= commitOnce();
+    },
+  };
+  async function commitOnce() {
       await ensureLanWriteAccess();
       if (permanentDeletes && !isCloudOnline()) {
         throw new Error('An administrative reset requires an online connection.');
       }
-      const pending = underlying.commit();
+      // Restoring missing historical purchase documents does not add stock and
+      // must retain the existing backup chunk size and restore behavior.
+      const changesStock=activities.some(activity=>activity.collection==='medicines' && activity.changedFields.includes('stock'));
+      const purchaseWrites=changesStock ? activities.filter(activity=>activity.collection==='purchases' && (activity.action==='saved' || purchaseEditOperation)) : [];
+      const purchases=purchaseEditOperation ? purchaseWrites.slice(0,1) : purchaseWrites;
+      const guards=await Promise.all(purchases.map(async activity=>({
+        reference:firestore.doc(database,'stockMovements',await purchaseGuardId(purchaseEditOperation || `create:purchases/${activity.recordId}`)),
+        payload:purchasePayload(activity.recoveryData || {}),
+      })));
+      // Rules make these markers create-only even for admins. A second batch
+      // using the same purchase identity is rejected atomically, including its
+      // stock increments. No new collection or offline queue is introduced.
+      for (const guard of guards) underlying.set(guard.reference,withSyncMetadata({
+        type:'purchase-write-guard',payload:guard.payload,createdAt:firestore.serverTimestamp(),
+        createdBy:getActiveAuthSession()?.profile.uid || 'unknown',
+      }));
+      const pending = underlying.commit().catch(async error=>{
+        if (!guards.length) throw error;
+        const matches=await Promise.all(guards.map(async guard=>{
+          try { const saved=await firestore.getDocFromServer(guard.reference); return saved.exists() && saved.data().type==='purchase-write-guard' && saved.data().payload===guard.payload; }
+          catch { return false; }
+        }));
+        if (!matches.every(Boolean)) throw error;
+        // The original operation is server-confirmed; this rejected duplicate
+        // performed no stock or accounting writes and can safely be acknowledged.
+      });
       activities.forEach(publishActivity);
       if (!permanentDeletes && typeof navigator !== 'undefined' && !isCloudOnline()) {
         pending.then(() => reportConfirmedWrite(activities)).catch(() => undefined);
@@ -214,9 +245,12 @@ function createWriteBatch(database: any, permanentDeletes: boolean) {
         reportRejectedWrite(error, activities);
         throw error;
       }
-    },
-  };
+  }
   return facade;
+}
+
+export function writePurchaseEditBatch(database:any, operationKey:string):firestore.WriteBatch {
+  return createWriteBatch(database,false,operationKey) as firestore.WriteBatch;
 }
 
 export const writeBatch: typeof firestore.writeBatch = ((database: any) => (

@@ -26,6 +26,10 @@ const createDevice = async (name, offline = false) => {
 app.whenReady().then(async () => {
   try {
     let primary = await createDevice('primary');
+    if (new URL(url).searchParams.has('purchase-guards')) {
+      const result=await primary.webContents.executeJavaScript('window.smoke.verifyPurchaseWriteGuards()');
+      console.log('PURCHASE_WRITE_GUARDS_PASS',JSON.stringify(result));app.exit(0);return;
+    }
     if (new URL(url).searchParams.has('role-audit')) {
       const online = await primary.webContents.executeJavaScript('window.smoke.auditRolePages(false)');
       const offline = await primary.webContents.executeJavaScript('window.smoke.auditRolePages(true)');

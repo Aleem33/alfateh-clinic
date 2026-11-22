@@ -1,4 +1,5 @@
 import React from 'react';
+import { increment } from 'firebase/firestore';
 import { createRoot } from 'react-dom/client';
 import { POSApp } from '../src/pos/POSApp';
 import { Reports as HMSReports } from '../src/hms/pages/Reports';
@@ -71,6 +72,29 @@ const checkout = async (expectedCount: number, rapidPresses = 1) => {
 };
 (window as any).smoke = {
   ready,
+  async verifyPurchaseWriteGuards() {
+    await ready();
+    const medicine=doc(db,'medicines','duplicate-guard-test');
+    await trackedSetDoc(medicine,{name:'Synthetic Grasil',stock:0,bonusStockUnits:0,unitsPerBox:5});
+    const apply=async(id:string,units:number)=>{
+      const batch=trackedBatch(db);
+      batch.set(doc(db,'purchases',id),{medicineId:'duplicate-guard-test',medicineName:'Synthetic Grasil',totalUnitsAdded:units,paidUnits:units,bonusUnits:0,unitsPerBox:5,totalCost:5630.5,createdAt:new Date().toISOString()});
+      batch.update(medicine,{stock:increment(units)});
+      await batch.commit();
+    };
+    await apply('guard-online',125);await apply('guard-online',125);
+    if((await getDocFromServer(medicine)).data()?.stock!==125)throw Error('Repeated online purchase applied stock twice.');
+    let rejected=false;try { await apply('guard-online',250); } catch { rejected=true; }
+    if(!rejected || (await getDocFromServer(medicine)).data()?.stock!==125)throw Error('Conflicting retry was not rejected safely.');
+    online=false;await disableNetwork(db);
+    await apply('guard-offline',50);await apply('guard-offline',50);
+    online=true;await enableNetwork(db);
+    await waitForPendingWrites(db).catch(()=>undefined);
+    await waitFor(async()=>(await getDocFromServer(medicine)).data()?.stock===175,'offline duplicate rollback and cloud confirmation');
+    const receipt=(await getDocFromServer(doc(db,'purchases','guard-online'))).data();
+    if(receipt?.totalCost!==5630.5 || receipt?.totalUnitsAdded!==125)throw Error('Original purchase accounting changed.');
+    return {onlineStock:125,finalStock:175,conflictingRetryRejected:rejected,purchaseAmountUnchanged:receipt.totalCost};
+  },
   async verifyBillingViewport(desktop: boolean) {
     if (role !== 'admin') return { skipped: 'admin performance fixture setup' };
     location.hash = '/billing';

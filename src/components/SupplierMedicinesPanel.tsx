@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { collection, doc, increment, writeBatch } from '@/lib/firestore';
 import { CheckCircle, ChevronUp, Package, PackagePlus, Plus, X } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
@@ -109,6 +109,7 @@ export function SupplierMedicinesPanel({
   onCollapse: () => void;
 }) {
   const { categories } = useMedicineCategories();
+  const purchaseWriteLock=useRef(false);
   const [medicines, setMedicines] = useState<any[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [purchasingMedicine, setPurchasingMedicine] = useState<any | null>(null);
@@ -273,6 +274,8 @@ export function SupplierMedicinesPanel({
       }
     }
 
+    if (purchaseWriteLock.current) return;
+    purchaseWriteLock.current=true;
     setSaving(true);
     setError('');
     try {
@@ -346,6 +349,7 @@ export function SupplierMedicinesPanel({
       setError('Purchase could not be recorded. Please try again.');
       handleFirestoreError(purchaseError, OperationType.CREATE, 'purchases');
     } finally {
+      purchaseWriteLock.current=false;
       setSaving(false);
     }
   };
