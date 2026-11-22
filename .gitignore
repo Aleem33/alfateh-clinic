@@ -9,3 +9,4 @@ firebase-applet-config.json
 !.env.example
 *.log
 .DS_Store
+scripts/reconcile-grasil-stock.cjs
